@@ -220,5 +220,4 @@ After `AUTH_FAILURE`, the SDK stops emitting permanently (check `meter.stopped`)
 - [Serverless guide](docs/serverless.md) — Lambda, Vercel, Azure Functions
 - [Sidecar guide](docs/sidecar.md) — Docker Compose, Kubernetes sidecar pattern
 - [Daemon / CLI guide](docs/daemon.md) — systemd unit file, config file reference
-- [Migration guide](docs/migration.md) — Migrating from manual CSV upload to SDK
 - [OTLP push guide](docs/otlp.md) — OpenTelemetry Collector config, GenAI semconv mapping
