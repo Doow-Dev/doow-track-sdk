@@ -14,7 +14,9 @@
  * }
  */
 
-import process from 'node:process';
+declare const process: {
+  env: Record<string, string | undefined>;
+};
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -37,10 +39,12 @@ export interface CliConfig {
 
 /** Raw JSON file — all fields optional for partial configs */
 type RawConfigFile = Partial<CliConfig>;
-type FsPromisesModule = typeof import('node:fs/promises');
+type FsPromisesModule = {
+  readFile(filePath: string, encoding: BufferEncoding): Promise<string>;
+};
 
 async function readConfigText(filePath: string): Promise<string> {
-  const fsPromises: FsPromisesModule = await import('node:fs/promises');
+  const fsPromises = (await import('node:fs/promises')) as unknown as FsPromisesModule;
   return fsPromises.readFile(filePath, 'utf8');
 }
 
@@ -71,7 +75,7 @@ export async function loadConfigFile(filePath: string): Promise<RawConfigFile> {
  * Env vars always take precedence.
  */
 export function applyEnvOverrides(base: RawConfigFile): RawConfigFile {
-  const env: Record<string, string | undefined> = process.env;
+  const env = process.env;
   const result: RawConfigFile = { ...base };
 
   if (env.DOOW_TRACK_API_KEY) {
