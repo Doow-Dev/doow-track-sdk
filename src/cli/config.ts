@@ -14,7 +14,8 @@
  * }
  */
 
-import * as fs from 'fs/promises';
+import { readFile } from 'node:fs/promises';
+import process from 'node:process';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -44,7 +45,7 @@ type RawConfigFile = Partial<CliConfig>;
 export async function loadConfigFile(filePath: string): Promise<RawConfigFile> {
   let content: string;
   try {
-    content = await fs.readFile(filePath, 'utf8');
+    content = await readFile(filePath, 'utf8');
   } catch (e) {
     const err = e instanceof Error ? e : new Error(String(e));
     throw new Error(`Cannot read config file "${filePath}": ${err.message}`);
@@ -65,7 +66,7 @@ export async function loadConfigFile(filePath: string): Promise<RawConfigFile> {
  * Env vars always take precedence.
  */
 export function applyEnvOverrides(base: RawConfigFile): RawConfigFile {
-  const env: NodeJS.ProcessEnv = process.env;
+  const env = process.env;
   const result: RawConfigFile = { ...base };
 
   if (env.DOOW_TRACK_API_KEY) {
