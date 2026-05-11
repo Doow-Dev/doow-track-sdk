@@ -109,7 +109,7 @@ export default meter.withAzureFunction(async (context: Context, req: unknown) =>
 
 For use cases where you emit telemetry from non-Node.js services (Python, Go, Rust, etc.), run the sidecar container on VMs, Kubernetes, Azure Container Apps, ECS, and any other platform that can run containers, then pipe JSON events to it over stdin or TCP.
 
-The published image lives in Azure Container Registry. If your runtime cannot already pull from `doowserver.azurecr.io`, sign in to Azure before pulling the image or configure the equivalent registry credentials for your platform.
+The published image is public on GitHub Container Registry at `ghcr.io/doow-dev/doow-track-sidecar`.
 
 ```yaml
 # docker-compose.yml
@@ -125,7 +125,7 @@ services:
       - DOOW_SIDECAR_PORT=9091
 
   doow-sidecar:
-    image: doowserver.azurecr.io/doow/track-sidecar:latest
+    image: ghcr.io/doow-dev/doow-track-sidecar:latest
     environment:
       - DOOW_TRACK_API_KEY=dk_your_api_key
       - DOOW_TRACK_ENDPOINT=https://api.doow.co
