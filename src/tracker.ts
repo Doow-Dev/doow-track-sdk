@@ -36,7 +36,8 @@ const DEFAULTS = {
 // ─── Env var parsing ───────────────────────────────────────────────────────
 
 function resolveEnvOverrides(opts: DoowTrackerOptions): DoowTrackerOptions {
-  const env = typeof process !== 'undefined' ? process.env : undefined;
+  const env: NodeJS.ProcessEnv | undefined =
+    typeof process !== 'undefined' ? process.env : undefined;
   // Spread opts without creating explicit undefined keys that would override DEFAULTS
   const result = { ...opts };
 

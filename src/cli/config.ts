@@ -14,7 +14,7 @@
  * }
  */
 
-import { promises as fs } from 'fs';
+import * as fs from 'fs/promises';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -65,7 +65,7 @@ export async function loadConfigFile(filePath: string): Promise<RawConfigFile> {
  * Env vars always take precedence.
  */
 export function applyEnvOverrides(base: RawConfigFile): RawConfigFile {
-  const env = process.env;
+  const env: NodeJS.ProcessEnv = process.env;
   const result: RawConfigFile = { ...base };
 
   if (env.DOOW_TRACK_API_KEY) {
