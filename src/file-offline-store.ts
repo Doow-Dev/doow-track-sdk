@@ -75,7 +75,11 @@ export class FileOfflineStore implements OfflineStore {
     try {
       batch = JSON.parse(content) as SerializedBatch;
     } catch {
-      try { await fs.unlink(oldest); } catch { /* best effort */ }
+      try {
+        await fs.unlink(oldest);
+      } catch {
+        /* best effort */
+      }
       return undefined;
     }
 

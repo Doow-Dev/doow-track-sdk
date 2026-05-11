@@ -50,11 +50,13 @@ function toWireEvent(event: SerializedEvent): WireEvent {
     occurred_at: event.timestamp,
     source_system: sourceSystem,
     ...(metricTupleHint ? { metric_tuple_hint: metricTupleHint } : {}),
-    measurements: [{
-      metric_name: event.metric,
-      quantity: event.quantity,
-      ...(metricTupleHint ? { metric_tuple_hint: metricTupleHint } : {}),
-    }],
+    measurements: [
+      {
+        metric_name: event.metric,
+        quantity: event.quantity,
+        ...(metricTupleHint ? { metric_tuple_hint: metricTupleHint } : {}),
+      },
+    ],
   };
 }
 
@@ -246,7 +248,11 @@ export class Exporter {
     }
   }
 
-  private async _sendWithRetry(events: SerializedEvent[], retriesLeft: number, batchId?: string): Promise<void> {
+  private async _sendWithRetry(
+    events: SerializedEvent[],
+    retriesLeft: number,
+    batchId?: string,
+  ): Promise<void> {
     if (this._stopped) return;
 
     const resolvedBatchId = batchId ?? generateUUID();
@@ -289,7 +295,8 @@ export class Exporter {
         if (sdkErr.rateLimitHeaders) {
           this._applyRateLimitHeader(sdkErr.rateLimitHeaders);
         }
-        const retryAfterMs = sdkErr.retryAfterMs ?? this._backoff(this.config.retryCount - retriesLeft);
+        const retryAfterMs =
+          sdkErr.retryAfterMs ?? this._backoff(this.config.retryCount - retriesLeft);
         this.config.debug.log(`429 rate limited — waiting ${retryAfterMs}ms`);
         this.config.onError({
           kind: 'RATE_LIMITED',
@@ -365,22 +372,42 @@ export class Exporter {
     const url = `${this.config.endpoint}/telemetry/events`;
     const transportPayload: TransportPayload = { body, headers, url };
 
-    this.config.debug.log(`POST ${url} batch_id=${batchId} events=${events.length} bytes=${body.length}`);
+    this.config.debug.log(
+      `POST ${url} batch_id=${batchId} events=${events.length} bytes=${body.length}`,
+    );
 
     let response: TransportResponse;
 
     try {
       if (this.config.transport) {
-        response = await this._withTimeout(this.config.transport.send(transportPayload), this.config.timeout);
+        response = await this._withTimeout(
+          this.config.transport.send(transportPayload),
+          this.config.timeout,
+        );
       } else {
-        response = await this._withTimeout(this._defaultTransport(transportPayload), this.config.timeout);
+        response = await this._withTimeout(
+          this._defaultTransport(transportPayload),
+          this.config.timeout,
+        );
       }
     } catch (err) {
       const e = err as Error;
       if (e.name === 'AbortError' || e.message?.includes('timeout')) {
-        throw new SdkHttpError('TIMEOUT', `Request timed out after ${this.config.timeout}ms`, undefined, undefined, e);
+        throw new SdkHttpError(
+          'TIMEOUT',
+          `Request timed out after ${this.config.timeout}ms`,
+          undefined,
+          undefined,
+          e,
+        );
       }
-      throw new SdkHttpError('NETWORK_ERROR', `Network error: ${e.message}`, undefined, undefined, e);
+      throw new SdkHttpError(
+        'NETWORK_ERROR',
+        `Network error: ${e.message}`,
+        undefined,
+        undefined,
+        e,
+      );
     }
 
     this.config.debug.log(`Response ${response.status} batch_id=${batchId}`);
@@ -419,8 +446,17 @@ export class Exporter {
     }
 
     if (response.status === 429) {
-      const retryAfterMs = this._parseRetryAfter(response.headers['retry-after'] ?? response.headers['Retry-After']);
-      throw new SdkHttpError('RATE_LIMITED', `Rate limited (429)`, 429, retryAfterMs, undefined, response.headers);
+      const retryAfterMs = this._parseRetryAfter(
+        response.headers['retry-after'] ?? response.headers['Retry-After'],
+      );
+      throw new SdkHttpError(
+        'RATE_LIMITED',
+        `Rate limited (429)`,
+        429,
+        retryAfterMs,
+        undefined,
+        response.headers,
+      );
     }
 
     if (response.status >= 500) {
@@ -484,8 +520,14 @@ export class Exporter {
       }, timeoutMs);
 
       promise.then(
-        (v) => { clearTimeout(timer); resolve(v); },
-        (e) => { clearTimeout(timer); reject(e as Error); },
+        (v) => {
+          clearTimeout(timer);
+          resolve(v);
+        },
+        (e) => {
+          clearTimeout(timer);
+          reject(e as Error);
+        },
       );
     });
   }

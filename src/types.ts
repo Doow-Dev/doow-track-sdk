@@ -130,7 +130,9 @@ export interface DoowTrackerOptions {
   /** Per-event hook. Return null to drop. */
   beforeSend?: (event: SerializedEvent) => SerializedEvent | null | Promise<SerializedEvent | null>;
   /** Per-batch hook. Return null to drop entire batch. */
-  beforeFlush?: (batch: SerializedEvent[]) => SerializedEvent[] | null | Promise<SerializedEvent[] | null>;
+  beforeFlush?: (
+    batch: SerializedEvent[],
+  ) => SerializedEvent[] | null | Promise<SerializedEvent[] | null>;
   /** Custom transport for testing/mTLS/HTTP2 */
   transport?: CustomTransport;
   /** Offline persistent store */

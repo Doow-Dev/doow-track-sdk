@@ -14,12 +14,7 @@ import { Exporter } from './exporter.js';
 import type { ExporterConfig } from './exporter.js';
 import { EventProcessor } from './event-processor.js';
 import type { ProcessorConfig } from './event-processor.js';
-import type {
-  DoowTrackerOptions,
-  SdkError,
-  SerializedEvent,
-  TrackEvent,
-} from './types.js';
+import type { DoowTrackerOptions, SdkError, SerializedEvent, TrackEvent } from './types.js';
 
 // ─── Defaults ──────────────────────────────────────────────────────────────
 
@@ -41,24 +36,27 @@ const DEFAULTS = {
 // ─── Env var parsing ───────────────────────────────────────────────────────
 
 function resolveEnvOverrides(opts: DoowTrackerOptions): DoowTrackerOptions {
-  const env = typeof process !== 'undefined' ? process.env : {};
+  const env = typeof process !== 'undefined' ? process.env : undefined;
   // Spread opts without creating explicit undefined keys that would override DEFAULTS
   const result = { ...opts };
 
-  if (env['DOOW_TRACK_ENDPOINT']) result.endpoint = env['DOOW_TRACK_ENDPOINT'];
-  if (env['DOOW_TRACK_DISABLED'] === 'true') result.enabled = false;
-  if (env['DOOW_TRACK_DEBUG'] === 'true') result.debug = true;
-  if (env['DOOW_TRACK_FLUSH_AT'] !== undefined) {
-    const n = parseInt(env['DOOW_TRACK_FLUSH_AT'] as string, 10);
+  if (env?.DOOW_TRACK_ENDPOINT) result.endpoint = env.DOOW_TRACK_ENDPOINT;
+  if (env?.DOOW_TRACK_DISABLED === 'true') result.enabled = false;
+  if (env?.DOOW_TRACK_DEBUG === 'true') result.debug = true;
+  if (env?.DOOW_TRACK_FLUSH_AT !== undefined) {
+    const n = parseInt(env.DOOW_TRACK_FLUSH_AT, 10);
     if (!isNaN(n) && n > 0) result.flushAt = n;
   }
-  if (env['DOOW_TRACK_FLUSH_INTERVAL'] !== undefined) {
-    const n = parseInt(env['DOOW_TRACK_FLUSH_INTERVAL'] as string, 10);
+  if (env?.DOOW_TRACK_FLUSH_INTERVAL !== undefined) {
+    const n = parseInt(env.DOOW_TRACK_FLUSH_INTERVAL, 10);
     if (!isNaN(n) && n > 0) result.flushInterval = n;
   }
-  if (env['DOOW_TRACK_ATTRIBUTION'] !== undefined) {
-    try { result.attribution = JSON.parse(env['DOOW_TRACK_ATTRIBUTION'] as string) as Record<string, string>; }
-    catch { /* keep opts.attribution */ }
+  if (env?.DOOW_TRACK_ATTRIBUTION !== undefined) {
+    try {
+      result.attribution = JSON.parse(env.DOOW_TRACK_ATTRIBUTION) as Record<string, string>;
+    } catch {
+      /* keep opts.attribution */
+    }
   }
 
   return result;
@@ -68,7 +66,24 @@ function resolveEnvOverrides(opts: DoowTrackerOptions): DoowTrackerOptions {
 
 export class DoowTracker {
   private readonly _apiKey: string;
-  private readonly _options: Required<Pick<DoowTrackerOptions, 'endpoint' | 'enabled' | 'debug' | 'flushAt' | 'flushInterval' | 'maxPayloadBytes' | 'maxQueueSize' | 'timeout' | 'retryCount' | 'disableCompression' | 'maxConcurrentFlushes' | 'shutdownTimeout'>> & DoowTrackerOptions;
+  private readonly _options: Required<
+    Pick<
+      DoowTrackerOptions,
+      | 'endpoint'
+      | 'enabled'
+      | 'debug'
+      | 'flushAt'
+      | 'flushInterval'
+      | 'maxPayloadBytes'
+      | 'maxQueueSize'
+      | 'timeout'
+      | 'retryCount'
+      | 'disableCompression'
+      | 'maxConcurrentFlushes'
+      | 'shutdownTimeout'
+    >
+  > &
+    DoowTrackerOptions;
   private readonly _processor: EventProcessor | null;
   private readonly _exporter: Exporter | null;
   private _shutdownCalled = false;
@@ -76,10 +91,13 @@ export class DoowTracker {
 
   constructor(apiKey: string, options: DoowTrackerOptions = {}) {
     // Validate API key prefix
-    const envApiKey = typeof process !== 'undefined' ? (process.env['DOOW_TRACK_API_KEY'] ?? apiKey) : apiKey;
+    const envApiKey =
+      typeof process !== 'undefined' ? (process.env['DOOW_TRACK_API_KEY'] ?? apiKey) : apiKey;
 
     if (!envApiKey.startsWith('dk_')) {
-      console.warn(`[doow/track] API key must start with "dk_". Got: "${envApiKey.slice(0, 10)}..."`);
+      console.warn(
+        `[doow/track] API key must start with "dk_". Got: "${envApiKey.slice(0, 10)}..."`,
+      );
     }
 
     this._apiKey = envApiKey;
@@ -89,10 +107,24 @@ export class DoowTracker {
 
     // Log unknown options in debug mode
     const knownKeys = new Set([
-      'endpoint', 'enabled', 'attribution', 'debug', 'flushAt', 'flushInterval',
-      'maxPayloadBytes', 'maxQueueSize', 'timeout', 'retryCount', 'disableCompression',
-      'onError', 'beforeSend', 'beforeFlush', 'transport', 'offlineStore',
-      'maxConcurrentFlushes', 'shutdownTimeout',
+      'endpoint',
+      'enabled',
+      'attribution',
+      'debug',
+      'flushAt',
+      'flushInterval',
+      'maxPayloadBytes',
+      'maxQueueSize',
+      'timeout',
+      'retryCount',
+      'disableCompression',
+      'onError',
+      'beforeSend',
+      'beforeFlush',
+      'transport',
+      'offlineStore',
+      'maxConcurrentFlushes',
+      'shutdownTimeout',
     ]);
 
     this._options = {
@@ -116,7 +148,9 @@ export class DoowTracker {
       return;
     }
 
-    const onError: (e: SdkError) => void = this._options.onError ?? ((e) => console.warn(`[doow/track] ${e.kind}: ${e.message}`));
+    const onError: (e: SdkError) => void =
+      this._options.onError ??
+      ((e: SdkError): void => console.warn(`[doow/track] ${e.kind}: ${e.message}`));
 
     const exporterConfig: ExporterConfig = {
       endpoint: this._options.endpoint,
@@ -144,8 +178,12 @@ export class DoowTracker {
     this._processor = new EventProcessor(processorConfig, this._exporter);
 
     if (typeof process !== 'undefined') {
-      const sigterm = (): void => { void this.shutdown(); };
-      const beforeExit = (): void => { void this.shutdown(); };
+      const sigterm = (): void => {
+        void this.shutdown();
+      };
+      const beforeExit = (): void => {
+        void this.shutdown();
+      };
 
       process.setMaxListeners(process.getMaxListeners() + 2);
       process.on('SIGTERM', sigterm);

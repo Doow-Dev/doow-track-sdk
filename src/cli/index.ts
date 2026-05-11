@@ -109,7 +109,9 @@ async function main(): Promise<void> {
   }
 
   if (parsed.help) {
-    process.stdout.write(`Usage: doow-track [--config <path>] [--api-key <key>] [--pidfile <path>] [--version]\n`);
+    process.stdout.write(
+      `Usage: doow-track [--config <path>] [--api-key <key>] [--pidfile <path>] [--version]\n`,
+    );
     process.exit(0);
   }
 
@@ -176,13 +178,14 @@ async function main(): Promise<void> {
 
   if (!isDaemon) {
     // Pipe mode: wait for stdin to end then flush and exit
+    const handlePipeEnd = async (): Promise<void> => {
+      await reader.stop();
+      await tracker.shutdown();
+      if (parsed.pidfile) await removePidFile(parsed.pidfile);
+      process.exit(0);
+    };
     process.stdin.on('end', () => {
-      void (async () => {
-        await reader.stop();
-        await tracker.shutdown();
-        if (parsed.pidfile) await removePidFile(parsed.pidfile);
-        process.exit(0);
-      })();
+      void handlePipeEnd();
     });
   }
 
@@ -204,7 +207,7 @@ async function main(): Promise<void> {
   // ─── SIGHUP: reload config ─────────────────────────────────────────────
 
   process.on('SIGHUP', () => {
-    void (async () => {
+    void (async (): Promise<void> => {
       process.stderr.write('[doow-track] SIGHUP — reloading config...\n');
       try {
         const newConfig = await resolveConfig(parsed.configPath, cliOverrides);
@@ -231,8 +234,12 @@ async function main(): Promise<void> {
     })();
   });
 
-  process.on('SIGTERM', () => { void shutdown(); });
-  process.on('SIGINT', () => { void shutdown(); });
+  process.on('SIGTERM', (): void => {
+    void shutdown();
+  });
+  process.on('SIGINT', (): void => {
+    void shutdown();
+  });
 
   if (isDaemon) {
     process.stderr.write(`[doow-track] Daemon running (PID ${process.pid}).\n`);

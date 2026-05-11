@@ -25,11 +25,11 @@ export function createDebugLogger(enabled: boolean): DebugLogger {
   }
 
   return {
-    log: (msg: string, ...args: unknown[]) => {
+    log: (msg: string, ...args: unknown[]): void => {
       // eslint-disable-next-line no-console
       console.warn(`[doow/track] ${msg}`, ...args);
     },
-    warn: (msg: string, ...args: unknown[]) => {
+    warn: (msg: string, ...args: unknown[]): void => {
       console.warn(`[doow/track:warn] ${msg}`, ...args);
     },
   };

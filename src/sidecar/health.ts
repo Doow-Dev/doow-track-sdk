@@ -26,11 +26,11 @@ export function createHealthServer(port: number): HealthServer {
   };
 
   return {
-    get port() {
+    get port(): number {
       return port;
     },
 
-    async start() {
+    async start(): Promise<void> {
       server = http.createServer(handler);
       await new Promise<void>((resolve, reject) => {
         server!.listen(port, () => resolve());
@@ -38,7 +38,7 @@ export function createHealthServer(port: number): HealthServer {
       });
     },
 
-    async stop() {
+    async stop(): Promise<void> {
       if (server) {
         await new Promise<void>((resolve) => {
           server!.close(() => resolve());

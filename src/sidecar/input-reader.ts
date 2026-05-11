@@ -33,7 +33,11 @@ export interface InputReader {
 /** Split a stream into lines, calling onLine for each complete line. */
 const MAX_LINE_BYTES = 1_048_576;
 
-function pipeLines(readable: Readable, onLine: (line: string) => void, onError?: InputErrorCallback): void {
+function pipeLines(
+  readable: Readable,
+  onLine: (line: string) => void,
+  onError?: InputErrorCallback,
+): void {
   let buf = '';
   readable.on('data', (chunk: Buffer | string) => {
     buf += typeof chunk === 'string' ? chunk : chunk.toString('utf8');
@@ -70,30 +74,26 @@ function dispatchLine(
     JSON.parse(line); // validate JSON — value not used here; caller validates shape
     onEvent(line);
   } catch (e) {
-    onError(
-      e instanceof Error ? e : new Error(String(e)),
-      line,
-    );
+    onError(e instanceof Error ? e : new Error(String(e)), line);
   }
 }
 
 // ─── Stdin mode ────────────────────────────────────────────────────────────
 
-function createStdinReader(
-  onEvent: InputEventCallback,
-  onError: InputErrorCallback,
-): InputReader {
+function createStdinReader(onEvent: InputEventCallback, onError: InputErrorCallback): InputReader {
   let started = false;
   return {
-    async start() {
-      if (started) return;
+    start(): Promise<void> {
+      if (started) return Promise.resolve();
       started = true;
       process.stdin.resume();
       process.stdin.setEncoding('utf8');
       pipeLines(process.stdin, (line) => dispatchLine(line, onEvent, onError));
+      return Promise.resolve();
     },
-    async stop() {
+    stop(): Promise<void> {
       // stdin mode: just let it close naturally
+      return Promise.resolve();
     },
   };
 }
@@ -163,20 +163,23 @@ function createFileReader(
 
   function scheduleNext(): void {
     if (stopped) return;
-    pollTimer = setTimeout(() => { void readChunk(); }, 200);
+    pollTimer = setTimeout(() => {
+      void readChunk();
+    }, 200);
   }
 
   return {
-    async start() {
+    start(): Promise<void> {
       // Read existing content first, then poll for new content
-      await readChunk();
+      return readChunk();
     },
-    async stop() {
+    stop(): Promise<void> {
       stopped = true;
       if (pollTimer !== null) {
         clearTimeout(pollTimer);
         pollTimer = null;
       }
+      return Promise.resolve();
     },
   };
 }
@@ -193,12 +196,14 @@ function createTcpReader(
   let server: net.Server | null = null;
 
   return {
-    async start() {
+    async start(): Promise<void> {
       server = net.createServer((socket) => {
         socket.setEncoding('utf8');
         socket.setTimeout(60_000, () => socket.destroy());
         pipeLines(socket, (line) => dispatchLine(line, onEvent, onError), onError);
-        socket.on('error', () => { /* ignore individual socket errors */ });
+        socket.on('error', () => {
+          /* ignore individual socket errors */
+        });
       });
       server.maxConnections = MAX_TCP_CONNECTIONS;
 
@@ -207,7 +212,7 @@ function createTcpReader(
         server!.on('error', reject);
       });
     },
-    async stop() {
+    async stop(): Promise<void> {
       if (server) {
         await new Promise<void>((resolve) => {
           server!.close(() => resolve());
@@ -249,9 +254,7 @@ export function createInputReader(opts: InputReaderOptions): InputReader {
  *   "file:/path"  → file mode
  *   "tcp:9000"    → TCP mode on port 9000
  */
-export function parseInputMode(
-  envValue: string | undefined,
-): InputReaderOptions['mode'] {
+export function parseInputMode(envValue: string | undefined): InputReaderOptions['mode'] {
   if (!envValue || envValue === 'stdin') return 'stdin';
 
   if (envValue.startsWith('file:')) {
@@ -269,5 +272,7 @@ export function parseInputMode(
     return { type: 'tcp', port };
   }
 
-  throw new Error(`Unknown DOOW_TRACK_INPUT value: "${envValue}". Use stdin, file:<path>, or tcp:<port>.`);
+  throw new Error(
+    `Unknown DOOW_TRACK_INPUT value: "${envValue}". Use stdin, file:<path>, or tcp:<port>.`,
+  );
 }

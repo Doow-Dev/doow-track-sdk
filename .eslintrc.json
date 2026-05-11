@@ -1,8 +1,14 @@
 {
   "root": true,
+  "ignorePatterns": [
+    "src/__tests__/**/*.ts"
+  ],
   "parser": "@typescript-eslint/parser",
   "parserOptions": {
-    "project": "./tsconfig.json",
+    "project": [
+      "./tsconfig.json",
+      "./tsconfig.test.json"
+    ],
     "ecmaVersion": 2019
   },
   "plugins": ["@typescript-eslint", "prettier"],

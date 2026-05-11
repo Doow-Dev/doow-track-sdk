@@ -42,7 +42,7 @@ export class EventProcessor {
   enqueue(event: SerializedEvent): Promise<void> {
     const p = this._enqueueAsync(event);
     this._pendingEnqueues.add(p);
-    p.finally(() => this._pendingEnqueues.delete(p));
+    void p.finally(() => this._pendingEnqueues.delete(p));
     return p;
   }
 

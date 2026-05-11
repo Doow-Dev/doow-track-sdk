@@ -46,7 +46,7 @@ export async function loadConfigFile(filePath: string): Promise<RawConfigFile> {
   try {
     content = await fs.readFile(filePath, 'utf8');
   } catch (e) {
-    const err = e as NodeJS.ErrnoException;
+    const err = e instanceof Error ? e : new Error(String(e));
     throw new Error(`Cannot read config file "${filePath}": ${err.message}`);
   }
 
@@ -68,35 +68,35 @@ export function applyEnvOverrides(base: RawConfigFile): RawConfigFile {
   const env = process.env;
   const result: RawConfigFile = { ...base };
 
-  if (env['DOOW_TRACK_API_KEY']) {
-    result.api_key = env['DOOW_TRACK_API_KEY'];
+  if (env.DOOW_TRACK_API_KEY) {
+    result.api_key = env.DOOW_TRACK_API_KEY;
   }
-  if (env['DOOW_TRACK_ENDPOINT']) {
-    result.endpoint = env['DOOW_TRACK_ENDPOINT'];
+  if (env.DOOW_TRACK_ENDPOINT) {
+    result.endpoint = env.DOOW_TRACK_ENDPOINT;
   }
-  if (env['DOOW_TRACK_DISABLED'] === 'true') {
+  if (env.DOOW_TRACK_DISABLED === 'true') {
     result.disabled = true;
   }
-  if (env['DOOW_TRACK_DEBUG'] === 'true') {
+  if (env.DOOW_TRACK_DEBUG === 'true') {
     result.debug = true;
   }
-  if (env['DOOW_TRACK_FLUSH_AT'] !== undefined) {
-    const n = parseInt(env['DOOW_TRACK_FLUSH_AT']!, 10);
+  if (env.DOOW_TRACK_FLUSH_AT !== undefined) {
+    const n = parseInt(env.DOOW_TRACK_FLUSH_AT, 10);
     if (!isNaN(n) && n > 0) result.flush_at = n;
   }
-  if (env['DOOW_TRACK_FLUSH_INTERVAL'] !== undefined) {
-    const n = parseInt(env['DOOW_TRACK_FLUSH_INTERVAL']!, 10);
+  if (env.DOOW_TRACK_FLUSH_INTERVAL !== undefined) {
+    const n = parseInt(env.DOOW_TRACK_FLUSH_INTERVAL, 10);
     if (!isNaN(n) && n > 0) result.flush_interval = n;
   }
-  if (env['DOOW_TRACK_ATTRIBUTION'] !== undefined) {
+  if (env.DOOW_TRACK_ATTRIBUTION !== undefined) {
     try {
-      result.attribution = JSON.parse(env['DOOW_TRACK_ATTRIBUTION']!) as Record<string, string>;
+      result.attribution = JSON.parse(env.DOOW_TRACK_ATTRIBUTION) as Record<string, string>;
     } catch {
       // Malformed — keep existing
     }
   }
-  if (env['DOOW_TRACK_INPUT'] !== undefined) {
-    const raw = env['DOOW_TRACK_INPUT']!;
+  if (env.DOOW_TRACK_INPUT !== undefined) {
+    const raw = env.DOOW_TRACK_INPUT;
     if (raw === 'stdin') {
       result.input = { mode: 'stdin' };
     } else if (raw.startsWith('file:')) {

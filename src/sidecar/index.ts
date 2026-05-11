@@ -35,7 +35,7 @@ async function main(): Promise<void> {
   // ─── Build tracker ───────────────────────────────────────────────────────
 
   const tracker = new DoowTracker(apiKey, {
-    onError: (err) => {
+    onError: (err): void => {
       console.error(`[doow-sidecar] SDK error [${err.kind}]: ${err.message}`);
     },
   });
@@ -52,7 +52,7 @@ async function main(): Promise<void> {
 
   const reader = createInputReader({
     mode: inputMode,
-    onEvent: (raw: string) => {
+    onEvent: (raw: string): void => {
       try {
         const event = JSON.parse(raw) as TrackEvent;
         tracker.track(event);
@@ -61,8 +61,10 @@ async function main(): Promise<void> {
         console.warn(`[doow-sidecar] Malformed event — skipping: ${err.message}`);
       }
     },
-    onError: (err: Error, line: string) => {
-      console.warn(`[doow-sidecar] Malformed line — skipping: ${err.message} | line: ${line.slice(0, 100)}`);
+    onError: (err: Error, line: string): void => {
+      console.warn(
+        `[doow-sidecar] Malformed line — skipping: ${err.message} | line: ${line.slice(0, 100)}`,
+      );
     },
   });
 
@@ -84,8 +86,12 @@ async function main(): Promise<void> {
     process.exit(0);
   }
 
-  process.on('SIGTERM', () => { void shutdown(); });
-  process.on('SIGINT', () => { void shutdown(); });
+  process.on('SIGTERM', (): void => {
+    void shutdown();
+  });
+  process.on('SIGINT', (): void => {
+    void shutdown();
+  });
 
   process.stderr.write(`[doow-sidecar] Running. Health: http://localhost:${healthPort}/healthz\n`);
 }
