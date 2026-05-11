@@ -1,10 +1,10 @@
 # OTLP Push Onboarding Guide
 
-If you already have an OpenTelemetry Collector deployed, you can forward usage metrics to Doow without installing the `@doow/track` SDK. This guide covers the OTLP_PUSH acquisition route.
+If you already have an OpenTelemetry Collector deployed, you can forward usage metrics to Doow without installing the `@doow/track` SDK. This guide covers Doow's OTLP push integration.
 
 ## Overview
 
-The OTLP_PUSH route lets you point your existing OpenTelemetry Collector at Doow's push API. Doow accepts standard OTLP/HTTP metrics and maps them to the internal metered event ledger.
+The OTLP push integration lets you point your existing OpenTelemetry Collector at Doow's push API. Doow accepts standard OTLP/HTTP metrics and maps them into its usage pipeline.
 
 ## Prerequisites
 

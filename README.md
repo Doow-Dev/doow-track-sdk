@@ -2,7 +2,7 @@
 
 Customer-facing SDK for emitting usage telemetry to Doow. Tracks metered usage events (API calls, tokens, storage, requests, etc.) from any Node.js application.
 
-Source repository: https://github.com/Doow-Dev/doow-track-sdk
+Project home: https://github.com/Doow-Dev/doow-track-sdk
 
 ## Quick start
 
