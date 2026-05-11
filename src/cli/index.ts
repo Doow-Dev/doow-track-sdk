@@ -23,13 +23,39 @@
  *   --version          Print version and exit
  */
 
-import { promises as fs } from 'fs';
 import { DoowTracker } from '../tracker.js';
 import type { DoowTrackerOptions, TrackEvent } from '../types.js';
 import { createInputReader, parseInputMode } from '../sidecar/input-reader.js';
 import type { InputReaderOptions } from '../sidecar/input-reader.js';
 import { resolveConfig } from './config.js';
 import type { CliConfig } from './config.js';
+
+type FsPromisesModule = {
+  writeFile(path: string, data: string, encoding: BufferEncoding): Promise<void>;
+  unlink(path: string): Promise<void>;
+};
+
+declare const process: {
+  argv: string[];
+  pid: number;
+  env: Record<string, string | undefined>;
+  stdin: {
+    resume(): void;
+    setEncoding(encoding: string): void;
+    on(event: 'end', listener: () => void): void;
+  };
+  stdout: { write(chunk: string): void };
+  stderr: { write(chunk: string): void };
+  exit(code?: number): never;
+  on(event: 'SIGTERM' | 'SIGINT' | 'SIGHUP' | 'beforeExit', listener: () => void): void;
+  removeListener(event: 'SIGTERM' | 'SIGINT' | 'beforeExit', listener: () => void): void;
+  setMaxListeners(n: number): void;
+  getMaxListeners(): number;
+};
+
+async function loadFsPromises(): Promise<FsPromisesModule> {
+  return (await import('node:fs/promises')) as unknown as FsPromisesModule;
+}
 
 // ─── Version ───────────────────────────────────────────────────────────────
 
@@ -70,12 +96,14 @@ function parseArgs(argv: string[]): ParsedArgs {
 // ─── PID file ─────────────────────────────────────────────────────────────
 
 async function writePidFile(pidfile: string): Promise<void> {
-  await fs.writeFile(pidfile, String(process.pid), 'utf8');
+  const fsPromises = await loadFsPromises();
+  await fsPromises.writeFile(pidfile, String(process.pid), 'utf8');
 }
 
 async function removePidFile(pidfile: string): Promise<void> {
   try {
-    await fs.unlink(pidfile);
+    const fsPromises = await loadFsPromises();
+    await fsPromises.unlink(pidfile);
   } catch {
     // Best effort
   }
