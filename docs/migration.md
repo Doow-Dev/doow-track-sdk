@@ -78,7 +78,7 @@ If your application is not in Node.js, use the sidecar or CLI:
 
 ```bash
 # Sidecar (Docker)
-docker run -e DOOW_TRACK_API_KEY=dk_... doow/track-sidecar:latest
+docker run -e DOOW_TRACK_API_KEY=dk_... doowserver.azurecr.io/doow/track-sidecar:latest
 
 # CLI (pipe mode)
 your-app --emit-usage | doow-track --api-key dk_...

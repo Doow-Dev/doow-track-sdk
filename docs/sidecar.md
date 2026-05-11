@@ -1,6 +1,6 @@
 # Sidecar Guide
 
-The `doow/track-sidecar` Docker image runs alongside your application and accepts newline-delimited JSON events over stdin, file tail, or TCP. Use it when your application is not written in Node.js or when you want to decouple telemetry emission from your main process.
+The `doow/track-sidecar` Docker image runs alongside your application and accepts newline-delimited JSON events over stdin, file tail, or TCP. Use it when your application is not written in Node.js or when you want to decouple telemetry emission from your main process. It is designed to run on VMs, Kubernetes, Azure Container Apps, ECS, and any other platform that can run containers.
 
 ## Docker Compose
 
@@ -17,7 +17,7 @@ services:
       - DOOW_SIDECAR_PORT=9091
 
   doow-sidecar:
-    image: doow/track-sidecar:latest
+    image: doowserver.azurecr.io/doow/track-sidecar:latest
     environment:
       - DOOW_TRACK_API_KEY=dk_your_api_key
       - DOOW_TRACK_ENDPOINT=https://api.doow.co
@@ -51,7 +51,7 @@ spec:
           value: '9091'
 
     - name: doow-sidecar
-      image: doow/track-sidecar:latest
+      image: doowserver.azurecr.io/doow/track-sidecar:latest
       env:
         - name: DOOW_TRACK_API_KEY
           valueFrom:

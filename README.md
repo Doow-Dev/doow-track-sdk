@@ -107,7 +107,7 @@ export default meter.withAzureFunction(async (context: Context, req: unknown) =>
 
 ## Sidecar Docker Compose example
 
-For use cases where you emit telemetry from non-Node.js services (Python, Go, Rust, etc.), run the sidecar container and pipe JSON events to it over stdin or TCP.
+For use cases where you emit telemetry from non-Node.js services (Python, Go, Rust, etc.), run the sidecar container on VMs, Kubernetes, Azure Container Apps, ECS, and any other platform that can run containers, then pipe JSON events to it over stdin or TCP.
 
 ```yaml
 # docker-compose.yml
@@ -123,7 +123,7 @@ services:
       - DOOW_SIDECAR_PORT=9091
 
   doow-sidecar:
-    image: doow/track-sidecar:latest
+    image: doowserver.azurecr.io/doow/track-sidecar:latest
     environment:
       - DOOW_TRACK_API_KEY=dk_your_api_key
       - DOOW_TRACK_ENDPOINT=https://api.doow.co
