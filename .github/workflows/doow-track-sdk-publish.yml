@@ -15,7 +15,7 @@ permissions:
 env:
   ACR_NAME: doowserver
   ACR_LOGIN_SERVER: doowserver.azurecr.io
-  SIDECAR_IMAGE_NAME: doow-track-sidecar
+  SIDECAR_IMAGE_NAME: doow/track-sidecar
 defaults:
   run:
     working-directory: .

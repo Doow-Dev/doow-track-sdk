@@ -2,6 +2,8 @@
 
 The `doow/track-sidecar` Docker image runs alongside your application and accepts newline-delimited JSON events over stdin, file tail, or TCP. Use it when your application is not written in Node.js or when you want to decouple telemetry emission from your main process. It is designed to run on VMs, Kubernetes, Azure Container Apps, ECS, and any other platform that can run containers.
 
+The published image lives in Azure Container Registry. If your runtime cannot already pull from `doowserver.azurecr.io`, sign in to Azure before pulling the image or configure the equivalent registry credentials or image pull secrets for your platform.
+
 ## Docker Compose
 
 ```yaml

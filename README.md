@@ -109,6 +109,8 @@ export default meter.withAzureFunction(async (context: Context, req: unknown) =>
 
 For use cases where you emit telemetry from non-Node.js services (Python, Go, Rust, etc.), run the sidecar container on VMs, Kubernetes, Azure Container Apps, ECS, and any other platform that can run containers, then pipe JSON events to it over stdin or TCP.
 
+The published image lives in Azure Container Registry. If your runtime cannot already pull from `doowserver.azurecr.io`, sign in to Azure before pulling the image or configure the equivalent registry credentials for your platform.
+
 ```yaml
 # docker-compose.yml
 version: '3.9'
