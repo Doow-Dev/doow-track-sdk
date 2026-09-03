@@ -78,17 +78,15 @@ export interface Expense {
 /**
  * Input for creating a license inline with a contract.
  *
- * SEAT_BASED licenses require: seats, total_cost
- * USAGE_BASED licenses: total_cost optional (calculated from usage)
+ * SDK only supports USAGE_BASED licenses — SEAT_BASED must be created via UI.
+ * total_cost is optional (calculated from usage metrics).
  */
 export interface LicenseInput {
   name: string;
-  /** Defaults to SEAT_BASED */
+  /** Defaults to USAGE_BASED. SDK only supports USAGE_BASED. */
   license_type?: LicenseType;
-  /** Required for SEAT_BASED licenses (min 1) */
   seats?: number;
   price_per_seat?: number;
-  /** Required for SEAT_BASED licenses (min 0) */
   total_cost?: number;
   discount?: Record<string, unknown>;
   discount_amount?: number;
@@ -98,10 +96,14 @@ export interface LicenseInput {
   seats_included_in_base_plan?: number;
 }
 
+/**
+ * License in contract response. Uses AllLicenseType since responses may include
+ * UI-created SEAT_BASED licenses.
+ */
 export interface LicenseInContract {
   id: string;
   name: string;
-  license_type: LicenseType;
+  license_type: AllLicenseType;
   seats?: number;
   price_per_seat?: number;
   total_cost?: number;
@@ -189,7 +191,16 @@ export interface ListContractsParams extends PaginationParams {
 
 // ─── Licenses ──────────────────────────────────────────────────────────────
 
-export type LicenseType = 'USAGE_BASED' | 'SEAT_BASED' | 'PREPAID_CREDITS' | 'FLAT_RATE';
+/**
+ * License types for SDK creation. SDK only supports USAGE_BASED.
+ * SEAT_BASED licenses must be created via the UI.
+ */
+export type LicenseType = 'USAGE_BASED';
+
+/**
+ * All license types (for responses that may include UI-created licenses)
+ */
+export type AllLicenseType = 'USAGE_BASED' | 'SEAT_BASED' | 'PREPAID_CREDITS' | 'FLAT_RATE';
 
 export interface CreateLicenseInput {
   name: string;
@@ -219,11 +230,15 @@ export interface UpdateLicenseInput {
   seats_included_in_base_plan?: number;
 }
 
+/**
+ * License response. Uses AllLicenseType since responses may include
+ * UI-created SEAT_BASED licenses.
+ */
 export interface License {
   id: string;
   contract_id: string;
   name: string;
-  license_type: LicenseType;
+  license_type: AllLicenseType;
   seats?: number;
   price_per_seat?: number;
   total_cost?: number;
@@ -238,7 +253,7 @@ export interface License {
 }
 
 export interface ListLicensesParams extends PaginationParams {
-  license_type?: LicenseType;
+  license_type?: AllLicenseType;
 }
 
 // ─── Metrics ───────────────────────────────────────────────────────────────
