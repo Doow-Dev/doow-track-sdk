@@ -1,0 +1,66 @@
+when:
+  - event: [push, tag, pull_request]
+
+variables:
+  - &node_image 'node:20-alpine'
+
+steps:
+  install:
+    image: *node_image
+    commands:
+      - npm ci
+
+  lint:
+    image: *node_image
+    commands:
+      - npm run lint
+    depends_on: [install]
+
+  typecheck:
+    image: *node_image
+    commands:
+      - npm run typecheck
+    depends_on: [install]
+
+  build:
+    image: *node_image
+    commands:
+      - npm run build
+    depends_on: [install]
+
+  test:
+    image: *node_image
+    commands:
+      - npm test
+    depends_on: [build]
+
+  publish-npm:
+    image: *node_image
+    commands:
+      - npm publish --access public
+    secrets: [npm_token]
+    environment:
+      - NODE_AUTH_TOKEN=$$NPM_TOKEN
+    when:
+      - event: tag
+        ref: refs/tags/sdk/v*
+    depends_on: [test, lint, typecheck]
+
+  publish-docker:
+    image: woodpeckerci/plugin-docker-buildx
+    settings:
+      repo: ghcr.io/doow-dev/doow-track-sidecar
+      registry: ghcr.io
+      dockerfile: Dockerfile
+      platforms: linux/amd64,linux/arm64
+      tags:
+        - latest
+        - ${CI_COMMIT_TAG##sdk/v}
+      username:
+        from_secret: docker_username
+      password:
+        from_secret: docker_password
+    when:
+      - event: tag
+        ref: refs/tags/sdk/v*
+    depends_on: [test, lint, typecheck]
