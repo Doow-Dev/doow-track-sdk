@@ -250,7 +250,13 @@ export type UsageAggregationType = 'SUM' | 'MAX' | 'CUMULATIVE';
 
 export type RateKind = 'PER_UNIT' | 'FLAT_FEE' | 'PER_SEAT' | 'TIERED' | 'VOLUME';
 
-export type EntitlementPeriod = 'MONTHLY' | 'YEARLY' | 'QUARTERLY' | 'WEEKLY' | 'DAILY' | 'ONE_TIME';
+export type EntitlementPeriod =
+  | 'MONTHLY'
+  | 'YEARLY'
+  | 'QUARTERLY'
+  | 'WEEKLY'
+  | 'DAILY'
+  | 'ONE_TIME';
 
 export type CarryoverPolicy = 'EXPIRE_AT_PERIOD_END' | 'ROLLOVER' | 'ROLLOVER_CAPPED';
 

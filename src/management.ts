@@ -47,15 +47,15 @@ const DEFAULT_TIMEOUT = 30_000;
 
 class ManagementApiError extends Error {
   readonly status: number;
-  readonly code?: string;
-  readonly details?: Record<string, unknown>;
+  readonly code?: string | undefined;
+  readonly details?: Record<string, unknown> | undefined;
 
   constructor(error: ApiError) {
     super(error.message);
     this.name = 'ManagementApiError';
     this.status = error.status;
-    this.code = error.code;
-    this.details = error.details;
+    if (error.code !== undefined) this.code = error.code;
+    if (error.details !== undefined) this.details = error.details;
   }
 }
 
@@ -113,7 +113,7 @@ export class DoowManagement {
     }
 
     const headers: Record<string, string> = {
-      'Authorization': `Bearer ${this._apiKey}`,
+      Authorization: `Bearer ${this._apiKey}`,
       'Content-Type': 'application/json',
       'User-Agent': '@doow/track-sdk',
     };
@@ -124,12 +124,15 @@ export class DoowManagement {
     const timeoutId = setTimeout(() => controller.abort(), this._timeout);
 
     try {
-      const response = await fetch(url.toString(), {
+      const fetchOptions: RequestInit = {
         method,
         headers,
-        body: body ? JSON.stringify(body) : undefined,
         signal: controller.signal,
-      });
+      };
+      if (body) {
+        fetchOptions.body = JSON.stringify(body);
+      }
+      const response = await fetch(url.toString(), fetchOptions);
 
       clearTimeout(timeoutId);
 
@@ -198,7 +201,11 @@ class AppsClient {
   }
 
   async update(id: string, input: UpdateAppInput): Promise<App> {
-    return this.mgmt.request<App>('PUT', `/sdk/apps/${id}`, input as unknown as Record<string, unknown>);
+    return this.mgmt.request<App>(
+      'PUT',
+      `/sdk/apps/${id}`,
+      input as unknown as Record<string, unknown>,
+    );
   }
 
   async delete(id: string): Promise<void> {
@@ -219,7 +226,10 @@ class ContractsClient {
     );
   }
 
-  async listByApp(appId: string, params: ListContractsParams = {}): Promise<PaginatedResponse<Contract>> {
+  async listByApp(
+    appId: string,
+    params: ListContractsParams = {},
+  ): Promise<PaginatedResponse<Contract>> {
     return this.mgmt.request<PaginatedResponse<Contract>>(
       'GET',
       `/sdk/apps/${appId}/contracts`,
@@ -237,7 +247,11 @@ class ContractsClient {
   }
 
   async update(id: string, input: UpdateContractInput): Promise<Contract> {
-    return this.mgmt.request<Contract>('PUT', `/sdk/contracts/${id}`, input as unknown as Record<string, unknown>);
+    return this.mgmt.request<Contract>(
+      'PUT',
+      `/sdk/contracts/${id}`,
+      input as unknown as Record<string, unknown>,
+    );
   }
 
   async delete(id: string): Promise<void> {
@@ -279,7 +293,11 @@ class LicensesClient {
   }
 
   async update(id: string, input: UpdateLicenseInput): Promise<License> {
-    return this.mgmt.request<License>('PUT', `/sdk/licenses/${id}`, input as unknown as Record<string, unknown>);
+    return this.mgmt.request<License>(
+      'PUT',
+      `/sdk/licenses/${id}`,
+      input as unknown as Record<string, unknown>,
+    );
   }
 
   async delete(id: string): Promise<void> {
@@ -300,7 +318,10 @@ class MetricsClient {
     );
   }
 
-  async listByLicense(licenseId: string, params: ListMetricsParams = {}): Promise<PaginatedResponse<Metric>> {
+  async listByLicense(
+    licenseId: string,
+    params: ListMetricsParams = {},
+  ): Promise<PaginatedResponse<Metric>> {
     return this.mgmt.request<PaginatedResponse<Metric>>(
       'GET',
       `/sdk/licenses/${licenseId}/metrics`,
@@ -318,7 +339,11 @@ class MetricsClient {
   }
 
   async update(id: string, input: UpdateMetricInput): Promise<Metric> {
-    return this.mgmt.request<Metric>('PUT', `/sdk/metrics/${id}`, input as unknown as Record<string, unknown>);
+    return this.mgmt.request<Metric>(
+      'PUT',
+      `/sdk/metrics/${id}`,
+      input as unknown as Record<string, unknown>,
+    );
   }
 
   async delete(id: string): Promise<void> {
