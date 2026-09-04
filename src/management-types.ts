@@ -55,24 +55,28 @@ export type ContractType = 'PAY_AS_YOU_GO' | 'ENTERPRISE' | 'UNKNOWN';
 
 export type CostAmortization = 'PRORATA' | 'MONTHS' | 'QUARTER' | 'YEARS';
 
-export interface ExpenseInput {
-  /** Amount in cents (min 1) */
-  total: number;
-  /** ISO date string (YYYY-MM-DD) */
-  date: string;
-  description?: string;
-  transaction_id?: string;
-}
-
 export interface Expense {
   id: string;
+  app_id: string | null;
+  contract_id: string | null;
+  license_id: string | null;
   total: number;
   date: string;
   month: number;
   year: number;
-  description?: string;
-  transaction_id?: string;
+  description: string | null;
+  transaction_id: string | null;
+  vendor: string | null;
+  payment_channel: string | null;
   created_at: string;
+  updated_at: string | null;
+}
+
+export interface ListExpensesParams extends PaginationParams {
+  app_id?: string;
+  contract_id?: string;
+  year?: number;
+  month?: number;
 }
 
 /**
@@ -113,26 +117,14 @@ export interface LicenseInContract {
   original_cost?: number;
   tenure?: number;
   seats_included_in_base_plan?: number;
-  created_at: string;
 }
 
-/**
- * Input for creating a contract.
- *
- * Requires at least 1 license and 1 expense. Contracts without these cannot be created.
- * - start_date must be before end_date if both provided
- * - currency must be 3-char ISO code (e.g., USD, EUR)
- */
 export interface CreateContractInput {
   title?: string;
   contract_type?: ContractType;
-  /** ISO date string. Must be before end_date */
   start_date?: string;
-  /** ISO date string. Must be after start_date */
   end_date?: string;
-  /** 3-char ISO currency code (e.g., USD, EUR) */
   currency?: string;
-  /** Cost in cents (min 0) */
   cost?: number;
   cost_break_down?: Record<string, unknown>;
   cost_amortization?: CostAmortization;
@@ -141,10 +133,8 @@ export interface CreateContractInput {
   total_contract_cost?: number;
   total_discount_amount?: number;
   total_original_cost?: number;
-  /** At least 1 license required */
   licenses: LicenseInput[];
-  /** At least 1 expense required */
-  expenses: ExpenseInput[];
+  expense_ids?: string[];
 }
 
 export interface UpdateContractInput {
@@ -248,8 +238,6 @@ export interface License {
   original_cost?: number;
   tenure?: number;
   seats_included_in_base_plan?: number;
-  created_at: string;
-  updated_at: string;
 }
 
 export interface ListLicensesParams extends PaginationParams {
