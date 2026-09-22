@@ -352,10 +352,9 @@ steps:
     image: ruby:3.2
     commands:
       - cd sdks/ruby && gem build *.gemspec
-
-        mkdir -p ~/.gem
-        echo ":rubygems_api_key: $RUBYGEMS_TOKEN" > ~/.gem/credentials
-        chmod 0600 ~/.gem/credentials
+      - mkdir -p ~/.gem
+      - 'echo ":rubygems_api_key: $RUBYGEMS_TOKEN" > ~/.gem/credentials'
+      - chmod 0600 ~/.gem/credentials
       - cd sdks/ruby && gem push *.gem
     environment:
       RUBYGEMS_TOKEN:
@@ -369,9 +368,8 @@ steps:
     image: dart:stable
     commands:
       - cd sdks/dart && dart pub get && dart analyze
-
-        mkdir -p ~/.config/dart
-        echo "$PUB_CREDENTIALS" > ~/.config/dart/pub-credentials.json
+      - mkdir -p ~/.config/dart
+      - echo "$PUB_CREDENTIALS" > ~/.config/dart/pub-credentials.json
       - cd sdks/dart && dart pub publish --force
     environment:
       PUB_CREDENTIALS:
