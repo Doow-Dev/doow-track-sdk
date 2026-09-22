@@ -168,7 +168,7 @@ steps:
         from_secret: npm_token
     when:
       - event: tag
-        ref: refs/tags/typescript/v*
+        ref: refs/tags/typescript-v*
 
   - name: publish-typescript-docker
     image: woodpeckerci/plugin-docker-buildx
@@ -188,7 +188,7 @@ steps:
         from_secret: ghcr_token
     when:
       - event: tag
-        ref: refs/tags/typescript/v*
+        ref: refs/tags/typescript-v*
 
   # --- React → npm ---
   - name: publish-react
@@ -203,7 +203,7 @@ steps:
         from_secret: npm_token
     when:
       - event: tag
-        ref: refs/tags/react/v*
+        ref: refs/tags/react-v*
 
   # --- Next.js → npm ---
   - name: publish-nextjs
@@ -218,7 +218,7 @@ steps:
         from_secret: npm_token
     when:
       - event: tag
-        ref: refs/tags/nextjs/v*
+        ref: refs/tags/nextjs-v*
 
   # --- React Native → npm ---
   - name: publish-react-native
@@ -233,7 +233,7 @@ steps:
         from_secret: npm_token
     when:
       - event: tag
-        ref: refs/tags/react-native/v*
+        ref: refs/tags/react-native-v*
 
   # --- Python → PyPI + Docker ---
   - name: publish-python
@@ -247,7 +247,7 @@ steps:
         from_secret: pypi_token
     when:
       - event: tag
-        ref: refs/tags/python/v*
+        ref: refs/tags/python-v*
 
   - name: publish-python-docker
     image: woodpeckerci/plugin-docker-buildx
@@ -267,7 +267,7 @@ steps:
         from_secret: ghcr_token
     when:
       - event: tag
-        ref: refs/tags/python/v*
+        ref: refs/tags/python-v*
 
   # --- Go → pkg.go.dev (auto via tag, just run tests) ---
   - name: publish-go
@@ -277,7 +277,7 @@ steps:
       - echo "Go module published automatically via tag to pkg.go.dev"
     when:
       - event: tag
-        ref: refs/tags/go/v*
+        ref: refs/tags/go-v*
 
   # --- Rust → crates.io ---
   - name: publish-rust
@@ -290,7 +290,7 @@ steps:
         from_secret: crates_token
     when:
       - event: tag
-        ref: refs/tags/rust/v*
+        ref: refs/tags/rust-v*
 
   # --- .NET → NuGet ---
   - name: publish-dotnet
@@ -304,7 +304,7 @@ steps:
         from_secret: nuget_token
     when:
       - event: tag
-        ref: refs/tags/dotnet/v*
+        ref: refs/tags/dotnet-v*
 
   # --- Java → Maven Central ---
   - name: publish-java
@@ -323,7 +323,7 @@ steps:
         from_secret: maven_signing_password
     when:
       - event: tag
-        ref: refs/tags/java/v*
+        ref: refs/tags/java-v*
 
   # --- Kotlin → Maven Central ---
   - name: publish-kotlin
@@ -342,7 +342,7 @@ steps:
         from_secret: maven_signing_password
     when:
       - event: tag
-        ref: refs/tags/kotlin/v*
+        ref: refs/tags/kotlin-v*
 
   # --- Ruby → RubyGems ---
   - name: publish-ruby
@@ -359,7 +359,7 @@ steps:
         from_secret: rubygems_token
     when:
       - event: tag
-        ref: refs/tags/ruby/v*
+        ref: refs/tags/ruby-v*
 
   # --- Dart → pub.dev ---
   - name: publish-dart
@@ -375,7 +375,7 @@ steps:
         from_secret: pub_credentials
     when:
       - event: tag
-        ref: refs/tags/dart/v*
+        ref: refs/tags/dart-v*
 
   # --- PHP → Packagist (auto via GitHub webhook, just run tests) ---
   - name: publish-php
@@ -386,7 +386,7 @@ steps:
       - echo "PHP package synced automatically via Packagist webhook"
     when:
       - event: tag
-        ref: refs/tags/php/v*
+        ref: refs/tags/php-v*
 
   # --- Swift → SPM (auto via tag, just run tests) ---
   - name: publish-swift
@@ -396,4 +396,4 @@ steps:
       - echo "Swift package available automatically via tag for SPM"
     when:
       - event: tag
-        ref: refs/tags/swift/v*
+        ref: refs/tags/swift-v*
