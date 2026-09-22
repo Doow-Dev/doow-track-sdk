@@ -12,7 +12,7 @@ steps:
   - name: ci-typescript
     image: node:22
     commands:
-      - cd sdks/typescript && npm ci && npm run lint && npm run typecheck && npm run build && npm test
+      - cd sdks/typescript && npm ci --ignore-scripts && npm run lint && npm run typecheck && npm run build && npm test
     when:
       - event: [push, pull_request]
         path: "sdks/typescript/**"
@@ -20,7 +20,7 @@ steps:
   - name: ci-react
     image: node:22
     commands:
-      - cd sdks/react && npm ci && npm run lint || true && npm run build && npm run test || true
+      - cd sdks/react && npm ci --ignore-scripts && npm run lint || true && npm run build && npm run test || true
     when:
       - event: [push, pull_request]
         path: "sdks/react/**"
@@ -28,7 +28,7 @@ steps:
   - name: ci-nextjs
     image: node:22
     commands:
-      - cd sdks/nextjs && npm ci && npm run lint || true && npm run build && npm run test || true
+      - cd sdks/nextjs && npm ci --ignore-scripts && npm run lint || true && npm run build && npm run test || true
     when:
       - event: [push, pull_request]
         path: "sdks/nextjs/**"
@@ -36,7 +36,7 @@ steps:
   - name: ci-react-native
     image: node:22
     commands:
-      - cd sdks/react-native && npm ci && npm run lint || true && npm run build && npm run test || true
+      - cd sdks/react-native && npm ci --ignore-scripts && npm run lint || true && npm run build && npm run test || true
     when:
       - event: [push, pull_request]
         path: "sdks/react-native/**"
@@ -145,7 +145,7 @@ steps:
   - name: publish-typescript
     image: node:22
     commands:
-      - cd sdks/typescript && npm ci && npm run build && npm test
+      - cd sdks/typescript && npm ci --ignore-scripts && npm run build && npm test
       - |
         echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" > ~/.npmrc
         cd sdks/typescript && npm publish --access public
@@ -180,7 +180,7 @@ steps:
   - name: publish-react
     image: node:22
     commands:
-      - cd sdks/react && npm ci && npm run build
+      - cd sdks/react && npm ci --ignore-scripts && npm run build
       - |
         echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" > ~/.npmrc
         cd sdks/react && npm publish --access public
@@ -195,7 +195,7 @@ steps:
   - name: publish-nextjs
     image: node:22
     commands:
-      - cd sdks/nextjs && npm ci && npm run build
+      - cd sdks/nextjs && npm ci --ignore-scripts && npm run build
       - |
         echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" > ~/.npmrc
         cd sdks/nextjs && npm publish --access public
@@ -210,7 +210,7 @@ steps:
   - name: publish-react-native
     image: node:22
     commands:
-      - cd sdks/react-native && npm ci && npm run build
+      - cd sdks/react-native && npm ci --ignore-scripts && npm run build
       - |
         echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" > ~/.npmrc
         cd sdks/react-native && npm publish --access public
