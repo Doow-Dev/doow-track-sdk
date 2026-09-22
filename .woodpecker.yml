@@ -8,6 +8,17 @@
 # ============================================================================
 
 steps:
+  # --- Always run: validate pipeline ---
+  - name: validate
+    image: alpine
+    commands:
+      - echo "Pipeline triggered successfully"
+      - echo "Commit: $CI_COMMIT_SHA"
+      - echo "Branch: $CI_COMMIT_BRANCH"
+      - echo "Event: $CI_PIPELINE_EVENT"
+    when:
+      - event: [push, pull_request]
+
   # --- JavaScript SDKs (npm workspaces) ---
   - name: ci-typescript
     image: node:22
