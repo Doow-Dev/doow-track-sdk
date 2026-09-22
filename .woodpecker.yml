@@ -3,6 +3,9 @@
 # CI: On push/PR, tests only SDKs with changes
 # Publish: On tag (e.g., python/v0.2.0), publishes that SDK to its registry
 
+when:
+  - event: [push, pull_request, tag]
+
 # ============================================================================
 # CI — Test changed SDKs only
 # ============================================================================
