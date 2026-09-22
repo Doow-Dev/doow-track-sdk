@@ -10,7 +10,7 @@
     "sdks/react-native"
   ],
   "scripts": {
-    "prepare": "husky",
+    "prepare": "[ -n \"$CI\" ] || husky",
     "lint": "npm run lint --workspaces --if-present",
     "build": "npm run build --workspaces --if-present",
     "test": "npm run test --workspaces --if-present"
