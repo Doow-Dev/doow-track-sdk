@@ -160,10 +160,8 @@ steps:
     image: node:22
     commands:
       - rm -rf node_modules package-lock.json
-      - cd sdks/typescript && npm install && npm run build && npm test
-
       - echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" > ~/.npmrc
-      - cd sdks/typescript && npm publish --access public
+      - cd sdks/typescript && npm install && npm run build && npm test && npm publish --access public
     environment:
       NPM_TOKEN:
         from_secret: npm_token
@@ -196,9 +194,8 @@ steps:
     image: node:22
     commands:
       - rm -rf node_modules package-lock.json
-      - cd sdks/react && npm install && npm run build
       - echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" > ~/.npmrc
-      - cd sdks/react && npm publish --access public
+      - cd sdks/react && npm install && npm run build && npm publish --access public
     environment:
       NPM_TOKEN:
         from_secret: npm_token
@@ -211,10 +208,8 @@ steps:
     image: node:22
     commands:
       - rm -rf node_modules package-lock.json
-      - cd sdks/nextjs && npm install && npm run build
-
       - echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" > ~/.npmrc
-      - cd sdks/nextjs && npm publish --access public
+      - cd sdks/nextjs && npm install && npm run build && npm publish --access public
     environment:
       NPM_TOKEN:
         from_secret: npm_token
@@ -227,10 +222,8 @@ steps:
     image: node:22
     commands:
       - rm -rf node_modules package-lock.json
-      - cd sdks/react-native && npm install && npm run build
-
       - echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" > ~/.npmrc
-      - cd sdks/react-native && npm publish --access public
+      - cd sdks/react-native && npm install && npm run build && npm publish --access public
     environment:
       NPM_TOKEN:
         from_secret: npm_token
