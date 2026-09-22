@@ -161,9 +161,9 @@ steps:
     commands:
       - rm -rf node_modules package-lock.json
       - cd sdks/typescript && npm install && npm run build && npm test
-      - |
-        echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" > ~/.npmrc
-        cd sdks/typescript && npm publish --access public
+
+      - echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" > ~/.npmrc
+      - cd sdks/typescript && npm publish --access public
     environment:
       NPM_TOKEN:
         from_secret: npm_token
@@ -197,9 +197,8 @@ steps:
     commands:
       - rm -rf node_modules package-lock.json
       - cd sdks/react && npm install && npm run build
-      - |
-        echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" > ~/.npmrc
-        cd sdks/react && npm publish --access public
+      - echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" > ~/.npmrc
+      - cd sdks/react && npm publish --access public
     environment:
       NPM_TOKEN:
         from_secret: npm_token
@@ -213,9 +212,9 @@ steps:
     commands:
       - rm -rf node_modules package-lock.json
       - cd sdks/nextjs && npm install && npm run build
-      - |
-        echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" > ~/.npmrc
-        cd sdks/nextjs && npm publish --access public
+
+      - echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" > ~/.npmrc
+      - cd sdks/nextjs && npm publish --access public
     environment:
       NPM_TOKEN:
         from_secret: npm_token
@@ -229,9 +228,9 @@ steps:
     commands:
       - rm -rf node_modules package-lock.json
       - cd sdks/react-native && npm install && npm run build
-      - |
-        echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" > ~/.npmrc
-        cd sdks/react-native && npm publish --access public
+
+      - echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" > ~/.npmrc
+      - cd sdks/react-native && npm publish --access public
     environment:
       NPM_TOKEN:
         from_secret: npm_token
@@ -353,11 +352,11 @@ steps:
     image: ruby:3.2
     commands:
       - cd sdks/ruby && gem build *.gemspec
-      - |
+
         mkdir -p ~/.gem
         echo ":rubygems_api_key: $RUBYGEMS_TOKEN" > ~/.gem/credentials
         chmod 0600 ~/.gem/credentials
-        cd sdks/ruby && gem push *.gem
+      - cd sdks/ruby && gem push *.gem
     environment:
       RUBYGEMS_TOKEN:
         from_secret: rubygems_token
@@ -370,10 +369,10 @@ steps:
     image: dart:stable
     commands:
       - cd sdks/dart && dart pub get && dart analyze
-      - |
+
         mkdir -p ~/.config/dart
         echo "$PUB_CREDENTIALS" > ~/.config/dart/pub-credentials.json
-        cd sdks/dart && dart pub publish --force
+      - cd sdks/dart && dart pub publish --force
     environment:
       PUB_CREDENTIALS:
         from_secret: pub_credentials
