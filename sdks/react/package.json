@@ -1,0 +1,48 @@
+{
+  "name": "@doow/track-react",
+  "version": "0.1.0",
+  "description": "Official React SDK for Doow usage telemetry",
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts --format cjs,esm --dts --clean",
+    "dev": "tsup src/index.ts --format cjs,esm --dts --watch",
+    "lint": "eslint src",
+    "test": "vitest"
+  },
+  "peerDependencies": {
+    "react": ">=17.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.0",
+    "react": "^18.2.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.3.0",
+    "vitest": "^1.0.0"
+  },
+  "keywords": [
+    "doow",
+    "telemetry",
+    "usage",
+    "billing",
+    "react",
+    "hooks"
+  ],
+  "author": "Doow",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Doow-Dev/doow-track-react.git"
+  }
+}
