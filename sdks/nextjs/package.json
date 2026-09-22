@@ -1,0 +1,56 @@
+{
+  "name": "@doow/track-nextjs",
+  "version": "0.1.0",
+  "description": "Official Next.js SDK for Doow usage telemetry",
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./server": {
+      "import": "./dist/server.mjs",
+      "require": "./dist/server.js",
+      "types": "./dist/server.d.ts"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts src/server.ts --format cjs,esm --dts --clean",
+    "dev": "tsup src/index.ts src/server.ts --format cjs,esm --dts --watch",
+    "lint": "eslint src",
+    "test": "vitest"
+  },
+  "peerDependencies": {
+    "next": ">=13.0.0",
+    "react": ">=18.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.0",
+    "next": "^14.0.0",
+    "react": "^18.2.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.3.0",
+    "vitest": "^1.0.0"
+  },
+  "keywords": [
+    "doow",
+    "telemetry",
+    "usage",
+    "billing",
+    "nextjs",
+    "react",
+    "server-actions"
+  ],
+  "author": "Doow",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Doow-Dev/doow-track-nextjs.git"
+  }
+}

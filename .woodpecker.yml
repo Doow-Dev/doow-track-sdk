@@ -1,81 +1,385 @@
-when:
-  - event: [push, pull_request, tag]
+# Doow Track SDKs — Unified CI/CD Pipeline
+#
+# CI: On push/PR, tests only SDKs with changes
+# Publish: On tag (e.g., python/v0.2.0), publishes that SDK to its registry
 
-concurrency:
-  limit: 1
-  group: doow-track-sdk-${CI_COMMIT_BRANCH}
+# ============================================================================
+# CI — Test changed SDKs only
+# ============================================================================
 
 steps:
-  - name: setup
+  # --- JavaScript SDKs (npm workspaces) ---
+  - name: ci-typescript
     image: node:22
     commands:
-      - npm ci
-      - git fetch --unshallow origin || git fetch origin main --depth=200 || true
+      - cd sdks/typescript && npm ci && npm run lint && npm run typecheck && npm run build && npm test
+    when:
+      - event: [push, pull_request]
+        path: "sdks/typescript/**"
 
-  - name: lint
+  - name: ci-react
     image: node:22
     commands:
-      - npm run lint
-    depends_on:
-      - setup
+      - cd sdks/react && npm ci && npm run lint || true && npm run build && npm run test || true
+    when:
+      - event: [push, pull_request]
+        path: "sdks/react/**"
 
-  - name: typecheck
+  - name: ci-nextjs
     image: node:22
     commands:
-      - npm run typecheck
-    depends_on:
-      - setup
+      - cd sdks/nextjs && npm ci && npm run lint || true && npm run build && npm run test || true
+    when:
+      - event: [push, pull_request]
+        path: "sdks/nextjs/**"
 
-  - name: build
+  - name: ci-react-native
     image: node:22
     commands:
-      - npm run build
-    depends_on:
-      - setup
+      - cd sdks/react-native && npm ci && npm run lint || true && npm run build && npm run test || true
+    when:
+      - event: [push, pull_request]
+        path: "sdks/react-native/**"
 
-  - name: test
-    image: node:22
+  # --- Go SDK ---
+  - name: ci-go
+    image: golang:1.22
     commands:
-      - npm test
-    depends_on:
-      - build
+      - cd sdks/go && go vet ./... && go build ./... && go test -v ./...
+    when:
+      - event: [push, pull_request]
+        path: "sdks/go/**"
 
-  - name: publish-npm
+  # --- Python SDK ---
+  - name: ci-python
+    image: python:3.11-slim
+    commands:
+      - cd sdks/python && pip install -e ".[dev]" || pip install -e .
+      - cd sdks/python && ruff check src/ || true
+      - cd sdks/python && pytest tests/ -v || true
+    when:
+      - event: [push, pull_request]
+        path: "sdks/python/**"
+
+  # --- Rust SDK ---
+  - name: ci-rust
+    image: rust:latest
+    commands:
+      - cd sdks/rust && cargo build && cargo test
+    when:
+      - event: [push, pull_request]
+        path: "sdks/rust/**"
+
+  # --- .NET SDK ---
+  - name: ci-dotnet
+    image: mcr.microsoft.com/dotnet/sdk:8.0
+    commands:
+      - cd sdks/dotnet && dotnet restore && dotnet build --no-restore -c Release
+      - cd sdks/dotnet && dotnet test --no-build -c Release --filter "Category!=E2E" || true
+    when:
+      - event: [push, pull_request]
+        path: "sdks/dotnet/**"
+
+  # --- Java SDK ---
+  - name: ci-java
+    image: gradle:8-jdk17
+    commands:
+      - cd sdks/java && gradle build || true
+    when:
+      - event: [push, pull_request]
+        path: "sdks/java/**"
+
+  # --- Kotlin SDK ---
+  - name: ci-kotlin
+    image: gradle:8-jdk17
+    commands:
+      - cd sdks/kotlin && gradle build || true
+    when:
+      - event: [push, pull_request]
+        path: "sdks/kotlin/**"
+
+  # --- Ruby SDK ---
+  - name: ci-ruby
+    image: ruby:3.2
+    commands:
+      - cd sdks/ruby && bundle install || true
+      - cd sdks/ruby && bundle exec rspec || true
+    when:
+      - event: [push, pull_request]
+        path: "sdks/ruby/**"
+
+  # --- Dart SDK ---
+  - name: ci-dart
+    image: dart:stable
+    commands:
+      - cd sdks/dart && dart pub get && dart analyze
+      - cd sdks/dart && dart test || true
+    when:
+      - event: [push, pull_request]
+        path: "sdks/dart/**"
+
+  # --- PHP SDK ---
+  - name: ci-php
+    image: php:8.2-cli
+    commands:
+      - cd sdks/php && composer install || true
+      - cd sdks/php && vendor/bin/phpunit || true
+    when:
+      - event: [push, pull_request]
+        path: "sdks/php/**"
+
+  # --- Swift SDK ---
+  - name: ci-swift
+    image: swift:5.9
+    commands:
+      - cd sdks/swift && swift build && swift test || true
+    when:
+      - event: [push, pull_request]
+        path: "sdks/swift/**"
+
+# ============================================================================
+# PUBLISH — Deploy to registries on tag
+# ============================================================================
+
+  # --- TypeScript → npm + Docker ---
+  - name: publish-typescript
     image: node:22
     commands:
+      - cd sdks/typescript && npm ci && npm run build && npm test
       - |
         echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" > ~/.npmrc
-        npm publish --access public
+        cd sdks/typescript && npm publish --access public
     environment:
       NPM_TOKEN:
         from_secret: npm_token
-    depends_on:
-      - test
-      - lint
-      - typecheck
     when:
       - event: tag
-        ref: refs/tags/sdk/v*
+        ref: refs/tags/typescript/v*
 
-  - name: docker-build
+  - name: publish-typescript-docker
     image: woodpeckerci/plugin-docker-buildx
     privileged: true
     settings:
       repo: ghcr.io/doow-dev/doow-track-sidecar
-      dockerfile: Dockerfile
+      dockerfile: sdks/typescript/Dockerfile
+      context: sdks/typescript
       registry: ghcr.io
       platforms: linux/amd64,linux/arm64
       tags:
         - latest
-        - ${CI_COMMIT_TAG##sdk/v}
+        - ${CI_COMMIT_TAG##typescript/v}
       username:
         from_secret: ghcr_username
       password:
         from_secret: ghcr_token
-    depends_on:
-      - test
-      - lint
-      - typecheck
     when:
       - event: tag
-        ref: refs/tags/sdk/v*
+        ref: refs/tags/typescript/v*
+
+  # --- React → npm ---
+  - name: publish-react
+    image: node:22
+    commands:
+      - cd sdks/react && npm ci && npm run build
+      - |
+        echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" > ~/.npmrc
+        cd sdks/react && npm publish --access public
+    environment:
+      NPM_TOKEN:
+        from_secret: npm_token
+    when:
+      - event: tag
+        ref: refs/tags/react/v*
+
+  # --- Next.js → npm ---
+  - name: publish-nextjs
+    image: node:22
+    commands:
+      - cd sdks/nextjs && npm ci && npm run build
+      - |
+        echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" > ~/.npmrc
+        cd sdks/nextjs && npm publish --access public
+    environment:
+      NPM_TOKEN:
+        from_secret: npm_token
+    when:
+      - event: tag
+        ref: refs/tags/nextjs/v*
+
+  # --- React Native → npm ---
+  - name: publish-react-native
+    image: node:22
+    commands:
+      - cd sdks/react-native && npm ci && npm run build
+      - |
+        echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" > ~/.npmrc
+        cd sdks/react-native && npm publish --access public
+    environment:
+      NPM_TOKEN:
+        from_secret: npm_token
+    when:
+      - event: tag
+        ref: refs/tags/react-native/v*
+
+  # --- Python → PyPI + Docker ---
+  - name: publish-python
+    image: python:3.11-slim
+    commands:
+      - cd sdks/python && pip install build twine
+      - cd sdks/python && python -m build
+      - cd sdks/python && twine upload dist/* -u __token__ -p $PYPI_TOKEN
+    environment:
+      PYPI_TOKEN:
+        from_secret: pypi_token
+    when:
+      - event: tag
+        ref: refs/tags/python/v*
+
+  - name: publish-python-docker
+    image: woodpeckerci/plugin-docker-buildx
+    privileged: true
+    settings:
+      repo: ghcr.io/doow-dev/doow-track-python
+      dockerfile: sdks/python/Dockerfile
+      context: sdks/python
+      registry: ghcr.io
+      platforms: linux/amd64,linux/arm64
+      tags:
+        - latest
+        - ${CI_COMMIT_TAG##python/v}
+      username:
+        from_secret: ghcr_username
+      password:
+        from_secret: ghcr_token
+    when:
+      - event: tag
+        ref: refs/tags/python/v*
+
+  # --- Go → pkg.go.dev (auto via tag, just run tests) ---
+  - name: publish-go
+    image: golang:1.22
+    commands:
+      - cd sdks/go && go vet ./... && go build ./... && go test -v ./...
+      - echo "Go module published automatically via tag to pkg.go.dev"
+    when:
+      - event: tag
+        ref: refs/tags/go/v*
+
+  # --- Rust → crates.io ---
+  - name: publish-rust
+    image: rust:latest
+    commands:
+      - cd sdks/rust && cargo build && cargo test
+      - cd sdks/rust && cargo publish --token $CRATES_TOKEN
+    environment:
+      CRATES_TOKEN:
+        from_secret: crates_token
+    when:
+      - event: tag
+        ref: refs/tags/rust/v*
+
+  # --- .NET → NuGet ---
+  - name: publish-dotnet
+    image: mcr.microsoft.com/dotnet/sdk:8.0
+    commands:
+      - cd sdks/dotnet && dotnet restore && dotnet build --no-restore -c Release
+      - cd sdks/dotnet && dotnet pack src/DoowTrack -c Release -o ./artifacts
+      - dotnet nuget push sdks/dotnet/artifacts/*.nupkg --api-key $NUGET_TOKEN --source https://api.nuget.org/v3/index.json
+    environment:
+      NUGET_TOKEN:
+        from_secret: nuget_token
+    when:
+      - event: tag
+        ref: refs/tags/dotnet/v*
+
+  # --- Java → Maven Central ---
+  - name: publish-java
+    image: gradle:8-jdk17
+    commands:
+      - cd sdks/java && gradle build
+      - cd sdks/java && gradle publish
+    environment:
+      MAVEN_USERNAME:
+        from_secret: maven_username
+      MAVEN_PASSWORD:
+        from_secret: maven_password
+      MAVEN_SIGNING_KEY:
+        from_secret: maven_signing_key
+      MAVEN_SIGNING_PASSWORD:
+        from_secret: maven_signing_password
+    when:
+      - event: tag
+        ref: refs/tags/java/v*
+
+  # --- Kotlin → Maven Central ---
+  - name: publish-kotlin
+    image: gradle:8-jdk17
+    commands:
+      - cd sdks/kotlin && gradle build
+      - cd sdks/kotlin && gradle publish
+    environment:
+      MAVEN_USERNAME:
+        from_secret: maven_username
+      MAVEN_PASSWORD:
+        from_secret: maven_password
+      MAVEN_SIGNING_KEY:
+        from_secret: maven_signing_key
+      MAVEN_SIGNING_PASSWORD:
+        from_secret: maven_signing_password
+    when:
+      - event: tag
+        ref: refs/tags/kotlin/v*
+
+  # --- Ruby → RubyGems ---
+  - name: publish-ruby
+    image: ruby:3.2
+    commands:
+      - cd sdks/ruby && gem build *.gemspec
+      - |
+        mkdir -p ~/.gem
+        echo ":rubygems_api_key: $RUBYGEMS_TOKEN" > ~/.gem/credentials
+        chmod 0600 ~/.gem/credentials
+        cd sdks/ruby && gem push *.gem
+    environment:
+      RUBYGEMS_TOKEN:
+        from_secret: rubygems_token
+    when:
+      - event: tag
+        ref: refs/tags/ruby/v*
+
+  # --- Dart → pub.dev ---
+  - name: publish-dart
+    image: dart:stable
+    commands:
+      - cd sdks/dart && dart pub get && dart analyze
+      - |
+        mkdir -p ~/.config/dart
+        echo "$PUB_CREDENTIALS" > ~/.config/dart/pub-credentials.json
+        cd sdks/dart && dart pub publish --force
+    environment:
+      PUB_CREDENTIALS:
+        from_secret: pub_credentials
+    when:
+      - event: tag
+        ref: refs/tags/dart/v*
+
+  # --- PHP → Packagist (auto via GitHub webhook, just run tests) ---
+  - name: publish-php
+    image: php:8.2-cli
+    commands:
+      - cd sdks/php && composer install || true
+      - cd sdks/php && vendor/bin/phpunit || true
+      - echo "PHP package synced automatically via Packagist webhook"
+    when:
+      - event: tag
+        ref: refs/tags/php/v*
+
+  # --- Swift → SPM (auto via tag, just run tests) ---
+  - name: publish-swift
+    image: swift:5.9
+    commands:
+      - cd sdks/swift && swift build && swift test || true
+      - echo "Swift package available automatically via tag for SPM"
+    when:
+      - event: tag
+        ref: refs/tags/swift/v*

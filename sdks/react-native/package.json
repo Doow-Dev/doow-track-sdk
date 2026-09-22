@@ -1,0 +1,53 @@
+{
+  "name": "@doow/track-react-native",
+  "version": "0.1.0",
+  "description": "Official React Native SDK for Doow usage telemetry",
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts --format cjs,esm --dts --clean",
+    "dev": "tsup src/index.ts --format cjs,esm --dts --watch",
+    "lint": "eslint src",
+    "test": "jest"
+  },
+  "peerDependencies": {
+    "@react-native-async-storage/async-storage": ">=1.0.0",
+    "react": ">=17.0.0",
+    "react-native": ">=0.70.0"
+  },
+  "devDependencies": {
+    "@react-native-async-storage/async-storage": "^1.21.0",
+    "@types/react": "^18.2.0",
+    "@types/react-native": "^0.72.0",
+    "react": "^18.2.0",
+    "react-native": "^0.73.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.3.0"
+  },
+  "keywords": [
+    "doow",
+    "telemetry",
+    "usage",
+    "billing",
+    "react-native",
+    "expo",
+    "mobile"
+  ],
+  "author": "Doow",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Doow-Dev/doow-track-react-native.git"
+  }
+}

@@ -68,46 +68,6 @@ export default [
     ],
     external: [],
   },
-  // Sidecar entry point (CJS — Node executable)
-  {
-    input: 'src/sidecar/index.ts',
-    output: {
-      file: 'dist/sidecar.cjs',
-      format: 'cjs',
-      sourcemap: true,
-      exports: 'named',
-    },
-    plugins: [
-      ...sharedPlugins,
-      typescript({
-        tsconfig: './tsconfig.json',
-        declaration: false,
-        declarationMap: false,
-        compilerOptions: { outDir: 'dist', declarationDir: undefined },
-      }),
-    ],
-    external: [],
-  },
-  // CLI entry point (CJS — Node executable)
-  {
-    input: 'src/cli/index.ts',
-    output: {
-      file: 'dist/cli.cjs',
-      format: 'cjs',
-      sourcemap: true,
-      exports: 'named',
-    },
-    plugins: [
-      ...sharedPlugins,
-      typescript({
-        tsconfig: './tsconfig.json',
-        declaration: false,
-        declarationMap: false,
-        compilerOptions: { outDir: 'dist', declarationDir: undefined },
-      }),
-    ],
-    external: [],
-  },
   // Types build
   {
     input: 'src/index.ts',
