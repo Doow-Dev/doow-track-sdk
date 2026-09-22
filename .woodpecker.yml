@@ -13,9 +13,9 @@ steps:
     image: alpine
     commands:
       - echo "Pipeline triggered successfully"
-      - echo "Commit: $CI_COMMIT_SHA"
-      - echo "Branch: $CI_COMMIT_BRANCH"
-      - echo "Event: $CI_PIPELINE_EVENT"
+      - 'echo "Commit: $CI_COMMIT_SHA"'
+      - 'echo "Branch: $CI_COMMIT_BRANCH"'
+      - 'echo "Event: $CI_PIPELINE_EVENT"'
     when:
       - event: [push, pull_request]
 
