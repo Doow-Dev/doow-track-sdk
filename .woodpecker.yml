@@ -235,9 +235,7 @@ steps:
   - name: publish-python
     image: python:3.11-slim
     commands:
-      - cd sdks/python && pip install build twine
-      - cd sdks/python && python -m build
-      - cd sdks/python && twine upload dist/* -u __token__ -p $PYPI_TOKEN
+      - cd sdks/python && pip install build twine && python -m build && twine upload dist/* -u __token__ -p $PYPI_TOKEN
     environment:
       PYPI_TOKEN:
         from_secret: pypi_token
