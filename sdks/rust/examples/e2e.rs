@@ -39,16 +39,18 @@ async fn main() -> doow_track::Result<()> {
         .create(
             &app.id,
             CreateContractInput {
-                title: "Rust SDK Test Contract".to_string(),
+                title: Some("Rust SDK Test Contract".to_string()),
                 contract_type: ContractType::PayAsYouGo,
                 licenses: vec![LicenseInput {
                     name: "API Usage License".to_string(),
                     license_type: LicenseType::UsageBased,
+                    ..Default::default()
                 }],
+                ..Default::default()
             },
         )
         .await?;
-    println!("   Created contract: {} ({})", contract.title, contract.id);
+    println!("   Created contract: {:?} ({})", contract.title, contract.id);
 
     let license_id = &contract.licenses[0].id;
     println!("   License ID: {}", license_id);
