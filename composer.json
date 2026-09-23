@@ -1,0 +1,36 @@
+{
+    "name": "doow/track",
+    "description": "Official Doow SDK for PHP - usage telemetry and management",
+    "type": "library",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Doow",
+            "email": "support@doow.co"
+        }
+    ],
+    "keywords": ["doow", "telemetry", "usage", "tracking", "metering"],
+    "homepage": "https://github.com/Doow-Dev/doow-track-sdk",
+    "require": {
+        "php": ">=8.1",
+        "guzzlehttp/guzzle": "^7.0",
+        "ramsey/uuid": "^4.0"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^10.0",
+        "phpstan/phpstan": "^1.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "Doow\\Track\\": "sdks/php/src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Doow\\Track\\Tests\\": "sdks/php/tests/"
+        }
+    },
+    "config": {
+        "sort-packages": true
+    }
+}
