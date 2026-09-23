@@ -590,3 +590,48 @@ class CreateMetricInput {
     }
   }
 }
+
+class CreateExpenseInput {
+  final String? appId;
+  final String? contractId;
+  final String? licenseId;
+  final double total;
+  final String? date;
+  final int? month;
+  final int? year;
+  final String? description;
+  final String? transactionId;
+  final String? vendor;
+  final String? paymentChannel;
+  final String currency;
+
+  CreateExpenseInput({
+    this.appId,
+    this.contractId,
+    this.licenseId,
+    required this.total,
+    this.date,
+    this.month,
+    this.year,
+    this.description,
+    this.transactionId,
+    this.vendor,
+    this.paymentChannel,
+    this.currency = 'USD',
+  });
+
+  Map<String, dynamic> toJson() => {
+        if (appId != null) 'app_id': appId,
+        if (contractId != null) 'contract_id': contractId,
+        if (licenseId != null) 'license_id': licenseId,
+        'total': total,
+        if (date != null) 'date': date,
+        if (month != null) 'month': month,
+        if (year != null) 'year': year,
+        if (description != null) 'description': description,
+        if (transactionId != null) 'transaction_id': transactionId,
+        if (vendor != null) 'vendor': vendor,
+        if (paymentChannel != null) 'payment_channel': paymentChannel,
+        'currency': currency,
+      };
+}
