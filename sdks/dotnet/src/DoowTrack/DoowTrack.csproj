@@ -5,18 +5,23 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <PackageId>DoowTrack</PackageId>
-    <Version>0.1.0</Version>
+    <Version>0.1.1</Version>
     <Authors>Doow</Authors>
     <Company>Doow</Company>
     <Description>Official Doow SDK for .NET - usage telemetry and management</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    <PackageProjectUrl>https://github.com/Doow-Dev/doow-track-dotnet</PackageProjectUrl>
-    <RepositoryUrl>https://github.com/Doow-Dev/doow-track-dotnet</RepositoryUrl>
-    <PackageTags>doow;telemetry;usage;billing;saas;metering</PackageTags>
+    <PackageProjectUrl>https://github.com/Doow-Dev/doow-track-sdk</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/Doow-Dev/doow-track-sdk</RepositoryUrl>
+    <PackageTags>doow;telemetry;usage;tracking;metering</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="System.Text.Json" Version="8.0.5" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="../../README.md" Pack="true" PackagePath="/" />
   </ItemGroup>
 
 </Project>
