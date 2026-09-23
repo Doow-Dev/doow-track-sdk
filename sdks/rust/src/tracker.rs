@@ -246,7 +246,7 @@ impl Tracker {
                 measurements: vec![WireMeasurement {
                     metric_name: e.metric.clone(),
                     quantity: e.quantity,
-                    metric_tuple_hint: e.metric_tuple_hint.clone(),
+                    metric_tuple_hint: e.metric_tuple_hint.as_ref().and_then(|h| serde_json::to_string(h).ok()),
                 }],
             })
             .collect();
