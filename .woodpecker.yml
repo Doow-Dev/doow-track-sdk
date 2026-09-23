@@ -258,8 +258,7 @@ steps:
   - name: publish-rust
     image: rust:latest
     commands:
-      - cd sdks/rust && cargo build && cargo test
-      - cd sdks/rust && cargo publish --token $CRATES_TOKEN
+      - cd sdks/rust && cargo build && cargo test && cargo publish --token $CRATES_TOKEN
     environment:
       CRATES_TOKEN:
         from_secret: crates_token
@@ -271,9 +270,7 @@ steps:
   - name: publish-dotnet
     image: mcr.microsoft.com/dotnet/sdk:8.0
     commands:
-      - cd sdks/dotnet && dotnet restore && dotnet build --no-restore -c Release
-      - cd sdks/dotnet && dotnet pack src/DoowTrack -c Release -o ./artifacts
-      - dotnet nuget push sdks/dotnet/artifacts/*.nupkg --api-key $NUGET_TOKEN --source https://api.nuget.org/v3/index.json
+      - cd sdks/dotnet && dotnet restore && dotnet build --no-restore -c Release && dotnet pack src/DoowTrack -c Release -o ./artifacts && dotnet nuget push ./artifacts/*.nupkg --api-key $NUGET_TOKEN --source https://api.nuget.org/v3/index.json
     environment:
       NUGET_TOKEN:
         from_secret: nuget_token
@@ -285,8 +282,7 @@ steps:
   - name: publish-java
     image: gradle:8-jdk17
     commands:
-      - cd sdks/java && gradle build
-      - cd sdks/java && gradle publish
+      - cd sdks/java && gradle build && gradle publish
     environment:
       MAVEN_USERNAME:
         from_secret: maven_username
@@ -304,8 +300,7 @@ steps:
   - name: publish-kotlin
     image: gradle:8-jdk17
     commands:
-      - cd sdks/kotlin && gradle build
-      - cd sdks/kotlin && gradle publish
+      - cd sdks/kotlin && gradle build && gradle publish
     environment:
       MAVEN_USERNAME:
         from_secret: maven_username
@@ -323,11 +318,7 @@ steps:
   - name: publish-ruby
     image: ruby:3.2
     commands:
-      - cd sdks/ruby && gem build *.gemspec
-      - mkdir -p ~/.gem
-      - 'echo ":rubygems_api_key: $RUBYGEMS_TOKEN" > ~/.gem/credentials'
-      - chmod 0600 ~/.gem/credentials
-      - cd sdks/ruby && gem push *.gem
+      - mkdir -p ~/.gem && echo ":rubygems_api_key: $RUBYGEMS_TOKEN" > ~/.gem/credentials && chmod 0600 ~/.gem/credentials && cd sdks/ruby && gem build *.gemspec && gem push *.gem
     environment:
       RUBYGEMS_TOKEN:
         from_secret: rubygems_token
@@ -339,10 +330,7 @@ steps:
   - name: publish-dart
     image: dart:stable
     commands:
-      - cd sdks/dart && dart pub get && dart analyze
-      - mkdir -p ~/.config/dart
-      - echo "$PUB_CREDENTIALS" > ~/.config/dart/pub-credentials.json
-      - cd sdks/dart && dart pub publish --force
+      - mkdir -p ~/.config/dart && echo "$PUB_CREDENTIALS" > ~/.config/dart/pub-credentials.json && cd sdks/dart && dart pub get && dart analyze && dart pub publish --force
     environment:
       PUB_CREDENTIALS:
         from_secret: pub_credentials
