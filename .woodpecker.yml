@@ -273,7 +273,7 @@ steps:
       - cd sdks/dotnet && dotnet restore && dotnet build --no-restore -c Release && dotnet pack src/DoowTrack -c Release -o ./artifacts && dotnet nuget push ./artifacts/*.nupkg --api-key $NUGET_TOKEN --source https://api.nuget.org/v3/index.json
     environment:
       NUGET_TOKEN:
-        from_secret: nuget_token
+        from_secret: nugget_token
     when:
       - event: tag
         ref: refs/tags/dotnet-v*
