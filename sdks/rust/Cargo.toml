@@ -7,7 +7,7 @@ description = "Official Doow SDK for Rust - usage telemetry and management"
 license = "MIT"
 repository = "https://github.com/Doow-Dev/doow-track-rust"
 documentation = "https://docs.rs/doow-track"
-keywords = ["doow", "telemetry", "usage", "billing", "saas", "metering"]
+keywords = ["doow", "telemetry", "usage", "billing", "metering"]
 categories = ["api-bindings", "web-programming"]
 
 [dependencies]
