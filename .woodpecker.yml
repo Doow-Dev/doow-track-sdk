@@ -318,7 +318,7 @@ steps:
   - name: publish-ruby
     image: ruby:3.2
     commands:
-      - mkdir -p ~/.gem && echo ":rubygems_api_key: $RUBYGEMS_TOKEN" > ~/.gem/credentials && chmod 0600 ~/.gem/credentials && cd sdks/ruby && gem build *.gemspec && gem push *.gem
+      - 'mkdir -p ~/.gem && echo ":rubygems_api_key: $RUBYGEMS_TOKEN" > ~/.gem/credentials && chmod 0600 ~/.gem/credentials && cd sdks/ruby && gem build *.gemspec && gem push *.gem'
     environment:
       RUBYGEMS_TOKEN:
         from_secret: rubygems_token
