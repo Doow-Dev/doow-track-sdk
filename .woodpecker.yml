@@ -282,7 +282,7 @@ steps:
   - name: publish-java
     image: maven:3.9-eclipse-temurin-17
     commands:
-      - 'mkdir -p ~/.m2 && echo "<settings><servers><server><id>central</id><username>$MAVEN_USERNAME</username><password>$MAVEN_PASSWORD</password></server></servers></settings>" > ~/.m2/settings.xml && cd sdks/java && mvn clean package -DskipTests && mvn deploy -DskipTests'
+      - 'mkdir -p ~/.m2 && echo "<settings><servers><server><id>central</id><username>$MAVEN_USERNAME</username><password>$MAVEN_PASSWORD</password></server></servers></settings>" > ~/.m2/settings.xml && cd sdks/java && mvn clean deploy -DskipTests'
     environment:
       MAVEN_USERNAME:
         from_secret: maven_username
