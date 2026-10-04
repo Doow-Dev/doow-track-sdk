@@ -104,3 +104,13 @@ export async function readPartialAccept(response: Response, batchId: string): Pr
     Array.isArray(data.rejections) ? data.rejections : [],
   );
 }
+
+export const MAX_RETRY_AFTER_MS = 30_000;
+
+export function parseRetryAfterMs(header: string | null | undefined): number | undefined {
+  if (!header) return undefined;
+  const seconds = Number(header);
+  const ms = Number.isFinite(seconds) ? seconds * 1000 : Date.parse(header) - Date.now();
+  if (!Number.isFinite(ms)) return undefined;
+  return Math.min(Math.max(ms, 0), MAX_RETRY_AFTER_MS);
+}

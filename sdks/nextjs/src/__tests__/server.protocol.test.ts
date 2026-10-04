@@ -51,19 +51,20 @@ describe('Next.js server wire protocol', () => {
     );
   });
 
-  it('207 throws a PartialAcceptError listing each rejection without retrying', async () => {
+  it('207 reports each rejection through onError without throwing or retrying', async () => {
     const calls = stubFetch([
       {
         status: 207,
         body: { accepted: 0, rejected: 1, batch_id: 'b', rejections: [{ event_id: 'e1', reason: 'bad' }] },
       },
     ]);
+    const onError = vi.fn();
 
-    await expect(new ServerTracker('dk_test', { retryCount: 2 }).track(event)).rejects.toMatchObject({
-      name: 'PartialAcceptError',
-      rejections: [{ event_id: 'e1', reason: 'bad' }],
-    });
+    await new ServerTracker('dk_test', { retryCount: 2, onError }).track(event);
+
     expect(calls).toHaveLength(1);
-    expect(PartialAcceptError).toBeDefined();
+    const error = onError.mock.calls[0]![0] as PartialAcceptError;
+    expect(error).toBeInstanceOf(PartialAcceptError);
+    expect(error.rejections).toEqual([{ event_id: 'e1', reason: 'bad' }]);
   });
 });

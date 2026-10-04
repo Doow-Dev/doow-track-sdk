@@ -46,4 +46,5 @@ export interface ServerTrackerOptions {
   debug?: boolean;
   timeoutMs?: number;
   retryCount?: number;
+  onError?: (error: Error) => void;
 }

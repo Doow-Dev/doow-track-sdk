@@ -2,6 +2,7 @@ import type { TrackEvent, TrackerOptions } from './types';
 import {
   NonRetryableError,
   generateUUID,
+  parseRetryAfterMs,
   readPartialAccept,
   toWireBatch,
   type QueuedEvent,
@@ -105,34 +106,29 @@ export class ClientTracker {
   private flushSync(): void {
     if (this.queue.length === 0 || typeof fetch === 'undefined') return;
 
-    const pending = this.queue;
-    this.queue = [];
+    const chunk = this.firstKeepaliveChunk(this.queue);
+    this.queue = this.queue.slice(chunk.length);
 
-    for (const chunk of this.chunkForKeepalive(pending)) {
-      const batchId = generateUUID();
-      fetch(`${this.options.endpoint}/telemetry/events`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${this.apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(toWireBatch(batchId, chunk)),
-        keepalive: true,
-      }).catch((error: unknown) => {
-        this.options.onError?.(error as Error);
-        this.log(`Unload flush failed: ${error}`);
-      });
-    }
+    fetch(`${this.options.endpoint}/telemetry/events`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${this.apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(toWireBatch(generateUUID(), chunk)),
+      keepalive: true,
+    }).catch((error: unknown) => {
+      this.options.onError?.(error as Error);
+      this.log(`Unload flush failed: ${error}`);
+    });
   }
 
-  private chunkForKeepalive(events: QueuedEvent[]): QueuedEvent[][] {
-    const size = JSON.stringify(toWireBatch('x', events)).length;
-    if (size <= KEEPALIVE_LIMIT_BYTES || events.length <= 1) return [events];
-    const mid = Math.ceil(events.length / 2);
-    return [
-      ...this.chunkForKeepalive(events.slice(0, mid)),
-      ...this.chunkForKeepalive(events.slice(mid)),
-    ];
+  private firstKeepaliveChunk(events: QueuedEvent[]): QueuedEvent[] {
+    let chunk = events;
+    while (chunk.length > 1 && JSON.stringify(toWireBatch('x', chunk)).length > KEEPALIVE_LIMIT_BYTES) {
+      chunk = chunk.slice(0, Math.ceil(chunk.length / 2));
+    }
+    return chunk;
   }
 
   private async sendWithRetry(batch: QueuedEvent[]): Promise<void> {
@@ -180,8 +176,9 @@ export class ClientTracker {
           if (attempt === this.options.retryCount) {
             throw new Error(`HTTP ${response.status} after ${attempt + 1} attempts`);
           }
-          const retryAfter = response.status === 429 ? response.headers.get('Retry-After') : null;
-          const delay = retryAfter ? parseInt(retryAfter, 10) * 1000 : 100 * Math.pow(2, attempt);
+          const retryAfter =
+            response.status === 429 ? parseRetryAfterMs(response.headers.get('Retry-After')) : undefined;
+          const delay = retryAfter ?? 100 * Math.pow(2, attempt);
           await this.sleep(delay);
           continue;
         }

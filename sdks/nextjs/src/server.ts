@@ -1,14 +1,17 @@
 import type { TrackEvent, ServerTrackerOptions } from './types';
 import {
   NonRetryableError,
-  PartialAcceptError,
+  parseRetryAfterMs,
   generateUUID,
   readPartialAccept,
   toWireBatch,
   type QueuedEvent,
 } from './wire';
 
-const DEFAULT_OPTIONS: Required<Omit<ServerTrackerOptions, 'debug'>> & { debug: boolean } = {
+const DEFAULT_OPTIONS: Required<Omit<ServerTrackerOptions, 'debug' | 'onError'>> & {
+  debug: boolean;
+  onError?: (error: Error) => void;
+} = {
   endpoint: 'https://api.doow.co',
   debug: false,
   timeoutMs: 10000,
@@ -48,6 +51,7 @@ export class ServerTracker {
 
     this.log(`Tracking batch ${batchId}: ${queued.length} events`);
 
+    let retryAfterMs: number | undefined;
     for (let attempt = 0; attempt <= this.options.retryCount; attempt++) {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), this.options.timeoutMs);
@@ -63,7 +67,10 @@ export class ServerTracker {
         });
 
         if (response.status === 207) {
-          throw await readPartialAccept(response, batchId);
+          const partial = await readPartialAccept(response, batchId);
+          this.options.onError?.(partial);
+          this.log(partial.message);
+          return;
         }
 
         if (response.ok) {
@@ -72,14 +79,16 @@ export class ServerTracker {
         }
 
         if (response.status === 429 || response.status >= 500) {
+          retryAfterMs = response.status === 429 ? parseRetryAfterMs(response.headers.get('Retry-After')) : undefined;
           throw new Error(`HTTP ${response.status}`);
         }
 
         throw new NonRetryableError(`HTTP ${response.status}: ${await response.text()}`);
       } catch (error) {
-        const retryable = !(error instanceof NonRetryableError) && !(error instanceof PartialAcceptError);
+        const retryable = !(error instanceof NonRetryableError);
         if (!retryable || attempt === this.options.retryCount) throw error;
-        await this.sleep(100 * Math.pow(2, attempt));
+        await this.sleep(retryAfterMs ?? 100 * Math.pow(2, attempt));
+        retryAfterMs = undefined;
       } finally {
         clearTimeout(timeout);
       }

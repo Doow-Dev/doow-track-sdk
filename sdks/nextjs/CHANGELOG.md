@@ -1,0 +1,13 @@
+# Changelog
+
+## Unreleased
+
+### Behavior changes
+
+- `ServerTracker` accepts an `onError` option. HTTP 207 partial acceptance is reported there as `PartialAcceptError` and does not throw. Previously a 207 was treated as success and rejections were lost.
+- `TrackEvent` accepts `sourceSystem` and `metricTupleHint`.
+
+### Fixes
+
+- Client and server requests now send the `batch_id`/`sdk_version` envelope and per-event `event_id`, `occurred_at`, `source_system`, and `measurements`.
+- Exhausted 429/5xx retries now reach `onError`, and `Retry-After` is clamped to 30 seconds.
