@@ -13,7 +13,7 @@ from typing import Any, Callable, Optional
 
 import httpx
 
-from .errors import APIError
+from .errors import APIError, PartialAcceptError
 from .types import EventKind, RateLimit, SerializedEvent, TrackEvent
 
 SDK_VERSION = "0.1.0"
@@ -26,6 +26,26 @@ DEFAULT_TIMEOUT = 10.0
 DEFAULT_RETRY_COUNT = 3
 DEFAULT_SHUTDOWN_TIMEOUT = 5.0
 
+
+
+def _build_payload(batch_id: str, events: list[SerializedEvent]) -> dict:
+    wire_events = []
+    for e in events:
+        hint = e.metric_tuple_hint.model_dump() if e.metric_tuple_hint else None
+        measurement: dict[str, Any] = {"metric_name": e.metric, "quantity": e.quantity}
+        if hint:
+            measurement["metric_tuple_hint"] = hint
+        wire_events.append({
+            "event_id": e.event_id,
+            "license_id": e.license_id,
+            "occurred_at": e.timestamp,
+            "source_system": e.source_system or "sdk",
+            "kind": e.kind.value if isinstance(e.kind, EventKind) else e.kind,
+            "attribution": e.attribution,
+            "metadata": e.metadata,
+            "measurements": [measurement],
+        })
+    return {"batch_id": batch_id, "sdk_version": SDK_VERSION, "events": wire_events}
 
 @dataclass
 class TrackerOptions:
@@ -196,30 +216,7 @@ class Tracker:
     def _send_batch(self, events: list[SerializedEvent]) -> None:
         batch_id = str(uuid.uuid4())
 
-        # Convert to wire format
-        wire_events = []
-        for e in events:
-            source_system = e.source_system or "sdk"
-            wire_events.append({
-                "event_id": e.event_id,
-                "license_id": e.license_id,
-                "occurred_at": e.timestamp,
-                "source_system": source_system,
-                "kind": e.kind.value if isinstance(e.kind, EventKind) else e.kind,
-                "attribution": e.attribution,
-                "metadata": e.metadata,
-                "measurements": [{
-                    "metric_name": e.metric,
-                    "quantity": e.quantity,
-                    "metric_tuple_hint": e.metric_tuple_hint,
-                }],
-            })
-
-        payload = {
-            "batch_id": batch_id,
-            "sdk_version": SDK_VERSION,
-            "events": wire_events,
-        }
+        payload = _build_payload(batch_id, events)
 
         body = json.dumps(payload).encode()
         self._log(f"sending batch {batch_id} with {len(events)} events ({len(body)} bytes)")
@@ -238,6 +235,10 @@ class Tracker:
                     self._log(f"batch {batch_id} sent successfully")
                     return
                 last_error = error
+
+                if isinstance(error, PartialAcceptError):
+                    self._handle_error(error)
+                    return
 
                 if isinstance(error, APIError):
                     if error.status in (401, 403):
@@ -290,6 +291,9 @@ class Tracker:
                         int(response.headers.get("X-RateLimit-Reset", 0))
                     ),
                 )
+
+            if response.status_code == 207:
+                return PartialAcceptError.from_response(response)
 
             if response.status_code >= 400:
                 try:
@@ -453,28 +457,7 @@ class AsyncTracker:
     async def _send_batch(self, events: list[SerializedEvent]) -> None:
         batch_id = str(uuid.uuid4())
 
-        wire_events = []
-        for e in events:
-            wire_events.append({
-                "event_id": e.event_id,
-                "license_id": e.license_id,
-                "occurred_at": e.timestamp,
-                "source_system": e.source_system or "sdk",
-                "kind": e.kind.value if isinstance(e.kind, EventKind) else e.kind,
-                "attribution": e.attribution,
-                "metadata": e.metadata,
-                "measurements": [{
-                    "metric_name": e.metric,
-                    "quantity": e.quantity,
-                    "metric_tuple_hint": e.metric_tuple_hint,
-                }],
-            })
-
-        payload = {
-            "batch_id": batch_id,
-            "sdk_version": SDK_VERSION,
-            "events": wire_events,
-        }
+        payload = _build_payload(batch_id, events)
 
         body = json.dumps(payload).encode()
         self._log(f"sending batch {batch_id} with {len(events)} events")
@@ -490,6 +473,7 @@ class AsyncTracker:
             body = gzip.compress(body)
             headers["Content-Encoding"] = "gzip"
 
+        last_error: Optional[Exception] = None
         for attempt in range(self._options.retry_count + 1):
             if attempt > 0:
                 await asyncio.sleep(min(0.1 * (2 ** (attempt - 1)), 10.0))
@@ -500,14 +484,23 @@ class AsyncTracker:
                     content=body,
                     headers=headers,
                 )
-                if response.status_code < 400:
-                    self._log(f"batch {batch_id} sent successfully")
-                    return
-                if response.status_code in (401, 403):
-                    break
             except Exception as e:
+                last_error = e
+                continue
+
+            if response.status_code == 207:
                 if self._options.on_error:
-                    self._options.on_error(e)
+                    self._options.on_error(PartialAcceptError.from_response(response))
+                return
+            if response.status_code < 400:
+                self._log(f"batch {batch_id} sent successfully")
+                return
+            last_error = APIError(status=response.status_code, message=response.reason_phrase)
+            if response.status_code in (401, 403):
+                break
+
+        if last_error and self._options.on_error:
+            self._options.on_error(last_error)
 
     async def _flush_loop(self) -> None:
         while not self._shutdown:
