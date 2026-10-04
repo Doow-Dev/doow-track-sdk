@@ -282,7 +282,7 @@ class Tracker:
                     if _is_permanent(error.status):
                         self._handle_error(error)
                         return
-                    if error.status == 429:
+                    if error.status in (429, 503):
                         threading.Event().wait(getattr(error, "retry_after", 0.0))
             except Exception as e:
                 last_error = _wrap_transport_error(e)
@@ -543,7 +543,7 @@ class AsyncTracker:
             last_error = APIError(status=response.status_code, message=response.reason_phrase)
             if _is_permanent(response.status_code):
                 break
-            if response.status_code == 429:
+            if response.status_code in (429, 503):
                 await asyncio.sleep(_retry_after(response.headers.get("Retry-After")))
 
         if last_error:

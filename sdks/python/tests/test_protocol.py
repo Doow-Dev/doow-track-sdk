@@ -287,6 +287,25 @@ def test_rate_limited_batch_waits_for_retry_after_and_retries_the_same_batch(htt
     assert errors == []
 
 
+def test_in_flight_unavailable_batch_waits_for_retry_after_and_retries_the_same_batch(httpx_mock):
+    import time
+
+    httpx_mock.add_response(status_code=503, headers={"Retry-After": "1"})
+    httpx_mock.add_response(status_code=202, json={"accepted": 1, "rejected": 0})
+    errors: list = []
+    tracker = Tracker("dk_test", _options(errors, retry_count=1))
+    tracker.track(_event())
+    started = time.monotonic()
+    tracker.flush()
+    elapsed = time.monotonic() - started
+    tracker._shutdown.set()
+
+    first, second = (json.loads(r.content) for r in httpx_mock.get_requests())
+    assert elapsed >= 0.9
+    assert first["batch_id"] == second["batch_id"]
+    assert errors == []
+
+
 @pytest.mark.asyncio
 async def test_async_rate_limited_batch_waits_for_retry_after(httpx_mock):
     import time
@@ -301,6 +320,30 @@ async def test_async_rate_limited_batch_waits_for_retry_after(httpx_mock):
     elapsed = time.monotonic() - started
     await tracker.shutdown()
 
-    assert len(httpx_mock.get_requests()) == 2
+    requests = httpx_mock.get_requests()
+    assert len(requests) == 2
     assert elapsed >= 0.9
+    assert json.loads(requests[0].content)["batch_id"] == json.loads(requests[1].content)["batch_id"]
+    assert errors == []
+
+
+
+@pytest.mark.asyncio
+async def test_async_in_flight_unavailable_batch_waits_for_retry_after(httpx_mock):
+    import time
+
+    httpx_mock.add_response(status_code=503, headers={"Retry-After": "1"})
+    httpx_mock.add_response(status_code=202, json={"accepted": 1, "rejected": 0})
+    errors: list = []
+    tracker = AsyncTracker("dk_test", _options(errors, retry_count=1))
+    await tracker.track(_event())
+    started = time.monotonic()
+    await tracker.flush()
+    elapsed = time.monotonic() - started
+    await tracker.shutdown()
+
+    requests = httpx_mock.get_requests()
+    assert len(requests) == 2
+    assert elapsed >= 0.9
+    assert json.loads(requests[0].content)["batch_id"] == json.loads(requests[1].content)["batch_id"]
     assert errors == []

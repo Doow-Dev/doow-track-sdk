@@ -442,7 +442,7 @@ impl Tracker {
             error_resp.error_class,
         );
         if let DoowError::Api { retry_after: slot, .. } = &mut error {
-            *slot = if status == 429 { retry_after } else { None };
+            *slot = if status == 429 || status == 503 { retry_after } else { None };
         }
         Err(error)
     }
@@ -785,6 +785,34 @@ mod tests {
         Mock::given(method("POST"))
             .and(path("/telemetry/events"))
             .respond_with(ResponseTemplate::new(429).insert_header("Retry-After", "1"))
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/telemetry/events"))
+            .respond_with(ResponseTemplate::new(202))
+            .mount(&server)
+            .await;
+        let errors = Arc::new(StdMutex::new(Vec::new()));
+        let tracker = tracker_for(&server, errors);
+
+        let started = std::time::Instant::now();
+        tracker.send_batch(vec![event("e1")]).await.unwrap();
+
+        assert!(started.elapsed() >= Duration::from_millis(900));
+        let requests = server.received_requests().await.unwrap();
+        assert_eq!(requests.len(), 2);
+        let first: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+        let second: serde_json::Value = serde_json::from_slice(&requests[1].body).unwrap();
+        assert_eq!(first["batch_id"], second["batch_id"]);
+    }
+
+    #[tokio::test]
+    async fn in_flight_unavailable_batch_waits_for_retry_after_and_retries_the_same_batch() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/telemetry/events"))
+            .respond_with(ResponseTemplate::new(503).insert_header("Retry-After", "1"))
             .up_to_n_times(1)
             .mount(&server)
             .await;
