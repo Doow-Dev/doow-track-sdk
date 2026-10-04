@@ -121,13 +121,24 @@ struct PartialAcceptBody {
 const MAX_BODY_BYTES: usize = 1 << 20;
 const MAX_RETRY_AFTER: Duration = Duration::from_secs(30);
 
-async fn read_capped(mut resp: reqwest::Response) -> Vec<u8> {
+async fn read_capped(mut resp: reqwest::Response, debug: bool) -> Vec<u8> {
     let mut bytes = Vec::new();
-    while let Ok(Some(chunk)) = resp.chunk().await {
-        let room = MAX_BODY_BYTES - bytes.len();
-        bytes.extend_from_slice(&chunk[..chunk.len().min(room)]);
-        if bytes.len() >= MAX_BODY_BYTES {
-            break;
+    loop {
+        match resp.chunk().await {
+            Ok(Some(chunk)) => {
+                let room = MAX_BODY_BYTES - bytes.len();
+                bytes.extend_from_slice(&chunk[..chunk.len().min(room)]);
+                if bytes.len() >= MAX_BODY_BYTES {
+                    break;
+                }
+            }
+            Ok(None) => break,
+            Err(error) => {
+                if debug {
+                    eprintln!("[doow/track] response body read stopped: {}", error);
+                }
+                break;
+            }
         }
     }
     bytes
@@ -390,7 +401,7 @@ impl Tracker {
         let retry_after = parse_retry_after(
             resp.headers().get("retry-after").and_then(|v| v.to_str().ok()),
         );
-        let body_bytes = read_capped(resp).await;
+        let body_bytes = read_capped(resp, self.options.debug).await;
 
         if status == 207 {
             let body: PartialAcceptBody =
@@ -645,6 +656,49 @@ mod tests {
             *errors.lock().unwrap(),
             vec!["e2:license_id is required".to_string()]
         );
+    }
+
+    fn streaming_response(
+        chunks: impl futures_util::Stream<Item = std::result::Result<Vec<u8>, std::io::Error>> + Send + Sync + 'static,
+    ) -> reqwest::Response {
+        reqwest::Response::from(http::Response::new(reqwest::Body::wrap_stream(chunks)))
+    }
+
+    #[tokio::test]
+    async fn read_capped_stops_pulling_chunks_at_the_cap() {
+        let pulled = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter = pulled.clone();
+        let endless = futures_util::stream::unfold((), move |_| {
+            let counter = counter.clone();
+            async move {
+                counter.fetch_add(4096, std::sync::atomic::Ordering::SeqCst);
+                tokio::task::yield_now().await;
+                Some((Ok::<_, std::io::Error>(vec![b'x'; 4096]), ()))
+            }
+        });
+
+        let bytes = tokio::time::timeout(
+            Duration::from_secs(5),
+            read_capped(streaming_response(endless), false),
+        )
+        .await
+        .expect("read_capped kept pulling an endless body past the cap");
+
+        assert_eq!(bytes.len(), MAX_BODY_BYTES);
+        assert!(pulled.load(std::sync::atomic::Ordering::SeqCst) <= MAX_BODY_BYTES + 4 * 4096);
+    }
+
+    #[tokio::test]
+    async fn read_capped_keeps_what_it_read_when_the_stream_errors() {
+        let chunks = futures_util::stream::iter(vec![
+            Ok::<_, std::io::Error>(vec![b'a'; 10]),
+            Err(std::io::Error::new(std::io::ErrorKind::ConnectionReset, "reset")),
+            Ok(vec![b'b'; 10]),
+        ]);
+
+        let bytes = read_capped(streaming_response(chunks), false).await;
+
+        assert_eq!(bytes, vec![b'a'; 10]);
     }
 
     #[test]
