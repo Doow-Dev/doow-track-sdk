@@ -7,7 +7,9 @@ namespace Doow\Track\Tracker;
 use Doow\Track\DoowError;
 use Doow\Track\TrackEvent;
 use Doow\Track\EventKind;
+use Doow\Track\PartialAcceptError;
 use GuzzleHttp\Client;
+use GuzzleHttp\ClientInterface;
 use GuzzleHttp\Exception\GuzzleException;
 use Ramsey\Uuid\Uuid;
 
@@ -25,6 +27,7 @@ class TrackerOptions
         public bool $disableCompression = false,
         public array $attribution = [],
         public ?\Closure $onError = null,
+        public ?ClientInterface $httpClient = null,
     ) {
         // Environment overrides
         if ($env = getenv('DOOW_TRACK_ENDPOINT')) {
@@ -51,7 +54,7 @@ class Tracker
 
     private string $apiKey;
     private TrackerOptions $options;
-    private Client $client;
+    private ClientInterface $client;
     private array $buffer = [];
 
     public function __construct(string $apiKey, ?TrackerOptions $options = null)
@@ -59,9 +62,11 @@ class Tracker
         $this->apiKey = getenv('DOOW_TRACK_API_KEY') ?: $apiKey;
         $this->options = $options ?? new TrackerOptions();
 
-        $this->client = new Client([
+        $this->client = $this->options->httpClient ?? new Client([
             'timeout' => $this->options->timeoutMs / 1000,
         ]);
+
+        register_shutdown_function(fn () => $this->flush());
     }
 
     private function log(string $message): void
@@ -90,7 +95,7 @@ class Tracker
             'kind' => $event->kind->value,
             'timestamp' => $timestamp,
             'source_system' => $event->sourceSystem,
-            'metric_tuple_hint' => $event->metricTupleHint,
+            'metric_tuple_hint' => $event->metricTupleHint?->toArray(),
             'attribution' => !empty($attribution) ? $attribution : null,
             'metadata' => $event->metadata,
         ];
@@ -131,20 +136,23 @@ class Tracker
         $batchId = Uuid::uuid4()->toString();
 
         $wireEvents = array_map(function ($e) {
-            return [
+            $measurement = array_filter([
+                'metric_name' => $e['metric'],
+                'quantity' => $e['quantity'],
+                'metric_tuple_hint' => $e['metric_tuple_hint'],
+            ], fn ($v) => $v !== null);
+
+            return array_filter([
                 'event_id' => $e['event_id'],
                 'license_id' => $e['license_id'],
                 'occurred_at' => $e['timestamp'],
                 'source_system' => $e['source_system'] ?? 'sdk',
                 'kind' => $e['kind'],
+                'unit' => $e['unit'],
                 'attribution' => $e['attribution'],
                 'metadata' => $e['metadata'],
-                'measurements' => [[
-                    'metric_name' => $e['metric'],
-                    'quantity' => $e['quantity'],
-                    'metric_tuple_hint' => $e['metric_tuple_hint'],
-                ]],
-            ];
+                'measurements' => [$measurement],
+            ], fn ($v) => $v !== null);
         }, $events);
 
         $payload = [
@@ -166,9 +174,11 @@ class Tracker
             }
 
             try {
-                $this->doSend($body);
+                $this->doSend($body, $batchId);
                 $this->log("batch {$batchId} sent successfully");
                 return;
+            } catch (PartialAcceptError $e) {
+                throw $e;
             } catch (DoowError $e) {
                 $lastError = $e;
                 if (!$e->isRetryable()) {
@@ -184,7 +194,7 @@ class Tracker
         }
     }
 
-    private function doSend(string $body): void
+    private function doSend(string $body, string $batchId): void
     {
         $headers = [
             'Authorization' => "Bearer {$this->apiKey}",
@@ -212,6 +222,10 @@ class Tracker
         );
 
         $statusCode = $response->getStatusCode();
+
+        if ($statusCode === 207) {
+            throw PartialAcceptError::fromBody($response->getBody()->getContents(), $batchId);
+        }
 
         if ($statusCode >= 400) {
             $data = json_decode($response->getBody()->getContents(), true) ?? [];

@@ -23,7 +23,12 @@
     "autoload": {
         "psr-4": {
             "Doow\\Track\\": "src/"
-        }
+        },
+        "files": [
+            "src/Types.php",
+            "src/Tracker/Tracker.php",
+            "src/Management/Management.php"
+        ]
     },
     "autoload-dev": {
         "psr-4": {
