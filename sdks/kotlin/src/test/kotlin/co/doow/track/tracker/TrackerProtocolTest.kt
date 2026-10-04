@@ -26,6 +26,7 @@ class TrackerProtocolTest {
     private val errors = CopyOnWriteArrayList<Exception>()
     @Volatile private var statuses = intArrayOf(202)
     @Volatile private var responseBody = "{}"
+    @Volatile private var retryAfter: String? = null
 
     @BeforeTest
     fun start() {
@@ -38,6 +39,7 @@ class TrackerProtocolTest {
             bodies.add(Json.parseToJsonElement(String(raw)).jsonObject)
             val status = statuses[minOf(bodies.size - 1, statuses.size - 1)]
             val out = responseBody.toByteArray()
+            if (status == 429 && retryAfter != null) exchange.responseHeaders.add("Retry-After", retryAfter)
             exchange.sendResponseHeaders(status, out.size.toLong())
             exchange.responseBody.write(out)
             exchange.close()
@@ -185,6 +187,23 @@ class TrackerProtocolTest {
 
         assertEquals(1, bodies.size)
         assertIs<PartialAcceptError>(errors.single())
+    }
+
+    @Test
+    fun rateLimitedBatchWaitsForRetryAfterAndRetriesTheSameBatch() {
+        statuses = intArrayOf(429, 202)
+        retryAfter = "2"
+        val tracker = tracker()
+        tracker.track(event())
+        val started = System.nanoTime()
+        tracker.flush()
+        val elapsedMs = (System.nanoTime() - started) / 1_000_000
+        tracker.shutdown()
+
+        assertEquals(2, bodies.size)
+        assertTrue(elapsedMs >= 1900, "retried after ${elapsedMs}ms, before the 2s Retry-After")
+        assertEquals(bodies[0]["batch_id"], bodies[1]["batch_id"])
+        assertTrue(errors.isEmpty())
     }
 
     @Test

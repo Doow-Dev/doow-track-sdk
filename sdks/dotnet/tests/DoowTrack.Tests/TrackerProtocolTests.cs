@@ -215,6 +215,49 @@ public class TrackerProtocolTests
         Assert.True(cleaned.Length <= 520);
     }
 
+    private sealed class RateLimitedThenOkHandler : HttpMessageHandler
+    {
+        public List<JsonElement> Bodies { get; } = new();
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            Bodies.Add(JsonDocument.Parse(await request.Content!.ReadAsByteArrayAsync(ct)).RootElement.Clone());
+            if (Bodies.Count == 1)
+            {
+                var limited = new HttpResponseMessage(HttpStatusCode.TooManyRequests) { Content = new StringContent("{}") };
+                limited.Headers.RetryAfter = new System.Net.Http.Headers.RetryConditionHeaderValue(TimeSpan.FromSeconds(2));
+                return limited;
+            }
+            return new HttpResponseMessage(HttpStatusCode.Accepted) { Content = new StringContent("{}") };
+        }
+    }
+
+    [Fact]
+    public async Task RateLimitedBatchWaitsForRetryAfterAndRetriesTheSameBatch()
+    {
+        var handler = new RateLimitedThenOkHandler();
+        var errors = new List<Exception>();
+        var tracker = new Tracker("dk_test", new TrackerOptions
+        {
+            Endpoint = "https://test.doow.co",
+            FlushIntervalMs = 0,
+            RetryCount = 1,
+            OnError = errors.Add,
+            HttpHandler = handler,
+        });
+        tracker.Track(Event());
+        var started = DateTime.UtcNow;
+        await tracker.FlushAsync();
+        var elapsed = DateTime.UtcNow - started;
+
+        Assert.Equal(2, handler.Bodies.Count);
+        Assert.True(elapsed >= TimeSpan.FromMilliseconds(1900), $"retried after {elapsed}, before the 2s Retry-After");
+        Assert.Equal(
+            handler.Bodies[0].GetProperty("batch_id").GetString(),
+            handler.Bodies[1].GetProperty("batch_id").GetString());
+        Assert.Empty(errors);
+    }
+
     [Fact]
     public void RetryAfterIsClamped()
     {

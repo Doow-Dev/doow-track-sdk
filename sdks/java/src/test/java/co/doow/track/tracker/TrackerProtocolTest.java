@@ -29,6 +29,7 @@ class TrackerProtocolTest {
     private final List<Exception> errors = new CopyOnWriteArrayList<>();
     private volatile int[] statuses = {202};
     private volatile String responseBody = "{}";
+    private volatile String retryAfter = null;
 
     @BeforeEach
     void startServer() throws Exception {
@@ -43,6 +44,9 @@ class TrackerProtocolTest {
             bodies.add(JSON.readTree(raw));
             int status = statuses[Math.min(bodies.size() - 1, statuses.length - 1)];
             byte[] out = responseBody.getBytes(StandardCharsets.UTF_8);
+            if (status == 429 && retryAfter != null) {
+                exchange.getResponseHeaders().add("Retry-After", retryAfter);
+            }
             exchange.sendResponseHeaders(status, out.length);
             exchange.getResponseBody().write(out);
             exchange.close();
@@ -189,6 +193,23 @@ class TrackerProtocolTest {
         assertEquals(1, bodies.size());
         assertEquals(1, errors.size());
         assertInstanceOf(PartialAcceptError.class, errors.get(0));
+    }
+
+    @Test
+    void rateLimitedBatchWaitsForRetryAfterAndRetriesTheSameBatch() {
+        statuses = new int[] {429, 202};
+        retryAfter = "2";
+        Tracker tracker = tracker();
+        tracker.track(event());
+        long started = System.nanoTime();
+        tracker.flush();
+        long elapsedMs = (System.nanoTime() - started) / 1_000_000;
+        tracker.shutdown();
+
+        assertEquals(2, bodies.size());
+        assertTrue(elapsedMs >= 1900, "retried after " + elapsedMs + "ms, before the 2s Retry-After");
+        assertEquals(bodies.get(0).path("batch_id").asText(), bodies.get(1).path("batch_id").asText());
+        assertTrue(errors.isEmpty());
     }
 
     @Test
