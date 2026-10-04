@@ -1,9 +1,21 @@
 package co.doow.track.tracker
 
 import co.doow.track.DoowError
+import co.doow.track.PartialAcceptError
 import co.doow.track.types.TrackEvent
 import kotlinx.coroutines.*
+import co.doow.track.types.EventKind
+import co.doow.track.types.MetricTupleHint
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.intOrNull
+import java.util.UUID
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.ByteArrayOutputStream
@@ -33,7 +45,7 @@ class Tracker(
     private val options: TrackerOptions = TrackerOptions()
 ) : AutoCloseable {
     private val apiKey = System.getenv("DOOW_TRACK_API_KEY") ?: apiKey
-    private val buffer = CopyOnWriteArrayList<TrackEvent>()
+    private val buffer = CopyOnWriteArrayList<Pending>()
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = false }
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var flushJob: Job? = null
@@ -64,7 +76,7 @@ class Tracker(
             return
         }
 
-        buffer.add(finalEvent)
+        buffer.add(Pending(UUID.randomUUID().toString(), finalEvent))
 
         if (buffer.size >= options.flushAt) {
             scope.launch { flush() }
@@ -80,55 +92,88 @@ class Tracker(
         sendBatch(batch)
     }
 
-    private fun sendBatch(batch: List<TrackEvent>) {
+    internal data class Pending(val eventId: String, val event: TrackEvent)
+
+    private fun sendBatch(batch: List<Pending>) {
         val url = "${options.endpoint.trimEnd('/')}/telemetry/events"
+        val batchId = UUID.randomUUID().toString()
 
-        repeat(options.retryCount + 1) { attempt ->
+        var body = json.encodeToString(buildPayload(batchId, batch)).toByteArray()
+        var gzipped = false
+        if (!options.disableCompression && body.size > 1024) {
+            val baos = ByteArrayOutputStream()
+            GZIPOutputStream(baos).use { it.write(body) }
+            body = baos.toByteArray()
+            gzipped = true
+        }
+
+        for (attempt in 0..options.retryCount) {
+            val lastAttempt = attempt >= options.retryCount
             try {
-                val payload = EventsPayload(batch)
-                var jsonBytes = json.encodeToString(payload).toByteArray()
-
                 val conn = URL(url).openConnection() as HttpURLConnection
                 conn.requestMethod = "POST"
                 conn.connectTimeout = options.timeoutMs
                 conn.readTimeout = options.timeoutMs
                 conn.setRequestProperty("Authorization", "Bearer $apiKey")
                 conn.setRequestProperty("Content-Type", "application/json")
+                if (gzipped) conn.setRequestProperty("Content-Encoding", "gzip")
                 conn.doOutput = true
-
-                if (!options.disableCompression && jsonBytes.size > 1024) {
-                    val baos = ByteArrayOutputStream()
-                    GZIPOutputStream(baos).use { it.write(jsonBytes) }
-                    jsonBytes = baos.toByteArray()
-                    conn.setRequestProperty("Content-Encoding", "gzip")
-                }
-
-                conn.outputStream.use { it.write(jsonBytes) }
+                conn.outputStream.use { it.write(body) }
 
                 val status = conn.responseCode
+
+                if (status == 207) {
+                    report(parsePartialAccept(conn.inputStream.bufferedReader().readText(), batchId))
+                    return
+                }
+
                 if (status in 200..299) {
                     log("[doow-track] Flushed ${batch.size} events")
                     return
                 }
 
-                if (status >= 500 && attempt < options.retryCount) {
+                if ((status == 429 || status >= 500) && !lastAttempt) {
                     Thread.sleep(2.0.pow(attempt).toLong() * 1000)
-                    return@repeat
+                    continue
                 }
 
                 val errorBody = conn.errorStream?.bufferedReader()?.readText() ?: ""
-                throw DoowError("API error: $errorBody", status)
-
-            } catch (e: Exception) {
-                if (e is DoowError) throw e
-                if (attempt < options.retryCount) {
-                    Thread.sleep(2.0.pow(attempt).toLong() * 1000)
-                    return@repeat
+                report(DoowError("API error: $errorBody", status))
+                return
+            } catch (e: java.io.IOException) {
+                if (lastAttempt) {
+                    report(e)
+                    return
                 }
-                options.onError?.invoke(e)
-                log("[doow-track] Error: ${e.message}")
+                Thread.sleep(2.0.pow(attempt).toLong() * 1000)
             }
         }
+    }
+
+    private fun parsePartialAccept(body: String, fallbackBatchId: String): PartialAcceptError {
+        val root: JsonObject = try {
+            json.parseToJsonElement(body).jsonObject
+        } catch (e: Exception) {
+            JsonObject(emptyMap())
+        }
+        val rejections = (root["rejections"] as? kotlinx.serialization.json.JsonArray).orEmpty().map {
+            val r = it.jsonObject
+            PartialAcceptError.Rejection(
+                r["event_id"]?.jsonPrimitive?.content ?: "unknown",
+                r["reason"]?.jsonPrimitive?.content ?: ""
+            )
+        }
+        return PartialAcceptError(
+            accepted = root["accepted"]?.jsonPrimitive?.intOrNull ?: 0,
+            rejected = root["rejected"]?.jsonPrimitive?.intOrNull ?: 0,
+            batchId = root["batch_id"]?.jsonPrimitive?.content ?: fallbackBatchId,
+            rejections = rejections
+        )
+    }
+
+    private fun report(error: Exception) {
+        options.onError?.invoke(error)
+        log("[doow-track] Error: ${error.message}")
     }
 
     fun shutdown() {
@@ -145,5 +190,52 @@ class Tracker(
     }
 
     @Serializable
-    private data class EventsPayload(val events: List<TrackEvent>)
+    internal data class WireMeasurement(
+        @SerialName("metric_name") val metricName: String,
+        val quantity: Double,
+        @SerialName("metric_tuple_hint") val metricTupleHint: MetricTupleHint? = null
+    )
+
+    @OptIn(ExperimentalSerializationApi::class)
+    @Serializable
+    internal data class WireEvent(
+        @SerialName("event_id") val eventId: String,
+        @SerialName("license_id") val licenseId: String,
+        @SerialName("occurred_at") val occurredAt: String,
+        @SerialName("source_system") val sourceSystem: String,
+        @EncodeDefault val kind: EventKind,
+        val unit: String? = null,
+        val attribution: Map<String, JsonElement>? = null,
+        val metadata: Map<String, JsonElement>? = null,
+        val measurements: List<WireMeasurement>
+    )
+
+    @Serializable
+    internal data class WireBatch(
+        @SerialName("batch_id") val batchId: String,
+        @SerialName("sdk_version") val sdkVersion: String,
+        val events: List<WireEvent>
+    )
+
+    internal companion object {
+        const val SDK_VERSION = "0.1.0"
+
+        fun buildPayload(batchId: String, batch: List<Pending>) = WireBatch(
+            batchId = batchId,
+            sdkVersion = SDK_VERSION,
+            events = batch.map { (eventId, e) ->
+                WireEvent(
+                    eventId = eventId,
+                    licenseId = e.licenseId,
+                    occurredAt = e.timestamp ?: Instant.now().toString(),
+                    sourceSystem = e.sourceSystem?.takeIf { it.isNotBlank() } ?: "sdk",
+                    kind = e.kind,
+                    unit = e.unit,
+                    attribution = e.attribution,
+                    metadata = e.metadata,
+                    measurements = listOf(WireMeasurement(e.metric, e.quantity, e.metricTupleHint))
+                )
+            }
+        )
+    }
 }
