@@ -78,9 +78,16 @@ export interface TransportResponse {
 
 // ─── Response shapes ───────────────────────────────────────────────────────
 
+export interface EventRejection {
+  event_id: string;
+  reason: string;
+}
+
 export interface PartialAcceptResponse {
-  accepted: string[];
-  rejected: Array<{ event_id: string; reason: string }>;
+  accepted: number;
+  rejected: number;
+  batch_id?: string;
+  rejections: EventRejection[];
 }
 
 // ─── Configuration ─────────────────────────────────────────────────────────
@@ -160,6 +167,7 @@ export interface SdkError {
   statusCode?: number;
   retryAfterMs?: number;
   rejectedEventIds?: string[];
+  rejections?: EventRejection[];
   error?: Error;
 }
 

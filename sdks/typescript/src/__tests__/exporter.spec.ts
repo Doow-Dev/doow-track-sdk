@@ -225,8 +225,10 @@ describe('Exporter — S78', () => {
           status: 207,
           headers: {},
           body: JSON.stringify({
-            accepted: ['evt-0'],
-            rejected: [{ event_id: 'evt-1', reason: 'invalid metric' }],
+            accepted: 1,
+            rejected: 1,
+            batch_id: 'b-1',
+            rejections: [{ event_id: 'evt-1', reason: 'invalid metric' }],
           }),
         }),
       };
@@ -238,7 +240,22 @@ describe('Exporter — S78', () => {
         expect.objectContaining({
           kind: 'PARTIAL_ACCEPT',
           rejectedEventIds: ['evt-1'],
+          rejections: [{ event_id: 'evt-1', reason: 'invalid metric' }],
         }),
+      );
+    });
+
+    it('207 without parseable details still reports PARTIAL_ACCEPT', async () => {
+      const onError = vi.fn();
+      const transport: CustomTransport = {
+        send: async () => ({ status: 207, headers: {}, body: 'not json' }),
+      };
+
+      const exporter = makeExporter(transport, { onError, retryCount: 0 });
+      await exporter.flush(makeEvents(2));
+
+      expect(onError).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: 'PARTIAL_ACCEPT', rejectedEventIds: [] }),
       );
     });
 

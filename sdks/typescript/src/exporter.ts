@@ -15,6 +15,7 @@ import { generateUUID } from './uuid.js';
 import type {
   BatchPayload,
   CustomTransport,
+  EventRejection,
   OfflineStore,
   PartialAcceptResponse,
   SdkError,
@@ -419,20 +420,23 @@ export class Exporter {
     }
 
     if (response.status === 207) {
-      // Partial accept
+      let rejections: EventRejection[] = [];
       try {
-        const parsed = JSON.parse(response.body) as PartialAcceptResponse;
-        if (parsed.rejected?.length > 0) {
-          this.config.onError({
-            kind: 'PARTIAL_ACCEPT',
-            message: `Batch partially accepted — ${parsed.rejected.length} events rejected`,
-            statusCode: 207,
-            rejectedEventIds: parsed.rejected.map((r) => r.event_id),
-          });
-        }
+        const parsed = JSON.parse(response.body) as Partial<PartialAcceptResponse>;
+        if (Array.isArray(parsed.rejections)) rejections = parsed.rejections;
       } catch {
-        // Non-JSON 207 — treat as success
+        this.config.debug.warn('Non-JSON 207 body — rejection details unavailable');
       }
+      this.config.onError({
+        kind: 'PARTIAL_ACCEPT',
+        message:
+          rejections.length > 0
+            ? `Batch partially accepted: ${rejections.length} events rejected (${rejections[0]!.reason})`
+            : 'Batch partially accepted: server reported rejections without details',
+        statusCode: 207,
+        rejectedEventIds: rejections.map((r) => r.event_id),
+        rejections,
+      });
       this._adaptiveBatchSize = null;
       return;
     }
