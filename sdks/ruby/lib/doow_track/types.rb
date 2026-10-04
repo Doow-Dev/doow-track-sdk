@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "time"
+
 module DoowTrack
   module EventKind
     USAGE = "USAGE"
@@ -68,13 +70,14 @@ module DoowTrack
   end
 
   TrackEvent = Struct.new(
-    :metric, :quantity, :license_id, :unit, :kind,
+    :event_id, :metric, :quantity, :license_id, :unit, :kind,
     :timestamp, :source_system, :metric_tuple_hint,
     :attribution, :metadata,
     keyword_init: true
   ) do
     def to_h
       {
+        event_id: event_id,
         metric: metric,
         quantity: quantity,
         license_id: license_id,

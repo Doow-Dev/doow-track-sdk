@@ -3,6 +3,8 @@
 require "net/http"
 require "json"
 require "zlib"
+require "stringio"
+require "securerandom"
 require "uri"
 
 module DoowTrack
@@ -41,6 +43,7 @@ module DoowTrack
       final_event = event.is_a?(Hash) ? TrackEvent.new(**event) : event
       final_event = TrackEvent.new(
         **final_event.to_h.merge(
+          event_id: final_event.event_id || SecureRandom.uuid,
           timestamp: final_event.timestamp || Time.now.utc,
           attribution: merge_attribution(final_event.attribution)
         )
@@ -90,49 +93,91 @@ module DoowTrack
 
     def send_batch(batch)
       url = URI("#{@options[:endpoint].chomp('/')}/telemetry/events")
-      payload = { events: batch.map(&:to_h) }
-      json = payload.to_json
+      batch_id = SecureRandom.uuid
+      json = build_payload(batch_id, batch).to_json
+      body, encoding = encode_body(json)
 
       (@options[:retry_count] + 1).times do |attempt|
+        last_attempt = attempt >= @options[:retry_count]
         begin
-          http = Net::HTTP.new(url.host, url.port)
-          http.use_ssl = url.scheme == "https"
-          http.open_timeout = @options[:timeout]
-          http.read_timeout = @options[:timeout]
-
-          request = Net::HTTP::Post.new(url)
-          request["Authorization"] = "Bearer #{@api_key}"
-          request["Content-Type"] = "application/json"
-
-          body = json
-          if !@options[:disable_compression] && json.bytesize > 1024
-            body = Zlib::Deflate.deflate(json, Zlib::DEFAULT_COMPRESSION)
-            request["Content-Encoding"] = "gzip"
+          response = post(url, body, encoding)
+        rescue StandardError => e
+          if last_attempt
+            report(e)
+          else
+            sleep(2**attempt)
+            next
           end
-          request.body = body
+          return
+        end
 
-          response = http.request(request)
-
-          if response.code.to_i >= 200 && response.code.to_i < 300
-            log("[doow-track] Flushed #{batch.size} events")
+        status = response.code.to_i
+        case status
+        when 207
+          report(PartialAcceptError.from_body(response.body))
+          return
+        when 200..299
+          log("[doow-track] Flushed #{batch.size} events")
+          return
+        when 429, 500..599
+          if last_attempt
+            report(Error.new("API error: #{response.body}", status_code: status))
             return
           end
-
-          if response.code.to_i >= 500 && attempt < @options[:retry_count]
-            sleep(2**attempt)
-            next
-          end
-
-          raise Error.new("API error: #{response.body}", status_code: response.code.to_i)
-        rescue StandardError => e
-          if attempt < @options[:retry_count]
-            sleep(2**attempt)
-            next
-          end
-          @options[:on_error]&.call(e)
-          log("[doow-track] Error: #{e.message}")
+          sleep(2**attempt)
+        else
+          report(Error.new("API error: #{response.body}", status_code: status))
+          return
         end
       end
+    end
+
+    def post(url, body, encoding)
+      http = Net::HTTP.new(url.host, url.port)
+      http.use_ssl = url.scheme == "https"
+      http.open_timeout = @options[:timeout]
+      http.read_timeout = @options[:timeout]
+
+      request = Net::HTTP::Post.new(url)
+      request["Authorization"] = "Bearer #{@api_key}"
+      request["Content-Type"] = "application/json"
+      request["Content-Encoding"] = encoding if encoding
+      request.body = body
+      http.request(request)
+    end
+
+    def build_payload(batch_id, batch)
+      events = batch.map do |event|
+        h = event.to_h
+        measurement = { metric_name: h[:metric], quantity: h[:quantity], metric_tuple_hint: h[:metric_tuple_hint] }.compact
+        {
+          event_id: h[:event_id],
+          license_id: h[:license_id],
+          occurred_at: h[:timestamp],
+          source_system: h[:source_system] || "sdk",
+          kind: h[:kind],
+          attribution: h[:attribution],
+          metadata: h[:metadata],
+          measurements: [measurement]
+        }.compact
+      end
+      { batch_id: batch_id, sdk_version: VERSION, events: events }
+    end
+
+    def encode_body(json)
+      return [json, nil] if @options[:disable_compression] || json.bytesize <= 1024
+
+      io = StringIO.new
+      io.set_encoding(Encoding::BINARY)
+      gz = Zlib::GzipWriter.new(io)
+      gz.write(json)
+      gz.close
+      [io.string, "gzip"]
+    end
+
+    def report(error)
+      @options[:on_error]&.call(error)
+      log("[doow-track] Error: #{error.message}")
     end
 
     def merge_attribution(event_attribution)
