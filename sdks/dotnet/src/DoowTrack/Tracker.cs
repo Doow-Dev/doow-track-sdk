@@ -212,7 +212,7 @@ public class Tracker : IDisposable
                 if ((status == 429 || status >= 500) && !lastAttempt)
                 {
                     var backoff = TimeSpan.FromSeconds(Math.Pow(2, attempt));
-                    if (status == 429) backoff = TimeSpan.FromTicks(Math.Max(backoff.Ticks, ParseRetryAfter(response).Ticks));
+                    if (status is 429 or 503) backoff = TimeSpan.FromTicks(Math.Max(backoff.Ticks, ParseRetryAfter(response).Ticks));
                     await Task.Delay(backoff);
                     continue;
                 }

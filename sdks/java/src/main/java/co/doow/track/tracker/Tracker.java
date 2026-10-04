@@ -214,7 +214,7 @@ public class Tracker implements AutoCloseable {
 
                 if ((status == 429 || status >= 500) && !lastAttempt) {
                     long backoff = (long) Math.pow(2, attempt) * 1000;
-                    long serverDelay = status == 429 ? parseRetryAfterMs(conn.getHeaderField("Retry-After")) : 0;
+                    long serverDelay = (status == 429 || status == 503) ? parseRetryAfterMs(conn.getHeaderField("Retry-After")) : 0;
                     Thread.sleep(Math.max(backoff, serverDelay));
                     continue;
                 }

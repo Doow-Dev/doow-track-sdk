@@ -217,14 +217,17 @@ public class TrackerProtocolTests
 
     private sealed class RateLimitedThenOkHandler : HttpMessageHandler
     {
+        private readonly HttpStatusCode _firstStatus;
         public List<JsonElement> Bodies { get; } = new();
+
+        public RateLimitedThenOkHandler(HttpStatusCode firstStatus) => _firstStatus = firstStatus;
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
         {
             Bodies.Add(JsonDocument.Parse(await request.Content!.ReadAsByteArrayAsync(ct)).RootElement.Clone());
             if (Bodies.Count == 1)
             {
-                var limited = new HttpResponseMessage(HttpStatusCode.TooManyRequests) { Content = new StringContent("{}") };
+                var limited = new HttpResponseMessage(_firstStatus) { Content = new StringContent("{}") };
                 limited.Headers.RetryAfter = new System.Net.Http.Headers.RetryConditionHeaderValue(TimeSpan.FromSeconds(2));
                 return limited;
             }
@@ -232,10 +235,12 @@ public class TrackerProtocolTests
         }
     }
 
-    [Fact]
-    public async Task RateLimitedBatchWaitsForRetryAfterAndRetriesTheSameBatch()
+    [Theory]
+    [InlineData(HttpStatusCode.TooManyRequests)]
+    [InlineData(HttpStatusCode.ServiceUnavailable)]
+    public async Task ThrottledBatchWaitsForRetryAfterAndRetriesTheSameBatch(HttpStatusCode firstStatus)
     {
-        var handler = new RateLimitedThenOkHandler();
+        var handler = new RateLimitedThenOkHandler(firstStatus);
         var errors = new List<Exception>();
         var tracker = new Tracker("dk_test", new TrackerOptions
         {

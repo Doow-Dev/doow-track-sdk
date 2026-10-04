@@ -44,7 +44,7 @@ class TrackerProtocolTest {
             bodies.add(JSON.readTree(raw));
             int status = statuses[Math.min(bodies.size() - 1, statuses.length - 1)];
             byte[] out = responseBody.getBytes(StandardCharsets.UTF_8);
-            if (status == 429 && retryAfter != null) {
+            if ((status == 429 || status == 503) && retryAfter != null) {
                 exchange.getResponseHeaders().add("Retry-After", retryAfter);
             }
             exchange.sendResponseHeaders(status, out.length);
@@ -198,6 +198,23 @@ class TrackerProtocolTest {
     @Test
     void rateLimitedBatchWaitsForRetryAfterAndRetriesTheSameBatch() {
         statuses = new int[] {429, 202};
+        retryAfter = "2";
+        Tracker tracker = tracker();
+        tracker.track(event());
+        long started = System.nanoTime();
+        tracker.flush();
+        long elapsedMs = (System.nanoTime() - started) / 1_000_000;
+        tracker.shutdown();
+
+        assertEquals(2, bodies.size());
+        assertTrue(elapsedMs >= 1900, "retried after " + elapsedMs + "ms, before the 2s Retry-After");
+        assertEquals(bodies.get(0).path("batch_id").asText(), bodies.get(1).path("batch_id").asText());
+        assertTrue(errors.isEmpty());
+    }
+
+    @Test
+    void inFlightUnavailableBatchWaitsForRetryAfterAndRetriesTheSameBatch() {
+        statuses = new int[] {503, 202};
         retryAfter = "2";
         Tracker tracker = tracker();
         tracker.track(event());

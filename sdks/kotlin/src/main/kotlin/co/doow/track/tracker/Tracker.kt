@@ -141,7 +141,7 @@ class Tracker(
 
                 if ((status == 429 || status >= 500) && !lastAttempt) {
                     val backoff = 2.0.pow(attempt).toLong() * 1000
-                    val serverDelay = if (status == 429) parseRetryAfterMs(conn.getHeaderField("Retry-After")) else 0L
+                    val serverDelay = if (status == 429 || status == 503) parseRetryAfterMs(conn.getHeaderField("Retry-After")) else 0L
                     Thread.sleep(maxOf(backoff, serverDelay))
                     continue
                 }
