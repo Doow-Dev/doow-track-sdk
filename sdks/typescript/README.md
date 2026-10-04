@@ -107,9 +107,9 @@ export default meter.withAzureFunction(async (context: Context, req: unknown) =>
 
 ## Sidecar Docker Compose example
 
-For use cases where you emit telemetry from non-Node.js services (Python, Go, Rust, etc.), run the sidecar container on VMs, Kubernetes, Azure Container Apps, ECS, and any other platform that can run containers, then pipe JSON events to it over stdin or TCP.
+For applications in any language, run the sidecar container on VMs, Kubernetes, Azure Container Apps, ECS, or any platform that can run containers, then send it newline-delimited JSON over stdin, a file, or TCP.
 
-The published image is public on GitHub Container Registry at `ghcr.io/doow-dev/doow-track-sidecar`.
+The image is currently private on GitHub Container Registry at `ghcr.io/doow-dev/doow-track-sidecar`. Customers need package read access and must authenticate Docker to GHCR before pulling it.
 
 ```yaml
 # docker-compose.yml
@@ -151,18 +151,20 @@ Send events from your app as newline-delimited JSON:
 
 ## CLI usage
 
-Run the sidecar as a standalone daemon process:
+The standalone `doow-track` daemon accepts newline-delimited JSON from applications in any language. Its downloaded binaries need neither Node.js nor a language SDK:
 
 ```bash
 # Start as daemon with config file
-npx @doow/track --config ./doow-track.json --pidfile /var/run/doow-track.pid
+./doow-track --config ./doow-track.json --pidfile /var/run/doow-track.pid
 
 # Pipe mode: pipe newline-delimited JSON from stdin
-echo '{"metric":"api_calls","quantity":1,"license_id":"lic_..."}' | npx @doow/track
+echo '{"metric":"api_calls","quantity":1,"license_id":"lic_..."}' | ./doow-track --api-key dk_...
 
-# Reload config without restart (daemon mode)
+# Linux/macOS: reload config without restart
 kill -HUP $(cat /var/run/doow-track.pid)
 ```
+
+See the [Daemon / CLI guide](docs/daemon.md) for the five OS/CPU downloads, Windows Server usage, and service configuration.
 
 Config file (`doow-track.json`):
 

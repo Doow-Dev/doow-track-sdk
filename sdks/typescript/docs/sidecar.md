@@ -1,8 +1,8 @@
 # Sidecar Guide
 
-The `doow/track-sidecar` Docker image runs alongside your application and accepts newline-delimited JSON events over stdin, file tail, or TCP. Use it when your application is not written in Node.js or when you want to decouple telemetry emission from your main process. It is designed to run on VMs, Kubernetes, Azure Container Apps, ECS, and any other platform that can run containers.
+The `ghcr.io/doow-dev/doow-track-sidecar` Docker image runs alongside your application and accepts newline-delimited JSON events over stdin, file tail, or TCP. Use it to decouple telemetry emission from your main process. It is designed to run on VMs, Kubernetes, Azure Container Apps, ECS, and any other platform that can run containers.
 
-The published image is public on GitHub Container Registry at `ghcr.io/doow-dev/doow-track-sidecar`.
+The image is currently private on GitHub Container Registry at `ghcr.io/doow-dev/doow-track-sidecar`. Customers need package read access and must authenticate Docker to GHCR before pulling it.
 
 ## Docker Compose
 

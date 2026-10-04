@@ -1,16 +1,22 @@
 # Daemon / CLI Guide
 
-The `doow-track` CLI runs as a long-lived daemon process. Install it globally via npm or use `npx`.
+The `doow-track` CLI runs as a long-lived daemon process and accepts newline-delimited JSON from applications written in any language. Download the self-contained executable for your server OS/CPU from GitHub Releases; it requires neither Node.js nor a language SDK on the server.
 
 ## Installation
 
-```bash
-# Global install
-npm install -g @doow/track
+### Standalone executables
 
-# Or use npx
-npx @doow/track --help
-```
+Download the asset matching the server platform from the [doow-track-sdk releases](https://github.com/Doow-Dev/doow-track-sdk/releases):
+
+| Server platform | Release asset |
+|-----------------|---------------|
+| Linux x64 | `doow-track-linux-x64` |
+| Linux arm64 | `doow-track-linux-arm64` |
+| macOS x64 | `doow-track-darwin-x64` |
+| macOS arm64 | `doow-track-darwin-arm64` |
+| Windows Server x64 | `doow-track-windows-x64.exe` |
+
+On Linux and macOS, make the downloaded file executable with `chmod +x doow-track-*` and run it directly. On Windows Server, run `doow-track-windows-x64.exe` from PowerShell or keep it running under a Windows service wrapper such as NSSM or WinSW.
 
 ## Quick start
 
@@ -21,9 +27,14 @@ echo '{"metric":"api_calls","quantity":1,"license_id":"lic_..."}' | doow-track -
 # Daemon mode with config file
 doow-track --config ./doow-track.json --pidfile /var/run/doow-track.pid
 
-# Reload config without restart
+# Windows Server (use Windows paths in the config file)
+.\doow-track-windows-x64.exe --config .\doow-track.json
+
+# Linux/macOS: reload config without restart
 kill -HUP $(cat /var/run/doow-track.pid)
 ```
+
+On Windows, restart the process to load changed configuration; SIGHUP reload is not available there. Use Windows paths, such as `C:\ProgramData\Doow\usage.jsonl`, for `input.path`.
 
 ## CLI flags
 
@@ -76,7 +87,7 @@ Config values are resolved in this order (highest wins):
 3. Config file
 4. Built-in defaults
 
-## systemd unit file
+## Linux systemd unit file
 
 ```ini
 [Unit]
@@ -98,7 +109,7 @@ StandardError=journal
 WantedBy=multi-user.target
 ```
 
-## SIGHUP config reload
+## Linux/macOS SIGHUP config reload
 
 When the daemon receives `SIGHUP`, it:
 

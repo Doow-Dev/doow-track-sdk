@@ -2,15 +2,10 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-# Copy package files
-COPY package.json package-lock.json ./
+ARG SDK_VERSION
+LABEL org.opencontainers.image.version=$SDK_VERSION
 
-# Install production dependencies only
-RUN npm ci --omit=dev
-
-# Copy compiled source
-# Assumes `npm run build` has already been run before docker build
-COPY dist/ ./dist/
+COPY sdks/typescript/dist/sidecar.cjs ./dist/sidecar.cjs
 
 # Health check
 HEALTHCHECK --interval=10s --timeout=5s --start-period=5s --retries=3 \

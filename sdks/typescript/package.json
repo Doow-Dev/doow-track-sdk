@@ -20,7 +20,9 @@
     }
   },
   "files": [
-    "dist",
+    "dist/cjs",
+    "dist/esm",
+    "dist/types",
     "README.md",
     "CHANGELOG.md"
   ],

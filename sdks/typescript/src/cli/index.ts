@@ -37,6 +37,7 @@ type FsPromisesModule = {
 
 declare const process: {
   argv: string[];
+  pkg?: unknown;
   pid: number;
   env: Record<string, string | undefined>;
   stdin: {
@@ -59,7 +60,8 @@ async function loadFsPromises(): Promise<FsPromisesModule> {
 
 // ─── Version ───────────────────────────────────────────────────────────────
 
-const VERSION = '0.1.0';
+declare const __SDK_VERSION__: string;
+const VERSION = __SDK_VERSION__;
 
 // ─── Arg parsing ──────────────────────────────────────────────────────────
 
@@ -72,7 +74,7 @@ interface ParsedArgs {
 }
 
 function parseArgs(argv: string[]): ParsedArgs {
-  const args = argv.slice(2); // strip node + script
+  const args = argv.slice(process.pkg ? 1 : 2);
   const result: ParsedArgs = { version: false, help: false };
 
   for (let i = 0; i < args.length; i++) {

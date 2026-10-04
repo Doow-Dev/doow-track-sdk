@@ -77,4 +77,40 @@ export default [
     },
     plugins: [dts()],
   },
+  {
+    input: 'src/cli/index.ts',
+    output: {
+      file: 'dist/cli.cjs',
+      format: 'cjs',
+      sourcemap: false,
+    },
+    plugins: [
+      ...sharedPlugins,
+      typescript({
+        tsconfig: './tsconfig.json',
+        declaration: false,
+        declarationMap: false,
+        compilerOptions: { outDir: 'dist', declarationDir: undefined, sourceMap: false },
+      }),
+    ],
+    external: [],
+  },
+  {
+    input: 'src/sidecar/index.ts',
+    output: {
+      file: 'dist/sidecar.cjs',
+      format: 'cjs',
+      sourcemap: false,
+    },
+    plugins: [
+      ...sharedPlugins,
+      typescript({
+        tsconfig: './tsconfig.json',
+        declaration: false,
+        declarationMap: false,
+        compilerOptions: { outDir: 'dist', declarationDir: undefined, sourceMap: false },
+      }),
+    ],
+    external: [],
+  },
 ];

@@ -25,6 +25,10 @@ Official SDKs for Doow usage telemetry across all platforms.
 
 See individual SDK READMEs in `sdks/<language>/README.md` for installation instructions.
 
+## Standalone CLI / daemon
+
+The `doow-track` executable is also released for Linux x64/arm64, macOS x64/arm64, and Windows Server x64. It accepts newline-delimited JSON events, so applications in any supported language can use it without installing Node.js or a language SDK on the server. See the [TypeScript daemon guide](sdks/typescript/docs/daemon.md) for downloads, configuration, and service setup.
+
 ## Contributing
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md) for commit conventions and release process.
