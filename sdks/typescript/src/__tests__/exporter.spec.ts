@@ -260,6 +260,50 @@ describe('Exporter — S78', () => {
       );
     });
 
+    it('a malformed 207 body is reported once and never resent', async () => {
+      const onError = vi.fn();
+      let sends = 0;
+      const transport: CustomTransport = {
+        send: async () => {
+          sends++;
+          return {
+            status: 207,
+            headers: {},
+            body: JSON.stringify({ accepted: 'abc', rejected: null, rejections: [null, 1, 'x', { event_id: 5 }] }),
+          };
+        },
+      };
+      const exporter = makeExporter(transport, { onError, retryCount: 3 });
+
+      await exporter.flush(makeEvents(1));
+
+      expect(sends).toBe(1);
+      expect(onError).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: 'PARTIAL_ACCEPT', rejectedEventIds: ['5'] }),
+      );
+    });
+
+    it('sanitizes control characters and truncates rejection reasons', async () => {
+      const onError = vi.fn();
+      const transport: CustomTransport = {
+        send: async () => ({
+          status: 207,
+          headers: {},
+          body: JSON.stringify({
+            rejected: 1,
+            rejections: [{ event_id: 'e', reason: 'line1\nline2\u001b[31m' + 'x'.repeat(2000) }],
+          }),
+        }),
+      };
+      const exporter = makeExporter(transport, { onError, retryCount: 0 });
+
+      await exporter.flush(makeEvents(1));
+
+      const reason = (onError.mock.calls[0]![0] as { rejections: Array<{ reason: string }> }).rejections[0]!.reason;
+      expect(reason).not.toMatch(/[\n\u001b]/);
+      expect(reason.length).toBeLessThanOrEqual(520);
+    });
+
     it('permanent 400 is reported once and never retried', async () => {
       const onError = vi.fn();
       const { transport, calls } = makeTransport(400);

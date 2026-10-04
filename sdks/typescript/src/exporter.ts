@@ -39,6 +39,13 @@ async function gzipBuffer(data: Buffer): Promise<Buffer> {
 }
 
 const MAX_RETRY_AFTER_MS = 30_000;
+const MAX_ERROR_TEXT = 512;
+
+function sanitizeText(value: unknown): string {
+  // eslint-disable-next-line no-control-regex
+  const text = String(value).replace(/[\u0000-\u001f\u007f]/g, ' ');
+  return text.length > MAX_ERROR_TEXT ? `${text.slice(0, MAX_ERROR_TEXT)}...` : text;
+}
 
 // Replaced at build time by @rollup/plugin-replace (rollup) and vitest define (tests)
 declare const __SDK_VERSION__: string;
@@ -443,7 +450,14 @@ export class Exporter {
       let rejections: EventRejection[] = [];
       try {
         const parsed = JSON.parse(response.body) as Partial<PartialAcceptResponse>;
-        if (Array.isArray(parsed.rejections)) rejections = parsed.rejections;
+        if (Array.isArray(parsed.rejections)) {
+          rejections = (parsed.rejections as unknown[])
+            .filter((r): r is Record<string, unknown> => !!r && typeof r === 'object')
+            .map((r) => ({
+              event_id: sanitizeText(r.event_id ?? 'unknown'),
+              reason: sanitizeText(r.reason ?? ''),
+            }));
+        }
       } catch {
         this.config.debug.warn('Non-JSON 207 body — rejection details unavailable');
       }
