@@ -8,6 +8,7 @@ import threading
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -26,6 +27,27 @@ DEFAULT_TIMEOUT = 10.0
 DEFAULT_RETRY_COUNT = 3
 DEFAULT_SHUTDOWN_TIMEOUT = 5.0
 
+
+
+MAX_RETRY_AFTER = 30.0
+
+
+def _retry_after(value: Optional[str]) -> float:
+    if not value:
+        return 0.0
+    try:
+        seconds = float(value)
+    except ValueError:
+        try:
+            at = parsedate_to_datetime(value)
+            seconds = (at - datetime.now(at.tzinfo)).total_seconds()
+        except Exception:
+            return 0.0
+    return max(0.0, min(seconds, MAX_RETRY_AFTER))
+
+
+def _is_permanent(status: int) -> bool:
+    return 400 <= status < 500 and status != 429
 
 
 def _build_payload(batch_id: str, events: list[SerializedEvent]) -> dict:
@@ -241,10 +263,11 @@ class Tracker:
                     return
 
                 if isinstance(error, APIError):
-                    if error.status in (401, 403):
-                        break  # Not retryable
+                    if _is_permanent(error.status):
+                        self._handle_error(error)
+                        return
                     if error.status == 429:
-                        threading.Event().wait(5.0)
+                        threading.Event().wait(getattr(error, "retry_after", 0.0))
             except Exception as e:
                 last_error = e
 
@@ -298,17 +321,19 @@ class Tracker:
             if response.status_code >= 400:
                 try:
                     data = response.json()
-                    return APIError(
+                    api_error = APIError(
                         status=response.status_code,
                         message=data.get("message", response.reason_phrase),
                         error_class=data.get("errorClass"),
                         details=data,
                     )
                 except Exception:
-                    return APIError(
+                    api_error = APIError(
                         status=response.status_code,
                         message=response.reason_phrase,
                     )
+                api_error.retry_after = _retry_after(response.headers.get("Retry-After"))
+                return api_error
 
             return None
         except Exception as e:
@@ -496,8 +521,10 @@ class AsyncTracker:
                 self._log(f"batch {batch_id} sent successfully")
                 return
             last_error = APIError(status=response.status_code, message=response.reason_phrase)
-            if response.status_code in (401, 403):
+            if _is_permanent(response.status_code):
                 break
+            if response.status_code == 429:
+                await asyncio.sleep(_retry_after(response.headers.get("Retry-After")))
 
         if last_error and self._options.on_error:
             self._options.on_error(last_error)

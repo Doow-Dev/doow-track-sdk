@@ -118,3 +118,37 @@ def test_retry_reuses_batch_and_event_ids(httpx_mock):
     assert first["batch_id"] == second["batch_id"]
     assert first["events"][0]["event_id"] == second["events"][0]["event_id"]
     assert errors == []
+
+
+def test_permanent_client_error_is_reported_without_retry(httpx_mock):
+    httpx_mock.add_response(status_code=400, json={"message": "bad"})
+    errors: list = []
+    tracker = Tracker("dk_test", _options(errors, retry_count=3))
+    tracker.track(_event())
+    tracker.flush()
+    tracker._shutdown.set()
+
+    assert len(httpx_mock.get_requests()) == 1
+    assert len(errors) == 1
+
+
+@pytest.mark.asyncio
+async def test_async_permanent_client_error_is_not_retried(httpx_mock):
+    httpx_mock.add_response(status_code=422, json={"message": "bad"})
+    errors: list = []
+    tracker = AsyncTracker("dk_test", _options(errors, retry_count=3))
+    await tracker.track(_event())
+    await tracker.flush()
+    await tracker.shutdown()
+
+    assert len(httpx_mock.get_requests()) == 1
+    assert len(errors) == 1
+
+
+def test_retry_after_is_clamped_and_tolerates_garbage():
+    from doow_track.tracker import MAX_RETRY_AFTER, _retry_after
+
+    assert _retry_after("2") == 2.0
+    assert _retry_after("86400") == MAX_RETRY_AFTER
+    assert _retry_after("garbage") == 0.0
+    assert _retry_after(None) == 0.0
