@@ -76,6 +76,22 @@ describe('Next.js client wire protocol', () => {
     expect(error.rejections).toEqual([{ event_id: 'e2', reason: 'bad' }]);
   });
 
+  it('a retry reuses the batch id and event ids', async () => {
+    const calls = stubFetch([{ status: 503 }, { status: 202 }]);
+    const onError = vi.fn();
+    const tracker = new Tracker('dk_test', { flushIntervalMs: 60_000, onError, retryCount: 1 });
+    tracker.track(event);
+    await tracker.flush();
+    tracker.destroy();
+
+    expect(calls).toHaveLength(2);
+    const first = JSON.parse(calls[0]!.init.body as string);
+    const second = JSON.parse(calls[1]!.init.body as string);
+    expect(second.batch_id).toBe(first.batch_id);
+    expect(second.events[0].event_id).toBe(first.events[0].event_id);
+    expect(onError).not.toHaveBeenCalled();
+  });
+
   it('exhausted 5xx retries reach onError', async () => {
     stubFetch([{ status: 503 }]);
     const onError = vi.fn();

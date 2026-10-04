@@ -103,3 +103,18 @@ async def test_async_server_failure_reaches_on_error(httpx_mock):
     await tracker.shutdown()
 
     assert len(errors) == 1
+
+
+def test_retry_reuses_batch_and_event_ids(httpx_mock):
+    httpx_mock.add_response(status_code=503)
+    httpx_mock.add_response(status_code=202, json={"accepted": 1, "rejected": 0})
+    errors: list = []
+    tracker = Tracker("dk_test", _options(errors, retry_count=1))
+    tracker.track(_event())
+    tracker.flush()
+    tracker._shutdown.set()
+
+    first, second = (json.loads(r.content) for r in httpx_mock.get_requests())
+    assert first["batch_id"] == second["batch_id"]
+    assert first["events"][0]["event_id"] == second["events"][0]["event_id"]
+    assert errors == []

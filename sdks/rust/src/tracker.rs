@@ -538,6 +538,32 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn retry_reuses_batch_and_event_ids() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/telemetry/events"))
+            .respond_with(ResponseTemplate::new(503))
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/telemetry/events"))
+            .respond_with(ResponseTemplate::new(202))
+            .mount(&server)
+            .await;
+        let errors = Arc::new(StdMutex::new(Vec::new()));
+        let tracker = tracker_for(&server, errors.clone());
+        tracker.send_batch(vec![event("e1")]).await.unwrap();
+
+        let requests = server.received_requests().await.unwrap();
+        assert_eq!(requests.len(), 2);
+        let first: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+        let second: serde_json::Value = serde_json::from_slice(&requests[1].body).unwrap();
+        assert_eq!(first["batch_id"], second["batch_id"]);
+        assert_eq!(first["events"][0]["event_id"], second["events"][0]["event_id"]);
+    }
+
+    #[tokio::test]
     async fn partial_accept_reports_each_rejection_without_retry() {
         let server = MockServer::start().await;
         Mock::given(method("POST"))

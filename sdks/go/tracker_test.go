@@ -1,6 +1,7 @@
 package doow
 
 import (
+	"compress/gzip"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -278,5 +279,116 @@ func TestTracker_PartialAcceptReportsRejections(t *testing.T) {
 	}
 	if partial.Rejected != 1 || len(partial.Rejections) != 1 || partial.Rejections[0].EventID != "evt-x" {
 		t.Fatalf("unexpected rejections: %+v", partial)
+	}
+}
+
+func TestTracker_RetryReusesBatchAndEventIDs(t *testing.T) {
+	var mu sync.Mutex
+	var payloads []BatchPayload
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload BatchPayload
+		json.NewDecoder(r.Body).Decode(&payload)
+		mu.Lock()
+		payloads = append(payloads, payload)
+		attempt := len(payloads)
+		mu.Unlock()
+		if attempt == 1 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer server.Close()
+
+	tracker := NewTracker("dk_test_key", &TrackerOptions{
+		Endpoint:      server.URL,
+		FlushAt:       1000,
+		FlushInterval: time.Hour,
+		RetryCount:    2,
+	})
+	tracker.Track(TrackEvent{Metric: "api_calls", Quantity: 1, LicenseID: "lic_1"})
+	tracker.Shutdown()
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(payloads) != 2 {
+		t.Fatalf("expected 2 attempts, got %d", len(payloads))
+	}
+	if payloads[0].BatchID == "" || payloads[0].BatchID != payloads[1].BatchID {
+		t.Fatalf("batch id changed across retry: %q vs %q", payloads[0].BatchID, payloads[1].BatchID)
+	}
+	if payloads[0].Events[0].EventID == "" || payloads[0].Events[0].EventID != payloads[1].Events[0].EventID {
+		t.Fatalf("event id changed across retry")
+	}
+}
+
+func TestTracker_Accepts202WithoutError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusAccepted)
+		w.Write([]byte(`{"accepted":1,"rejected":0,"batch_id":"b"}`))
+	}))
+	defer server.Close()
+
+	var errs []error
+	var mu sync.Mutex
+	tracker := NewTracker("dk_test_key", &TrackerOptions{
+		Endpoint:      server.URL,
+		FlushAt:       1000,
+		FlushInterval: time.Hour,
+		OnError: func(err error) {
+			mu.Lock()
+			errs = append(errs, err)
+			mu.Unlock()
+		},
+	})
+	tracker.Track(TrackEvent{Metric: "api_calls", Quantity: 1, LicenseID: "lic_1"})
+	tracker.Shutdown()
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(errs) != 0 {
+		t.Fatalf("202 must not report errors, got %v", errs)
+	}
+}
+
+func TestTracker_LargeBodiesAreRealGzip(t *testing.T) {
+	var mu sync.Mutex
+	var encoding string
+	var events int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reader := r.Body
+		if r.Header.Get("Content-Encoding") == "gzip" {
+			gz, err := gzip.NewReader(r.Body)
+			if err != nil {
+				t.Errorf("body is not gzip: %v", err)
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			reader = gz
+		}
+		var payload BatchPayload
+		json.NewDecoder(reader).Decode(&payload)
+		mu.Lock()
+		encoding = r.Header.Get("Content-Encoding")
+		events = len(payload.Events)
+		mu.Unlock()
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer server.Close()
+
+	tracker := NewTracker("dk_test_key", &TrackerOptions{
+		Endpoint:      server.URL,
+		FlushAt:       1000,
+		FlushInterval: time.Hour,
+	})
+	for i := 0; i < 300; i++ {
+		tracker.Track(TrackEvent{Metric: "api_calls", Quantity: 1, LicenseID: "lic_1"})
+	}
+	tracker.Shutdown()
+
+	mu.Lock()
+	defer mu.Unlock()
+	if encoding != "gzip" || events != 300 {
+		t.Fatalf("expected 300 gzip events, got encoding=%q events=%d", encoding, events)
 	}
 }
