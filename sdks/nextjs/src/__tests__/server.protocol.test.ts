@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ServerTracker } from '../server';
 import { PartialAcceptError } from '../wire';
 
-function stubFetch(responses: Array<{ status: number; body?: unknown }>) {
+function stubFetch(responses: Array<{ status: number; body?: unknown; headers?: Record<string, string> }>) {
   const calls: Array<{ init: RequestInit }> = [];
   let i = 0;
   vi.stubGlobal(
@@ -10,7 +10,7 @@ function stubFetch(responses: Array<{ status: number; body?: unknown }>) {
     vi.fn(async (_url: string, init: RequestInit) => {
       calls.push({ init });
       const r = responses[Math.min(i++, responses.length - 1)]!;
-      return new Response(r.body === undefined ? null : JSON.stringify(r.body), { status: r.status });
+      return new Response(r.body === undefined ? null : JSON.stringify(r.body), { status: r.status, headers: r.headers });
     }),
   );
   return calls;
@@ -66,6 +66,19 @@ describe('Next.js server wire protocol', () => {
     const error = onError.mock.calls[0]![0] as PartialAcceptError;
     expect(error).toBeInstanceOf(PartialAcceptError);
     expect(error.rejections).toEqual([{ event_id: 'e1', reason: 'bad' }]);
+  });
+
+  it('a 429 with Retry-After waits at least that long and retries the same batch', async () => {
+    const calls = stubFetch([{ status: 429, headers: { 'Retry-After': '1' } }, { status: 202 }]);
+    const started = Date.now();
+
+    await new ServerTracker('dk_test', { retryCount: 1 }).track(event);
+
+    expect(calls).toHaveLength(2);
+    expect(Date.now() - started).toBeGreaterThanOrEqual(900);
+    const first = JSON.parse(calls[0]!.init.body as string);
+    const second = JSON.parse(calls[1]!.init.body as string);
+    expect(second.batch_id).toBe(first.batch_id);
   });
 
   it('a permanent 400 is reported by throwing once and never retried', async () => {

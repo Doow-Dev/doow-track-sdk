@@ -7,7 +7,7 @@ interface Call {
   init: RequestInit;
 }
 
-function stubFetch(responses: Array<{ status: number; body?: unknown }>): Call[] {
+function stubFetch(responses: Array<{ status: number; body?: unknown; headers?: Record<string, string> }>): Call[] {
   const calls: Call[] = [];
   let i = 0;
   vi.stubGlobal(
@@ -15,7 +15,7 @@ function stubFetch(responses: Array<{ status: number; body?: unknown }>): Call[]
     vi.fn(async (url: string, init: RequestInit) => {
       calls.push({ url, init });
       const r = responses[Math.min(i++, responses.length - 1)]!;
-      return new Response(r.body === undefined ? null : JSON.stringify(r.body), { status: r.status });
+      return new Response(r.body === undefined ? null : JSON.stringify(r.body), { status: r.status, headers: r.headers });
     }),
   );
   return calls;
@@ -90,6 +90,21 @@ describe('React tracker wire protocol', () => {
     expect(second.batch_id).toBe(first.batch_id);
     expect(second.events[0].event_id).toBe(first.events[0].event_id);
     expect(onError).not.toHaveBeenCalled();
+  });
+
+  it('a 429 with Retry-After waits at least that long and retries the same batch', async () => {
+    const calls = stubFetch([{ status: 429, headers: { 'Retry-After': '1' } }, { status: 202 }]);
+    const tracker = new Tracker('dk_test', { flushIntervalMs: 60_000, retryCount: 1 });
+    tracker.track(event);
+    const started = Date.now();
+    await tracker.flush();
+    tracker.destroy();
+
+    expect(calls).toHaveLength(2);
+    expect(Date.now() - started).toBeGreaterThanOrEqual(900);
+    const first = JSON.parse(calls[0]!.init.body as string);
+    const second = JSON.parse(calls[1]!.init.body as string);
+    expect(second.batch_id).toBe(first.batch_id);
   });
 
   it('exhausted 5xx retries reach onError', async () => {

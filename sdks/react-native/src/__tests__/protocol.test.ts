@@ -18,7 +18,7 @@ vi.mock('@react-native-async-storage/async-storage', () => {
 import { Tracker } from '../tracker';
 import { PartialAcceptError, sanitizeText } from '../wire';
 
-function stubFetch(responses: Array<{ status: number; body?: unknown }>) {
+function stubFetch(responses: Array<{ status: number; body?: unknown; headers?: Record<string, string> }>) {
   const calls: Array<{ init: RequestInit }> = [];
   let i = 0;
   vi.stubGlobal(
@@ -26,7 +26,7 @@ function stubFetch(responses: Array<{ status: number; body?: unknown }>) {
     vi.fn(async (_url: string, init: RequestInit) => {
       calls.push({ init });
       const r = responses[Math.min(i++, responses.length - 1)]!;
-      return new Response(r.body === undefined ? null : JSON.stringify(r.body), { status: r.status });
+      return new Response(r.body === undefined ? null : JSON.stringify(r.body), { status: r.status, headers: r.headers });
     }),
   );
   return calls;
@@ -102,6 +102,21 @@ describe('React Native wire protocol', () => {
 
     expect(calls).toHaveLength(1);
     expect(onError).toHaveBeenCalledTimes(1);
+  });
+
+  it('a 429 with Retry-After waits at least that long and retries the same batch', async () => {
+    const calls = stubFetch([{ status: 429, headers: { 'Retry-After': '1' } }, { status: 202 }]);
+    const tracker = new Tracker('dk_test', { persistQueue: false, retryCount: 1 });
+    tracker.track(event);
+    const started = Date.now();
+    await tracker.flush();
+    
+
+    expect(calls).toHaveLength(2);
+    expect(Date.now() - started).toBeGreaterThanOrEqual(900);
+    const first = JSON.parse(calls[0]!.init.body as string);
+    const second = JSON.parse(calls[1]!.init.body as string);
+    expect(second.batch_id).toBe(first.batch_id);
   });
 
   it('a throwing onError handler never causes a resend of a recorded 207 batch', async () => {
