@@ -39,6 +39,8 @@ module DoowTrack
       @buffer = []
       @mutex = Mutex.new
       @stopping = false
+      @stop_mutex = Mutex.new
+      @stop_signal = ConditionVariable.new
       @flusher = start_flusher
     end
 
@@ -75,11 +77,11 @@ module DoowTrack
     end
 
     def shutdown
-      @stopping = true
-      if @flusher
-        @flusher.wakeup if @flusher.status == "sleep"
-        @flusher.join(SHUTDOWN_JOIN_SECONDS)
+      @stop_mutex.synchronize do
+        @stopping = true
+        @stop_signal.broadcast
       end
+      @flusher&.join(SHUTDOWN_JOIN_SECONDS)
       flush
     end
 
@@ -89,8 +91,10 @@ module DoowTrack
       return nil if @options[:flush_interval] <= 0
 
       Thread.new do
-        until @stopping
-          sleep @options[:flush_interval]
+        loop do
+          @stop_mutex.synchronize do
+            @stop_signal.wait(@stop_mutex, @options[:flush_interval]) unless @stopping
+          end
           break if @stopping
 
           begin

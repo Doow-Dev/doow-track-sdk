@@ -77,14 +77,16 @@ RSpec.describe DoowTrack::Tracker do
     expect(errors.first.rejections.first["event_id"]).to eq("evt-x")
   end
 
-  it "reuses the same batch id across retries" do
+  it "reuses the same batch id and event id across retries" do
+    sent = []
+    WebMock.after_request { |request, _response| sent << JSON.parse(request.body) }
     stub_request(:post, url).to_return({ status: 503 }, { status: 202 })
     track_one(tracker)
     tracker.flush
 
-    bodies = WebMock::RequestRegistry.instance.requested_signatures.hash.keys.map { |s| JSON.parse(s.body) }
-    expect(bodies.map { |b| b["batch_id"] }.uniq.size).to eq(1)
-    expect(bodies.map { |b| b["events"].first["event_id"] }.uniq.size).to eq(1)
+    expect(sent.size).to eq(2)
+    expect(sent.map { |b| b["batch_id"] }.uniq.size).to eq(1)
+    expect(sent.map { |b| b["events"].first["event_id"] }.uniq.size).to eq(1)
     expect(errors).to be_empty
   end
 
@@ -150,10 +152,13 @@ RSpec.describe DoowTrack::Tracker do
     stub_request(:post, url).to_return(status: 202)
     flusher = described_class.new("dk_test", endpoint: endpoint, flush_interval: 30, flush_at: 1000, retry_count: 0)
     track_one(flusher)
+    started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
     flusher.shutdown
+    elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
 
     expect(request_count).to eq(1)
     expect(flusher.instance_variable_get(:@flusher)).not_to be_alive
+    expect(elapsed).to be < 2
   end
 
   it "clamps Retry-After and tolerates garbage" do
