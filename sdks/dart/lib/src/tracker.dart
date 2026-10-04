@@ -166,7 +166,7 @@ class Tracker {
     try {
       await _sendWithRetry(batch);
     } catch (e) {
-      _options.onError?.call(e is DoowError ? e : DoowError(e.toString()));
+      _notify(e is DoowError ? e : DoowError(sanitizeText(e)));
       _log('Flush failed: $e');
     }
   }
@@ -205,7 +205,7 @@ class Tracker {
             .timeout(_options.timeout);
 
         if (response.statusCode == 207) {
-          _options.onError?.call(PartialAcceptError.fromBody(response.body, batchId));
+          _notify(PartialAcceptError.fromBody(response.body, batchId));
           return;
         }
 
@@ -227,7 +227,7 @@ class Tracker {
           continue;
         }
 
-        throw DoowError('HTTP ${response.statusCode}: ${response.body}',
+        throw DoowError('HTTP ${response.statusCode}: ${sanitizeText(response.body)}',
             statusCode: response.statusCode);
       } on DoowError {
         rethrow;
@@ -242,6 +242,12 @@ class Tracker {
     _flushTimer?.cancel();
     await flush();
     _shutdown = true;
+  }
+
+  void _notify(DoowError error) {
+    try {
+      _options.onError?.call(error);
+    } catch (_) {}
   }
 
   void _log(String message) {

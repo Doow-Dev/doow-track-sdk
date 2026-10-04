@@ -1,5 +1,18 @@
 import 'dart:convert';
 
+const _maxErrorText = 512;
+
+String sanitizeText(Object? value) {
+  final text = '$value'.replaceAll(RegExp(r'[\x00-\x1f\x7f]'), ' ');
+  return text.length > _maxErrorText ? '${text.substring(0, _maxErrorText)}...' : text;
+}
+
+int _toInt(Object? value) {
+  if (value is num) return value.toInt();
+  if (value is String) return int.tryParse(value) ?? 0;
+  return 0;
+}
+
 class DoowError implements Exception {
   final String message;
   final int? statusCode;
@@ -61,13 +74,14 @@ class PartialAcceptError extends DoowError {
     final rejections = raw is List
         ? raw
             .whereType<Map>()
-            .map((r) => EventRejection('${r['event_id']}', '${r['reason']}'))
+            .map((r) => EventRejection(
+                sanitizeText(r['event_id'] ?? 'unknown'), sanitizeText(r['reason'] ?? '')))
             .toList()
         : <EventRejection>[];
     return PartialAcceptError(
-      accepted: (data['accepted'] as num?)?.toInt() ?? 0,
-      rejected: (data['rejected'] as num?)?.toInt() ?? 0,
-      batchId: (data['batch_id'] as String?) ?? fallbackBatchId,
+      accepted: _toInt(data['accepted']),
+      rejected: _toInt(data['rejected']),
+      batchId: sanitizeText(data['batch_id'] ?? fallbackBatchId),
       rejections: rejections,
     );
   }

@@ -103,9 +103,12 @@ void main() {
 
   test('retries reuse the same batch id', () async {
     final ids = <String>[];
+    final eventIds = <String>[];
     var calls = 0;
     final client = MockClient((request) async {
-      ids.add((jsonDecode(request.body) as Map)['batch_id'] as String);
+      final decoded = jsonDecode(request.body) as Map;
+      ids.add(decoded['batch_id'] as String);
+      eventIds.add(((decoded['events'] as List).first as Map)['event_id'] as String);
       calls++;
       return http.Response('', calls == 1 ? 503 : 202);
     });
@@ -116,6 +119,8 @@ void main() {
 
     expect(ids.length, 2);
     expect(ids.toSet().length, 1);
+    expect(eventIds.length, 2);
+    expect(eventIds.toSet().length, 1);
   });
 
   test('permanent client errors are reported once and not retried', () async {
@@ -139,5 +144,56 @@ void main() {
     expect(parseRetryAfter('86400'), const Duration(seconds: 30));
     expect(parseRetryAfter('garbage'), isNull);
     expect(parseRetryAfter(null), isNull);
+  });
+
+  test('a throwing onError handler never causes a resend of a recorded 207 batch', () async {
+    var calls = 0;
+    final client = MockClient((request) async {
+      calls++;
+      return http.Response(
+        jsonEncode({'accepted': 0, 'rejected': 1, 'batch_id': 'b', 'rejections': [
+          {'event_id': 'e1', 'reason': 'bad'}
+        ]}),
+        207,
+      );
+    });
+    final tracker = Tracker(
+      'dk_test',
+      TrackerOptions(
+        flushInterval: const Duration(hours: 1),
+        retryCount: 3,
+        onError: (_) => throw StateError('handler failure'),
+        httpClient: client,
+      ),
+    );
+
+    tracker.track(sampleEvent());
+    await tracker.shutdown();
+
+    expect(calls, 1);
+  });
+
+  test('a malformed 207 body is reported and not resent', () async {
+    var calls = 0;
+    final client = MockClient((request) async {
+      calls++;
+      return http.Response(
+          jsonEncode({'accepted': 'abc', 'rejected': null, 'rejections': [1, 'x', {'event_id': 5}]}), 207);
+    });
+    final errors = <DoowError>[];
+    final tracker = trackerFor(client, errors, retries: 3);
+
+    tracker.track(sampleEvent());
+    await tracker.shutdown();
+
+    expect(calls, 1);
+    expect(errors.single, isA<PartialAcceptError>());
+  });
+
+  test('server text is sanitized and truncated', () {
+    final cleaned = sanitizeText('line1\nline2\x1b[31m${'x' * 2000}');
+    expect(cleaned.contains('\n'), isFalse);
+    expect(cleaned.contains('\x1b'), isFalse);
+    expect(cleaned.length, lessThanOrEqualTo(520));
   });
 }
