@@ -226,6 +226,7 @@ class Tracker
                 'headers' => $headers,
                 'body' => $reqBody,
                 'http_errors' => false,
+                'stream' => true,
             ]
         );
 

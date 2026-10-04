@@ -207,6 +207,27 @@ final class TrackerProtocolTest extends TestCase
         $this->assertSame([], $this->errors);
     }
 
+    public function testTheClientStreamsResponsesInsteadOfBufferingThem(): void
+    {
+        $options = [];
+        $handler = HandlerStack::create(new MockHandler([new Response(202)]));
+        $handler->push(function (callable $next) use (&$options) {
+            return function ($request, array $requestOptions) use ($next, &$options) {
+                $options = $requestOptions;
+
+                return $next($request, $requestOptions);
+            };
+        });
+        $tracker = new Tracker('dk_test', new TrackerOptions(
+            flushAt: 1000,
+            httpClient: new Client(['handler' => $handler]),
+        ));
+        $tracker->track($this->event());
+        $tracker->flush();
+
+        $this->assertTrue($options['stream'] ?? false);
+    }
+
     public function testRetryAfterIsClampedAndGarbageIgnored(): void
     {
         $this->assertSame(2.0, Tracker::parseRetryAfter('2'));
@@ -240,14 +261,22 @@ final class TrackerProtocolTest extends TestCase
         $this->assertStringContainsString('bytes', $cleaned);
     }
 
-    public function testChunkedBodiesAreReadToTheCapOrEof(): void
+    public function testAnEndlessBodyIsReadOnlyUpToTheCap(): void
     {
-        $big = json_encode(['message' => str_repeat('x', 3_000_000)]);
-        $tracker = $this->tracker([new Response(400, [], $big)], 0);
+        $served = 0;
+        $endless = \GuzzleHttp\Psr7\Utils::streamFor(function (int $size) use (&$served) {
+            $chunk = str_repeat('x', min($size, 8192));
+            $served += strlen($chunk);
+
+            return $chunk;
+        });
+        $tracker = $this->tracker([new Response(400, [], $endless)], 0);
         $tracker->track($this->event());
         $tracker->flush();
 
         $this->assertCount(1, $this->errors);
         $this->assertLessThanOrEqual(600, mb_strlen($this->errors[0]->getMessage()));
+        $this->assertGreaterThanOrEqual(1048576, $served);
+        $this->assertLessThanOrEqual(1048576 + 8192, $served);
     }
 }
