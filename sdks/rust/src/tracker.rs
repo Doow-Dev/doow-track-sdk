@@ -1,6 +1,6 @@
 //! Telemetry tracker for Doow SDK.
 
-use crate::error::{DoowError, Rejection, Result};
+use crate::error::{sanitize_text, DoowError, Rejection, Result};
 use crate::types::{EventKind, MetricTupleHint, SerializedEvent, TrackEvent};
 use chrono::Utc;
 use flate2::write::GzEncoder;
@@ -118,6 +118,26 @@ struct PartialAcceptBody {
     rejections: Vec<Rejection>,
 }
 
+const MAX_BODY_BYTES: usize = 1 << 20;
+const MAX_RETRY_AFTER: Duration = Duration::from_secs(30);
+
+async fn read_capped(resp: reqwest::Response) -> Vec<u8> {
+    if resp.content_length().map_or(false, |len| len as usize > MAX_BODY_BYTES) {
+        return Vec::new();
+    }
+    let mut bytes = resp.bytes().await.map(|b| b.to_vec()).unwrap_or_default();
+    bytes.truncate(MAX_BODY_BYTES);
+    bytes
+}
+
+pub(crate) fn parse_retry_after(header: Option<&str>) -> Option<Duration> {
+    let seconds: f64 = header?.trim().parse().ok()?;
+    if !seconds.is_finite() || seconds < 0.0 {
+        return None;
+    }
+    Some(Duration::from_secs_f64(seconds).min(MAX_RETRY_AFTER))
+}
+
 pub(crate) fn build_payload(batch_id: &str, events: &[SerializedEvent]) -> BatchPayload {
     BatchPayload {
         batch_id: batch_id.to_string(),
@@ -128,7 +148,13 @@ pub(crate) fn build_payload(batch_id: &str, events: &[SerializedEvent]) -> Batch
                 event_id: e.event_id.clone(),
                 license_id: e.license_id.clone(),
                 occurred_at: e.timestamp.clone(),
-                source_system: e.source_system.clone().unwrap_or_else(|| "sdk".to_string()),
+                source_system: e
+                    .source_system
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or("sdk")
+                    .to_string(),
                 kind: e.kind.clone(),
                 attribution: e.attribution.clone(),
                 metadata: e.metadata.clone(),
@@ -219,7 +245,7 @@ impl Tracker {
             eprintln!("[doow/track] {}", error);
         }
         if let Some(handler) = &options.on_error {
-            (handler.0)(error);
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| (handler.0)(error)));
         }
     }
 
@@ -301,10 +327,14 @@ impl Tracker {
         ));
 
         let mut last_error = None;
+        let mut server_delay: Option<Duration> = None;
 
         for attempt in 0..=self.options.retry_count {
             if attempt > 0 {
-                let backoff = Duration::from_millis(100 * (1 << (attempt - 1)).min(100));
+                let mut backoff = Duration::from_millis(100 * (1 << (attempt - 1)).min(100));
+                if let Some(delay) = server_delay.take() {
+                    backoff = backoff.max(delay);
+                }
                 tokio::time::sleep(backoff).await;
                 self.log(&format!("retry attempt {} after {:?}", attempt, backoff));
             }
@@ -318,6 +348,10 @@ impl Tracker {
                     if !e.is_retryable() {
                         return Err(e);
                     }
+                    server_delay = match &e {
+                        DoowError::Api { retry_after, .. } => *retry_after,
+                        _ => None,
+                    };
                     last_error = Some(e);
                 }
             }
@@ -350,36 +384,53 @@ impl Tracker {
         let resp = req.body(req_body).send().await?;
 
         let status = resp.status().as_u16();
+        let retry_after = parse_retry_after(
+            resp.headers().get("retry-after").and_then(|v| v.to_str().ok()),
+        );
+        let body_bytes = read_capped(resp).await;
 
         if status == 207 {
-            let body: PartialAcceptBody = resp.json().await.unwrap_or(PartialAcceptBody {
-                accepted: 0,
-                rejected: 0,
-                batch_id: String::new(),
-                rejections: Vec::new(),
-            });
+            let body: PartialAcceptBody =
+                serde_json::from_slice(&body_bytes).unwrap_or(PartialAcceptBody {
+                    accepted: 0,
+                    rejected: 0,
+                    batch_id: String::new(),
+                    rejections: Vec::new(),
+                });
             return Err(DoowError::PartialAccept {
                 accepted: body.accepted,
                 rejected: body.rejected,
-                batch_id: body.batch_id,
-                rejections: body.rejections,
+                batch_id: sanitize_text(&body.batch_id),
+                rejections: body
+                    .rejections
+                    .into_iter()
+                    .map(|r| Rejection {
+                        event_id: sanitize_text(&r.event_id),
+                        reason: sanitize_text(&r.reason),
+                    })
+                    .collect(),
             });
         }
 
-        if resp.status().is_success() {
+        if (200..300).contains(&status) {
             return Ok(());
         }
 
-        let error_resp: ApiErrorResponse = resp.json().await.unwrap_or(ApiErrorResponse {
-            message: None,
-            error_class: None,
-        });
+        let error_resp: ApiErrorResponse =
+            serde_json::from_slice(&body_bytes).unwrap_or(ApiErrorResponse {
+                message: None,
+                error_class: None,
+            });
 
-        Err(DoowError::api(
+        let mut error = DoowError::api(
             status,
             error_resp.message.unwrap_or_else(|| "Unknown error".to_string()),
             error_resp.error_class,
-        ))
+        );
+        if let DoowError::Api { retry_after: slot, .. } = &mut error {
+            *slot = if status == 429 { retry_after } else { None };
+        }
+        Err(error)
     }
 
     async fn flush_loop(
@@ -591,5 +642,86 @@ mod tests {
             *errors.lock().unwrap(),
             vec!["e2:license_id is required".to_string()]
         );
+    }
+
+    #[test]
+    fn blank_source_system_defaults_to_sdk() {
+        let mut e = event("e1");
+        e.source_system = Some("  ".to_string());
+        let json = serde_json::to_value(build_payload("b1", &[e])).unwrap();
+        assert_eq!(json["events"][0]["source_system"], "sdk");
+    }
+
+    #[test]
+    fn retry_after_is_clamped_and_garbage_ignored() {
+        assert_eq!(parse_retry_after(Some("2")), Some(Duration::from_secs(2)));
+        assert_eq!(parse_retry_after(Some("86400")), Some(MAX_RETRY_AFTER));
+        assert_eq!(parse_retry_after(Some("garbage")), None);
+        assert_eq!(parse_retry_after(None), None);
+    }
+
+    #[test]
+    fn server_text_is_sanitized_and_truncated() {
+        let cleaned = sanitize_text(&format!("line1\nline2\u{1b}[31m{}", "x".repeat(2000)));
+        assert!(!cleaned.contains('\n') && !cleaned.contains('\u{1b}'));
+        assert!(cleaned.chars().count() <= 520);
+    }
+
+    #[tokio::test]
+    async fn permanent_client_error_is_not_retried() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/telemetry/events"))
+            .respond_with(ResponseTemplate::new(400).set_body_json(serde_json::json!({"message": "bad"})))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let errors = Arc::new(StdMutex::new(Vec::new()));
+        let tracker = tracker_for(&server, errors);
+        let result = tracker.send_batch(vec![event("e1")]).await;
+        assert!(matches!(result, Err(DoowError::Api { status: 400, .. })));
+    }
+
+    #[test]
+    fn every_5xx_and_408_is_retryable_but_other_4xx_is_not() {
+        for status in [408u16, 429, 500, 502, 503, 504, 520, 522, 524] {
+            assert!(DoowError::api(status, "x", None).is_retryable(), "{status}");
+        }
+        for status in [400u16, 401, 403, 404, 413, 422] {
+            assert!(!DoowError::api(status, "x", None).is_retryable(), "{status}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_panicking_error_handler_does_not_unwind_into_the_caller() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/telemetry/events"))
+            .respond_with(ResponseTemplate::new(207).set_body_json(serde_json::json!({
+                "accepted": 0, "rejected": 1, "batch_id": "b",
+                "rejections": [{"event_id": "e", "reason": "bad"}]
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let tracker = Tracker::new(
+            "dk_test",
+            Some(TrackerOptions {
+                endpoint: server.uri(),
+                retry_count: 2,
+                flush_at: 1000,
+                on_error: Some(ErrorHandler(Arc::new(|_| panic!("handler failure")))),
+                ..Default::default()
+            }),
+        );
+        tracker
+            .track(TrackEvent {
+                metric: "m".to_string(),
+                quantity: 1.0,
+                license_id: "l".to_string(),
+                ..Default::default()
+            })
+            .await;
+        tracker.flush().await;
     }
 }
