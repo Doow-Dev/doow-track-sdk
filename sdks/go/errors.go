@@ -2,7 +2,9 @@ package doow
 
 import (
 	"fmt"
+	"strings"
 	"time"
+	"unicode"
 )
 
 // APIError represents an error from the Doow API
@@ -67,4 +69,27 @@ func (e *PartialAcceptError) Error() string {
 // IsPermanent reports a 4xx other than 429, which no retry can fix.
 func (e *APIError) IsPermanent() bool {
 	return e.Status >= 400 && e.Status < 500 && e.Status != 429
+}
+
+const maxErrorText = 512
+
+func sanitizeText(text string) string {
+	cleaned := strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return ' '
+		}
+		return r
+	}, text)
+	if runes := []rune(cleaned); len(runes) > maxErrorText {
+		return string(runes[:maxErrorText]) + "..."
+	}
+	return cleaned
+}
+
+func (e *PartialAcceptError) sanitize() {
+	e.BatchID = sanitizeText(e.BatchID)
+	for i := range e.Rejections {
+		e.Rejections[i].EventID = sanitizeText(e.Rejections[i].EventID)
+		e.Rejections[i].Reason = sanitizeText(e.Rejections[i].Reason)
+	}
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -473,4 +474,101 @@ func (m *memoryStore) Length() (int, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return len(m.batches), nil
+}
+
+func TestTracker_ShutdownTwiceDoesNotPanicAndLateTracksAreDropped(t *testing.T) {
+	var mu sync.Mutex
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		requests++
+		mu.Unlock()
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer server.Close()
+
+	tracker := NewTracker("dk_test_key", &TrackerOptions{Endpoint: server.URL, FlushAt: 1000, FlushInterval: time.Hour})
+	tracker.Shutdown()
+	tracker.Shutdown()
+	tracker.Track(TrackEvent{Metric: "api_calls", Quantity: 1, LicenseID: "lic_1"})
+	tracker.Flush()
+
+	mu.Lock()
+	defer mu.Unlock()
+	if requests != 0 {
+		t.Fatalf("a late Track after Shutdown must be dropped, got %d requests", requests)
+	}
+}
+
+func TestTracker_PanickingErrorHandlerDoesNotCrashOrResend(t *testing.T) {
+	var mu sync.Mutex
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		calls++
+		mu.Unlock()
+		w.WriteHeader(http.StatusMultiStatus)
+		w.Write([]byte(`{"accepted":0,"rejected":1,"batch_id":"b","rejections":[{"event_id":"e","reason":"bad"}]}`))
+	}))
+	defer server.Close()
+
+	tracker := NewTracker("dk_test_key", &TrackerOptions{
+		Endpoint:      server.URL,
+		FlushAt:       1000,
+		FlushInterval: time.Hour,
+		RetryCount:    3,
+		OnError:       func(err error) { panic("handler failure") },
+	})
+	tracker.Track(TrackEvent{Metric: "api_calls", Quantity: 1, LicenseID: "lic_1"})
+	tracker.Shutdown()
+
+	mu.Lock()
+	defer mu.Unlock()
+	if calls != 1 {
+		t.Fatalf("expected one request, got %d", calls)
+	}
+}
+
+func TestTracker_MalformedPartialAcceptBodyIsReportedWithoutResend(t *testing.T) {
+	var mu sync.Mutex
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		calls++
+		mu.Unlock()
+		w.WriteHeader(http.StatusMultiStatus)
+		w.Write([]byte(`{"accepted":"abc","rejected":null,"rejections":[1,"x"]}`))
+	}))
+	defer server.Close()
+
+	var errs []error
+	tracker := NewTracker("dk_test_key", &TrackerOptions{
+		Endpoint:      server.URL,
+		FlushAt:       1000,
+		FlushInterval: time.Hour,
+		RetryCount:    3,
+		OnError: func(err error) {
+			mu.Lock()
+			errs = append(errs, err)
+			mu.Unlock()
+		},
+	})
+	tracker.Track(TrackEvent{Metric: "api_calls", Quantity: 1, LicenseID: "lic_1"})
+	tracker.Shutdown()
+
+	mu.Lock()
+	defer mu.Unlock()
+	if calls != 1 || len(errs) != 1 {
+		t.Fatalf("expected 1 request and 1 error, got %d and %d", calls, len(errs))
+	}
+	if _, ok := errs[0].(*PartialAcceptError); !ok {
+		t.Fatalf("expected *PartialAcceptError, got %T", errs[0])
+	}
+}
+
+func TestSanitizeText(t *testing.T) {
+	cleaned := sanitizeText("line1\nline2\x1b[31m" + strings.Repeat("x", 2000))
+	if strings.ContainsAny(cleaned, "\n\x1b") || len([]rune(cleaned)) > 520 {
+		t.Fatalf("not sanitized: %q", cleaned[:40])
+	}
 }

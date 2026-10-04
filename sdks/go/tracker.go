@@ -8,10 +8,12 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -67,6 +69,8 @@ type Tracker struct {
 	flushSem   chan struct{}
 	rateLimit  *RateLimit
 	inflight   sync.WaitGroup
+	closed     atomic.Bool
+	closeOnce  sync.Once
 }
 
 // NewTracker creates a new telemetry tracker
@@ -155,6 +159,12 @@ func NewTracker(apiKey string, opts *TrackerOptions) *Tracker {
 		}
 	}
 
+	reportError := onError
+	onError = func(err error) {
+		defer func() { _ = recover() }()
+		reportError(err)
+	}
+
 	t := &Tracker{
 		apiKey:               apiKey,
 		endpoint:             endpoint,
@@ -194,6 +204,10 @@ func (t *Tracker) log(format string, args ...interface{}) {
 // Track queues a telemetry event for submission
 func (t *Tracker) Track(event TrackEvent) {
 	if !t.enabled {
+		return
+	}
+	if t.closed.Load() {
+		t.log("tracker is shut down, dropping event")
 		return
 	}
 
@@ -444,17 +458,19 @@ func (t *Tracker) doSend(body []byte) error {
 
 	if resp.StatusCode == http.StatusMultiStatus {
 		var partial PartialAcceptError
-		if err := json.NewDecoder(resp.Body).Decode(&partial); err != nil {
+		if err := json.NewDecoder(io.LimitReader(resp.Body, maxResponseBytes)).Decode(&partial); err != nil {
 			t.log("unparseable 207 body: %v", err)
 		}
+		partial.sanitize()
 		return &partial
 	}
 
 	if resp.StatusCode >= 400 {
 		var apiErr APIError
-		if err := json.NewDecoder(resp.Body).Decode(&apiErr); err != nil {
+		if err := json.NewDecoder(io.LimitReader(resp.Body, maxResponseBytes)).Decode(&apiErr); err != nil {
 			apiErr = APIError{Status: resp.StatusCode, Message: resp.Status}
 		}
+		apiErr.Message = sanitizeText(apiErr.Message)
 		apiErr.Status = resp.StatusCode
 		apiErr.RetryAfter = parseRetryAfter(resp.Header.Get("Retry-After"))
 		return &apiErr
@@ -519,7 +535,10 @@ func (t *Tracker) drainOfflineStore() {
 
 // Shutdown flushes remaining events and stops the tracker
 func (t *Tracker) Shutdown() error {
-	close(t.shutdown)
+	t.closeOnce.Do(func() {
+		t.closed.Store(true)
+		close(t.shutdown)
+	})
 
 	select {
 	case <-t.done:
@@ -535,6 +554,7 @@ func (t *Tracker) GetRateLimit() *RateLimit {
 }
 
 const maxRetryAfter = 30 * time.Second
+const maxResponseBytes = 1 << 20
 
 func parseRetryAfter(header string) time.Duration {
 	if header == "" {
