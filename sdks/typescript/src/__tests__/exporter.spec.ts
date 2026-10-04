@@ -1,3 +1,4 @@
+import { gunzipSync } from 'zlib';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Exporter } from '../exporter.js';
 import type { CustomTransport, SerializedEvent, TransportPayload, TransportResponse } from '../types.js';
@@ -257,6 +258,56 @@ describe('Exporter — S78', () => {
       expect(onError).toHaveBeenCalledWith(
         expect.objectContaining({ kind: 'PARTIAL_ACCEPT', rejectedEventIds: [] }),
       );
+    });
+
+    it('permanent 400 is reported once and never retried', async () => {
+      const onError = vi.fn();
+      const { transport, calls } = makeTransport(400);
+      const exporter = makeExporter(transport, { onError, retryCount: 3 });
+
+      await exporter.flush(makeEvents(1));
+
+      expect(calls).toHaveLength(1);
+      expect(onError).toHaveBeenCalledTimes(1);
+      expect(onError).toHaveBeenCalledWith(expect.objectContaining({ statusCode: 400 }));
+    });
+
+    it('a throwing onError handler never escapes flush', async () => {
+      const onError = vi.fn(() => {
+        throw new Error('handler failure');
+      });
+      const { transport } = makeTransport(400);
+      const exporter = makeExporter(transport, { onError, retryCount: 0 });
+
+      await expect(exporter.flush(makeEvents(1))).resolves.toBeUndefined();
+      expect(onError).toHaveBeenCalled();
+    });
+
+    it('Retry-After is clamped to 30 seconds and tolerates garbage', () => {
+      const exporter = makeExporter(makeTransport(202).transport) as unknown as {
+        _parseRetryAfter(header: string | undefined): number | undefined;
+      };
+
+      expect(exporter._parseRetryAfter('2')).toBe(2000);
+      expect(exporter._parseRetryAfter('86400')).toBe(30_000);
+      expect(exporter._parseRetryAfter('garbage')).toBeUndefined();
+      expect(exporter._parseRetryAfter(undefined)).toBeUndefined();
+    });
+
+    it('large bodies are a real gzip stream', async () => {
+      const bodies: string[] = [];
+      const transport: CustomTransport = {
+        send: async (payload) => {
+          expect(payload.headers['Content-Encoding']).toBe('gzip');
+          bodies.push(gunzipSync(payload.body).toString('utf8'));
+          return { status: 202, headers: {}, body: '{}' };
+        },
+      };
+      const exporter = makeExporter(transport, { disableCompression: false });
+
+      await exporter.flush(makeEvents(50));
+
+      expect(JSON.parse(bodies[0]!).events).toHaveLength(50);
     });
 
     it('401 → stops emitting permanently', async () => {

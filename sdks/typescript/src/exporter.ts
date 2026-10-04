@@ -38,6 +38,8 @@ async function gzipBuffer(data: Buffer): Promise<Buffer> {
   });
 }
 
+const MAX_RETRY_AFTER_MS = 30_000;
+
 // Replaced at build time by @rollup/plugin-replace (rollup) and vitest define (tests)
 declare const __SDK_VERSION__: string;
 const SDK_VERSION = __SDK_VERSION__;
@@ -136,6 +138,14 @@ export class Exporter {
       if (this._pendingFlush === next) {
         this._pendingFlush = null;
       }
+    }
+  }
+
+  private _report(error: SdkError): void {
+    try {
+      this.config.onError(error);
+    } catch {
+      this.config.debug.warn('onError handler threw — ignored');
     }
   }
 
@@ -266,7 +276,7 @@ export class Exporter {
       if (sdkErr.statusCode === 401) {
         // Auth failure — stop permanently
         this._stopped = true;
-        this.config.onError({
+        this._report({
           kind: 'AUTH_FAILURE',
           message: 'API key rejected (401). Stopping SDK.',
           statusCode: 401,
@@ -299,7 +309,7 @@ export class Exporter {
         const retryAfterMs =
           sdkErr.retryAfterMs ?? this._backoff(this.config.retryCount - retriesLeft);
         this.config.debug.log(`429 rate limited — waiting ${retryAfterMs}ms`);
-        this.config.onError({
+        this._report({
           kind: 'RATE_LIMITED',
           message: `Rate limited (429). Retry after ${retryAfterMs}ms.`,
           statusCode: 429,
@@ -310,6 +320,20 @@ export class Exporter {
         return await this._sendWithRetry(events, retriesLeft - 1, resolvedBatchId);
       }
 
+      if (
+        sdkErr.statusCode !== undefined &&
+        sdkErr.statusCode >= 400 &&
+        sdkErr.statusCode < 500
+      ) {
+        this._report({
+          kind: sdkErr.kind ?? 'TRANSPORT_ERROR',
+          message: sdkErr.message,
+          statusCode: sdkErr.statusCode,
+          rejectedEventIds: events.map((e) => e.event_id),
+        });
+        return;
+      }
+
       if (retriesLeft <= 0) {
         const errPayload: SdkError = {
           kind: sdkErr.kind ?? 'NETWORK_ERROR',
@@ -318,7 +342,7 @@ export class Exporter {
         };
         if (sdkErr.statusCode !== undefined) errPayload.statusCode = sdkErr.statusCode;
         if (sdkErr.cause instanceof Error) errPayload.error = sdkErr.cause;
-        this.config.onError(errPayload);
+        this._report(errPayload);
         // S80: Persist to offline store if configured
         await this._persistToOfflineStore(resolvedBatchId, events);
         return;
@@ -427,7 +451,7 @@ export class Exporter {
       } catch {
         this.config.debug.warn('Non-JSON 207 body — rejection details unavailable');
       }
-      this.config.onError({
+      this._report({
         kind: 'PARTIAL_ACCEPT',
         message:
           rejections.length > 0
@@ -564,10 +588,9 @@ export class Exporter {
   private _parseRetryAfter(header: string | undefined): number | undefined {
     if (!header) return undefined;
     const seconds = parseFloat(header);
-    if (!isNaN(seconds)) return Math.round(seconds * 1000);
-    const date = new Date(header).getTime();
-    if (!isNaN(date)) return Math.max(0, date - Date.now());
-    return undefined;
+    const ms = !isNaN(seconds) ? Math.round(seconds * 1000) : new Date(header).getTime() - Date.now();
+    if (isNaN(ms)) return undefined;
+    return Math.min(Math.max(0, ms), MAX_RETRY_AFTER_MS);
   }
 
   private _sleep(ms: number): Promise<void> {
