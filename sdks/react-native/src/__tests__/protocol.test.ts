@@ -110,7 +110,7 @@ describe('React Native wire protocol', () => {
     tracker.track(event);
     const started = Date.now();
     await tracker.flush();
-    
+
 
     expect(calls).toHaveLength(2);
     expect(Date.now() - started).toBeGreaterThanOrEqual(900);
@@ -125,7 +125,7 @@ describe('React Native wire protocol', () => {
     tracker.track(event);
     const started = Date.now();
     await tracker.flush();
-    
+
 
     expect(calls).toHaveLength(2);
     expect(Date.now() - started).toBeGreaterThanOrEqual(900);
