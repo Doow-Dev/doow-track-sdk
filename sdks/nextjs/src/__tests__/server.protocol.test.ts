@@ -81,6 +81,19 @@ describe('Next.js server wire protocol', () => {
     expect(second.batch_id).toBe(first.batch_id);
   });
 
+  it('a 503 in-flight response with Retry-After waits at least that long and retries the same batch', async () => {
+    const calls = stubFetch([{ status: 503, headers: { 'Retry-After': '1' } }, { status: 202 }]);
+    const started = Date.now();
+
+    await new ServerTracker('dk_test', { retryCount: 1 }).track(event);
+
+    expect(calls).toHaveLength(2);
+    expect(Date.now() - started).toBeGreaterThanOrEqual(900);
+    const first = JSON.parse(calls[0]!.init.body as string);
+    const second = JSON.parse(calls[1]!.init.body as string);
+    expect(second.batch_id).toBe(first.batch_id);
+  });
+
   it('a permanent 400 is reported by throwing once and never retried', async () => {
     const calls = stubFetch([{ status: 400, body: { message: 'bad' } }]);
 

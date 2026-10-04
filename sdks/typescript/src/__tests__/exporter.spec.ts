@@ -350,6 +350,28 @@ describe('Exporter — S78', () => {
       expect(reason).not.toContain('\u009b');
     });
 
+    it('a 503 with Retry-After waits at least that long before the same batch is retried', async () => {
+      const bodies: Array<{ batch_id: string }> = [];
+      let attempt = 0;
+      const transport: CustomTransport = {
+        send: async (payload) => {
+          bodies.push(JSON.parse(payload.body.toString()) as { batch_id: string });
+          attempt++;
+          return attempt === 1
+            ? { status: 503, headers: { 'retry-after': '0.4' }, body: '{}' }
+            : { status: 202, headers: {}, body: '{}' };
+        },
+      };
+      const exporter = makeExporter(transport, { retryCount: 1, disableCompression: true });
+
+      const started = Date.now();
+      await exporter.flush(makeEvents(1));
+
+      expect(bodies).toHaveLength(2);
+      expect(Date.now() - started).toBeGreaterThanOrEqual(350);
+      expect(bodies[1]!.batch_id).toBe(bodies[0]!.batch_id);
+    });
+
     it('permanent 400 is reported once and never retried', async () => {
       const onError = vi.fn();
       const { transport, calls } = makeTransport(400);

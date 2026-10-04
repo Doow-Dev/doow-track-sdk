@@ -208,7 +208,9 @@ export class ClientTracker {
             throw new Error(`HTTP ${response.status} after ${attempt + 1} attempts`);
           }
           const retryAfter =
-            response.status === 429 ? parseRetryAfterMs(response.headers.get('Retry-After')) : undefined;
+            response.status === 429 || response.status === 503
+              ? parseRetryAfterMs(response.headers.get('Retry-After'))
+              : undefined;
           const delay = retryAfter ?? 100 * Math.pow(2, attempt);
           await this.sleep(delay);
           continue;

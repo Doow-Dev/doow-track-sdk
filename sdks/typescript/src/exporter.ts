@@ -361,8 +361,11 @@ export class Exporter {
         return;
       }
 
-      // Exponential backoff for non-429 retryable errors
-      const delay = this._backoff(this.config.retryCount - retriesLeft);
+      // Exponential backoff for non-429 retryable errors; a 503 may also carry Retry-After
+      const delay = Math.max(
+        sdkErr.retryAfterMs ?? 0,
+        this._backoff(this.config.retryCount - retriesLeft),
+      );
       this.config.debug.log(`Retry in ${delay}ms, ${retriesLeft - 1} retries left`);
       await this._sleep(delay);
       await this._sendWithRetry(events, retriesLeft - 1, resolvedBatchId);
@@ -508,7 +511,16 @@ export class Exporter {
     }
 
     if (response.status >= 500) {
-      throw new SdkHttpError('TRANSPORT_ERROR', `Server error ${response.status}`, response.status);
+      const retryAfterMs =
+        response.status === 503
+          ? this._parseRetryAfter(response.headers['retry-after'] ?? response.headers['Retry-After'])
+          : undefined;
+      throw new SdkHttpError(
+        'TRANSPORT_ERROR',
+        `Server error ${response.status}`,
+        response.status,
+        retryAfterMs,
+      );
     }
 
     // Other 4xx — don't retry

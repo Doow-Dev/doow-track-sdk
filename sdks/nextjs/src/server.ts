@@ -82,7 +82,10 @@ export class ServerTracker {
         }
 
         if (response.status === 429 || response.status >= 500) {
-          retryAfterMs = response.status === 429 ? parseRetryAfterMs(response.headers.get('Retry-After')) : undefined;
+          retryAfterMs =
+            response.status === 429 || response.status === 503
+              ? parseRetryAfterMs(response.headers.get('Retry-After'))
+              : undefined;
           throw new Error(`HTTP ${response.status}`);
         }
 

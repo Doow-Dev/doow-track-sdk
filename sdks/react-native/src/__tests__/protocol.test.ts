@@ -119,6 +119,21 @@ describe('React Native wire protocol', () => {
     expect(second.batch_id).toBe(first.batch_id);
   });
 
+  it('a 503 in-flight response with Retry-After waits at least that long and retries the same batch', async () => {
+    const calls = stubFetch([{ status: 503, headers: { 'Retry-After': '1' } }, { status: 202 }]);
+    const tracker = new Tracker('dk_test', { persistQueue: false, retryCount: 1 });
+    tracker.track(event);
+    const started = Date.now();
+    await tracker.flush();
+    
+
+    expect(calls).toHaveLength(2);
+    expect(Date.now() - started).toBeGreaterThanOrEqual(900);
+    const first = JSON.parse(calls[0]!.init.body as string);
+    const second = JSON.parse(calls[1]!.init.body as string);
+    expect(second.batch_id).toBe(first.batch_id);
+  });
+
   it('a throwing onError handler never causes a resend of a recorded 207 batch', async () => {
     const calls = stubFetch([
       { status: 207, body: { accepted: 0, rejected: 1, batch_id: 'b', rejections: [{ event_id: 'e1', reason: 'bad' }] } },
