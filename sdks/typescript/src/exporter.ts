@@ -320,11 +320,7 @@ export class Exporter {
         return await this._sendWithRetry(events, retriesLeft - 1, resolvedBatchId);
       }
 
-      if (
-        sdkErr.statusCode !== undefined &&
-        sdkErr.statusCode >= 400 &&
-        sdkErr.statusCode < 500
-      ) {
+      if (sdkErr.statusCode !== undefined && sdkErr.statusCode >= 400 && sdkErr.statusCode < 500) {
         this._report({
           kind: sdkErr.kind ?? 'TRANSPORT_ERROR',
           message: sdkErr.message,
@@ -588,7 +584,9 @@ export class Exporter {
   private _parseRetryAfter(header: string | undefined): number | undefined {
     if (!header) return undefined;
     const seconds = parseFloat(header);
-    const ms = !isNaN(seconds) ? Math.round(seconds * 1000) : new Date(header).getTime() - Date.now();
+    const ms = !isNaN(seconds)
+      ? Math.round(seconds * 1000)
+      : new Date(header).getTime() - Date.now();
     if (isNaN(ms)) return undefined;
     return Math.min(Math.max(0, ms), MAX_RETRY_AFTER_MS);
   }
