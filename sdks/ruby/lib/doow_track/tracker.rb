@@ -154,7 +154,7 @@ module DoowTrack
           event_id: h[:event_id],
           license_id: h[:license_id],
           occurred_at: h[:timestamp],
-          source_system: h[:source_system] || "sdk",
+          source_system: h[:source_system].to_s.strip.empty? ? "sdk" : h[:source_system],
           kind: h[:kind],
           attribution: h[:attribution],
           metadata: h[:metadata],

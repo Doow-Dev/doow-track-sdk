@@ -85,6 +85,16 @@ final class TrackerProtocolTests {
         #expect(errors.isEmpty)
     }
 
+    @Test func blankSourceSystemDefaultsToSdk() throws {
+        let tracker = try makeTracker()
+        tracker.track(TrackEvent(metric: "api_calls", quantity: 1, licenseId: "lic_1", sourceSystem: " "))
+        tracker.flush()
+
+        let body = try json(StubURLProtocol.requests[0].body)
+        let event = try #require((body["events"] as? [[String: Any]])?.first)
+        #expect(event["source_system"] as? String == "sdk")
+    }
+
     @Test func partialAcceptReportsRejectionsWithoutRetry() throws {
         StubURLProtocol.responder = { _ in
             (207, Data(#"{"accepted":1,"rejected":1,"batch_id":"b","rejections":[{"event_id":"evt-x","reason":"license_id is required"}]}"#.utf8))

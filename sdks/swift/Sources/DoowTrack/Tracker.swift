@@ -183,7 +183,7 @@ public class Tracker {
                     eventId: buffered.eventId,
                     licenseId: e.licenseId,
                     occurredAt: e.timestamp ?? Date(),
-                    sourceSystem: e.sourceSystem ?? "sdk",
+                    sourceSystem: e.sourceSystem.flatMap { $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : $0 } ?? "sdk",
                     kind: e.kind,
                     attribution: e.attribution,
                     metadata: e.metadata,

@@ -82,9 +82,18 @@ RSpec.describe DoowTrack::Tracker do
     track_one(tracker)
     tracker.flush
 
-    ids = WebMock::RequestRegistry.instance.requested_signatures.hash.keys.map { |s| JSON.parse(s.body)["batch_id"] }
-    expect(ids.uniq.size).to eq(1)
+    bodies = WebMock::RequestRegistry.instance.requested_signatures.hash.keys.map { |s| JSON.parse(s.body) }
+    expect(bodies.map { |b| b["batch_id"] }.uniq.size).to eq(1)
+    expect(bodies.map { |b| b["events"].first["event_id"] }.uniq.size).to eq(1)
     expect(errors).to be_empty
+  end
+
+  it "defaults a blank source_system to sdk" do
+    stub_request(:post, url).to_return(status: 202)
+    track_one(tracker, source_system: " ")
+    tracker.flush
+
+    expect(a_request(:post, url).with { |r| body_of(r)["events"].first["source_system"] == "sdk" }).to have_been_made
   end
 
   it "does not retry a 401 and reports it" do
