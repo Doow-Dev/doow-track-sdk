@@ -266,3 +266,41 @@ def test_server_text_is_sanitized_and_truncated():
     error = APIError(status=500, message="line1\nline2\x1b[31m\x9b31m" + "x" * 2000)
     assert "\n" not in error.message and "\x1b" not in error.message and "\x9b" not in error.message
     assert len(error.message) <= 520
+
+
+def test_rate_limited_batch_waits_for_retry_after_and_retries_the_same_batch(httpx_mock):
+    import time
+
+    httpx_mock.add_response(status_code=429, headers={"Retry-After": "1"})
+    httpx_mock.add_response(status_code=202, json={"accepted": 1, "rejected": 0})
+    errors: list = []
+    tracker = Tracker("dk_test", _options(errors, retry_count=1))
+    tracker.track(_event())
+    started = time.monotonic()
+    tracker.flush()
+    elapsed = time.monotonic() - started
+    tracker._shutdown.set()
+
+    first, second = (json.loads(r.content) for r in httpx_mock.get_requests())
+    assert elapsed >= 0.9
+    assert first["batch_id"] == second["batch_id"]
+    assert errors == []
+
+
+@pytest.mark.asyncio
+async def test_async_rate_limited_batch_waits_for_retry_after(httpx_mock):
+    import time
+
+    httpx_mock.add_response(status_code=429, headers={"Retry-After": "1"})
+    httpx_mock.add_response(status_code=202, json={"accepted": 1, "rejected": 0})
+    errors: list = []
+    tracker = AsyncTracker("dk_test", _options(errors, retry_count=1))
+    await tracker.track(_event())
+    started = time.monotonic()
+    await tracker.flush()
+    elapsed = time.monotonic() - started
+    await tracker.shutdown()
+
+    assert len(httpx_mock.get_requests()) == 2
+    assert elapsed >= 0.9
+    assert errors == []

@@ -572,3 +572,46 @@ func TestSanitizeText(t *testing.T) {
 		t.Fatalf("not sanitized: %q", cleaned[:40])
 	}
 }
+
+func TestTracker_RateLimitedBatchWaitsForRetryAfterAndRetriesTheSameBatch(t *testing.T) {
+	var mu sync.Mutex
+	var payloads []BatchPayload
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload BatchPayload
+		json.NewDecoder(r.Body).Decode(&payload)
+		mu.Lock()
+		payloads = append(payloads, payload)
+		attempt := len(payloads)
+		mu.Unlock()
+		if attempt == 1 {
+			w.Header().Set("Retry-After", "1")
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer server.Close()
+
+	tracker := NewTracker("dk_test_key", &TrackerOptions{
+		Endpoint:      server.URL,
+		FlushAt:       1000,
+		FlushInterval: time.Hour,
+		RetryCount:    1,
+	})
+	tracker.Track(TrackEvent{Metric: "api_calls", Quantity: 1, LicenseID: "lic_1"})
+	started := time.Now()
+	tracker.Shutdown()
+	elapsed := time.Since(started)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(payloads) != 2 {
+		t.Fatalf("expected 2 attempts, got %d", len(payloads))
+	}
+	if elapsed < 900*time.Millisecond {
+		t.Fatalf("retry came after %v, before the 1s Retry-After", elapsed)
+	}
+	if payloads[0].BatchID != payloads[1].BatchID {
+		t.Fatalf("batch id changed across the rate-limited retry")
+	}
+}
