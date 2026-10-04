@@ -1,14 +1,13 @@
 import { AppState, AppStateStatus } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { TrackEvent, TrackerOptions } from './types';
-
-function generateUUID(): string {
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-    const r = (Math.random() * 16) | 0;
-    const v = c === 'x' ? r : (r & 0x3) | 0x8;
-    return v.toString(16);
-  });
-}
+import {
+  NonRetryableError,
+  generateUUID,
+  readPartialAccept,
+  toWireBatch,
+  type QueuedEvent,
+} from './wire';
 
 const STORAGE_KEY = '@doow/track/queue';
 
@@ -30,7 +29,7 @@ export class Tracker {
     attribution?: Record<string, unknown>;
     onError?: (error: Error) => void;
   };
-  private queue: TrackEvent[] = [];
+  private queue: QueuedEvent[] = [];
   private flushTimer: ReturnType<typeof setInterval> | null = null;
   private shutdown = false;
   private appStateSubscription: { remove: () => void } | null = null;
@@ -55,7 +54,12 @@ export class Tracker {
     try {
       const stored = await AsyncStorage.getItem(STORAGE_KEY);
       if (stored) {
-        this.queue = JSON.parse(stored);
+        const parsed = JSON.parse(stored) as Array<Partial<QueuedEvent> & TrackEvent>;
+        this.queue = parsed.map((e) => ({
+          ...e,
+          eventId: e.eventId ?? generateUUID(),
+          timestamp: e.timestamp ?? new Date().toISOString(),
+        }));
         this.log(`Loaded ${this.queue.length} events from storage`);
       }
     } catch (error) {
@@ -99,8 +103,9 @@ export class Tracker {
       return;
     }
 
-    const enrichedEvent: TrackEvent = {
+    const enrichedEvent: QueuedEvent = {
       ...event,
+      eventId: generateUUID(),
       timestamp: event.timestamp || new Date().toISOString(),
       attribution: { ...event.attribution, ...this.options.attribution },
     };
@@ -126,25 +131,18 @@ export class Tracker {
     try {
       await this.sendWithRetry(batch);
     } catch (error) {
-      this.queue = [...batch, ...this.queue];
-      await this.persistQueue();
+      if (!(error instanceof NonRetryableError)) {
+        this.queue = [...batch, ...this.queue];
+        await this.persistQueue();
+      }
       this.options.onError?.(error as Error);
       this.log(`Flush failed: ${error}`);
     }
   }
 
-  private async sendWithRetry(batch: TrackEvent[]): Promise<void> {
-    const payload = JSON.stringify({
-      events: batch.map((e) => ({
-        event_id: generateUUID(),
-        metric: e.metric,
-        quantity: e.quantity,
-        license_id: e.licenseId,
-        unit: e.unit,
-        attribution: e.attribution,
-        timestamp: e.timestamp,
-      })),
-    });
+  private async sendWithRetry(batch: QueuedEvent[]): Promise<void> {
+    const batchId = generateUUID();
+    const payload = JSON.stringify(toWireBatch(batchId, batch));
 
     for (let attempt = 0; attempt <= this.options.retryCount; attempt++) {
       try {
@@ -163,26 +161,29 @@ export class Tracker {
 
         clearTimeout(timeout);
 
+        if (response.status === 207) {
+          this.options.onError?.(await readPartialAccept(response, batchId));
+          return;
+        }
+
         if (response.ok) {
           this.log('Batch sent successfully');
           return;
         }
 
-        if (response.status === 429) {
-          const retryAfter = response.headers.get('Retry-After');
+        if (response.status === 429 || response.status >= 500) {
+          if (attempt === this.options.retryCount) {
+            throw new Error(`HTTP ${response.status} after ${attempt + 1} attempts`);
+          }
+          const retryAfter = response.status === 429 ? response.headers.get('Retry-After') : null;
           const delay = retryAfter ? parseInt(retryAfter, 10) * 1000 : 100 * Math.pow(2, attempt);
           await this.sleep(delay);
           continue;
         }
 
-        if (response.status >= 500) {
-          await this.sleep(100 * Math.pow(2, attempt));
-          continue;
-        }
-
-        throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+        throw new NonRetryableError(`HTTP ${response.status}: ${await response.text()}`);
       } catch (error) {
-        if (attempt === this.options.retryCount) throw error;
+        if (error instanceof NonRetryableError || attempt === this.options.retryCount) throw error;
         await this.sleep(100 * Math.pow(2, attempt));
       }
     }
