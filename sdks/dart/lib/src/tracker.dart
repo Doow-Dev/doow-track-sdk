@@ -220,7 +220,9 @@ class Tracker {
                 statusCode: response.statusCode);
           }
           final retryAfter =
-              response.statusCode == 429 ? response.headers['retry-after'] : null;
+              (response.statusCode == 429 || response.statusCode == 503)
+                  ? response.headers['retry-after']
+                  : null;
           final delay = parseRetryAfter(retryAfter) ??
               Duration(milliseconds: 100 * (1 << attempt));
           await Future.delayed(delay);

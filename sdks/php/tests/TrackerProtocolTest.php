@@ -207,6 +207,20 @@ final class TrackerProtocolTest extends TestCase
         $this->assertSame([], $this->errors);
     }
 
+    public function testInFlightUnavailableBatchWaitsForRetryAfterAndRetriesTheSameBatch(): void
+    {
+        $tracker = $this->tracker([new Response(503, ['Retry-After' => '1']), new Response(202)], 1);
+        $tracker->track($this->event());
+        $started = microtime(true);
+        $tracker->flush();
+        $elapsed = microtime(true) - $started;
+
+        $this->assertCount(2, $this->history);
+        $this->assertGreaterThanOrEqual(0.9, $elapsed);
+        $this->assertSame($this->body(0)['batch_id'], $this->body(1)['batch_id']);
+        $this->assertSame([], $this->errors);
+    }
+
     public function testTheClientStreamsResponsesInsteadOfBufferingThem(): void
     {
         $options = [];

@@ -244,7 +244,7 @@ class Tracker
                 message: DoowError::sanitize($data['message'] ?? 'Unknown error'),
                 errorClass: isset($data['errorClass']) ? DoowError::sanitize($data['errorClass']) : null,
                 details: $data,
-                retryAfterSeconds: $statusCode === 429 ? self::parseRetryAfter($response->getHeaderLine('Retry-After')) : null,
+                retryAfterSeconds: in_array($statusCode, [429, 503], true) ? self::parseRetryAfter($response->getHeaderLine('Retry-After')) : null,
             );
         }
     }

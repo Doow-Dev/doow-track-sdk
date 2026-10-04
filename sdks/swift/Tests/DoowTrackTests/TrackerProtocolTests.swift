@@ -194,6 +194,26 @@ final class TrackerProtocolTests {
         #expect(StubURLProtocol.bytesServed <= 8_000_000)
     }
 
+    @Test(arguments: [429, 503]) func throttledBatchWaitsForRetryAfterAndRetriesTheSameBatch(firstStatus: Int) throws {
+        var calls = 0
+        StubURLProtocol.headers = ["Retry-After": "2"]
+        StubURLProtocol.responder = { _ in
+            calls += 1
+            return (calls == 1 ? firstStatus : 202, Data())
+        }
+        let tracker = try makeTracker()
+        track(tracker)
+        let started = Date()
+        tracker.flush()
+        let elapsed = Date().timeIntervalSince(started)
+
+        #expect(StubURLProtocol.requests.count == 2)
+        #expect(elapsed >= 1.9)
+        let ids = try StubURLProtocol.requests.map { try json($0.body)["batch_id"] as? String }
+        #expect(Set(ids).count == 1)
+        #expect(errors.isEmpty)
+    }
+
     @Test func retryAfterIsClampedAndGarbageIgnored() {
         #expect(parseRetryAfter("2") == 2)
         #expect(parseRetryAfter("86400") == 30)

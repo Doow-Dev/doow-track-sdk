@@ -314,7 +314,7 @@ public class Tracker {
 
             if (status == 429 || status >= 500) && !isLastAttempt {
                 var delay = pow(2, Double(attempt))
-                if status == 429 {
+                if status == 429 || status == 503 {
                     delay = max(delay, parseRetryAfter(httpResponse?.value(forHTTPHeaderField: "Retry-After")))
                 }
                 Thread.sleep(forTimeInterval: delay)

@@ -147,7 +147,7 @@ module DoowTrack
             report(Error.new("API error: #{DoowTrack.sanitize(response.body)}", status_code: status))
             return
           end
-          sleep([2**attempt, status == 429 ? retry_after_seconds(response["Retry-After"]) : 0].max)
+          sleep([2**attempt, [429, 503].include?(status) ? retry_after_seconds(response["Retry-After"]) : 0].max)
         else
           report(Error.new("API error: #{DoowTrack.sanitize(response.body)}", status_code: status))
           return

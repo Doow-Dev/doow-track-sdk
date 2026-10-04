@@ -178,6 +178,21 @@ RSpec.describe DoowTrack::Tracker do
     expect(errors).to be_empty
   end
 
+  it "waits at least the Retry-After on a 503 and retries the same batch" do
+    sleeps = []
+    allow_any_instance_of(Object).to receive(:sleep) { |_obj, seconds| sleeps << seconds }
+    sent = []
+    WebMock.after_request { |request, _response| sent << JSON.parse(request.body) }
+    stub_request(:post, url).to_return({ status: 503, headers: { "Retry-After" => "7" } }, { status: 202 })
+    track_one(tracker)
+    tracker.flush
+
+    expect(sent.size).to eq(2)
+    expect(sleeps.max).to be >= 7
+    expect(sent.map { |b| b["batch_id"] }.uniq.size).to eq(1)
+    expect(errors).to be_empty
+  end
+
   it "clamps Retry-After and tolerates garbage" do
     expect(tracker.send(:retry_after_seconds, "2")).to eq(2)
     expect(tracker.send(:retry_after_seconds, "86400")).to eq(30)
