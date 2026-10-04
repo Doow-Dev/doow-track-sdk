@@ -15,7 +15,7 @@ Official Swift SDK for [Doow](https://doow.co) usage telemetry and management.
 | **Compression** | Automatic gzip for payloads >1KB |
 | **Retries** | Exponential backoff with configurable retry count |
 | **Type Safety** | Full Codable support |
-| **Sidecar** | Executable for stdin/file/tcp input modes |
+
 
 ---
 
