@@ -6,7 +6,9 @@ module DoowTrack
   MAX_ERROR_TEXT = 512
 
   def self.sanitize(value)
-    text = value.to_s.gsub(/[[:cntrl:]]/, " ")
+    raw = value.to_s.dup
+    raw.force_encoding(Encoding::UTF_8) if raw.encoding == Encoding::BINARY
+    text = raw.scrub(" ").gsub(/[[:cntrl:]]/, " ")
     text.length > MAX_ERROR_TEXT ? "#{text[0, MAX_ERROR_TEXT]}..." : text
   end
 

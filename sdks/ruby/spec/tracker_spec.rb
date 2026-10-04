@@ -152,6 +152,8 @@ RSpec.describe DoowTrack::Tracker do
     stub_request(:post, url).to_return(status: 202)
     flusher = described_class.new("dk_test", endpoint: endpoint, flush_interval: 30, flush_at: 1000, retry_count: 0)
     track_one(flusher)
+    thread = flusher.instance_variable_get(:@flusher)
+    wait_for { thread.status == "sleep" }
     started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
     flusher.shutdown
     elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
@@ -181,6 +183,20 @@ RSpec.describe DoowTrack::Tracker do
     expect(tracker.send(:retry_after_seconds, "86400")).to eq(30)
     expect(tracker.send(:retry_after_seconds, "garbage")).to eq(0)
     expect(tracker.send(:retry_after_seconds, nil)).to eq(0)
+  end
+
+  it "strips C1 control characters from a binary Net::HTTP body" do
+    binary = "bad\xC2\x9B31m ok".b
+    expect(binary.encoding).to eq(Encoding::BINARY)
+
+    cleaned = DoowTrack.sanitize(binary)
+
+    expect(cleaned).not_to include("\u009b")
+    expect(cleaned).to include("ok")
+  end
+
+  it "survives invalid bytes in server text" do
+    expect(DoowTrack.sanitize("bad\xFFbytes".b)).to include("bytes")
   end
 
   it "sanitizes and truncates server text" do
