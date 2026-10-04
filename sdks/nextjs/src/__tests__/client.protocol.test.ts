@@ -103,28 +103,174 @@ describe('Next.js client wire protocol', () => {
     expect(onError).toHaveBeenCalledTimes(1);
   });
 
-  it('unload delivery carries the Bearer header and the batch envelope', () => {
-    const calls = stubFetch([{ status: 202 }]);
-    const tracker = new Tracker('dk_test', { flushIntervalMs: 60_000 });
+  it('a retry reuses the batch id and event ids', async () => {
+    const calls = stubFetch([{ status: 503 }, { status: 202 }]);
+    const onError = vi.fn();
+    const tracker = new Tracker('dk_test', { flushIntervalMs: 60_000, onError, retryCount: 1 });
     tracker.track(event);
+    await tracker.flush();
     tracker.destroy();
 
+    expect(calls).toHaveLength(2);
+    const first = JSON.parse(calls[0]!.init.body as string);
+    const second = JSON.parse(calls[1]!.init.body as string);
+    expect(second.batch_id).toBe(first.batch_id);
+    expect(second.events[0].event_id).toBe(first.events[0].event_id);
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it('exhausted 5xx retries reach onError', async () => {
+    stubFetch([{ status: 503 }]);
+    const onError = vi.fn();
+    const tracker = new Tracker('dk_test', { flushIntervalMs: 60_000, onError, retryCount: 1 });
+    tracker.track(event);
+    await tracker.flush();
+    tracker.destroy();
+
+    expect(onError).toHaveBeenCalledTimes(1);
+  });
+
+});
+
+describe('Next.js client lifecycle', () => {
+  let win: EventTarget;
+  let doc: EventTarget & { visibilityState: string };
+
+  beforeEach(() => {
+    win = new EventTarget();
+    doc = Object.assign(new EventTarget(), { visibilityState: 'visible' });
+    vi.stubGlobal('window', win);
+    vi.stubGlobal('document', doc);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const unloadTracker = (options = {}) =>
+    new Tracker('dk_test', { flushIntervalMs: 60_000, flushAt: 100_000, ...options });
+
+  it('beforeunload sends an authenticated keepalive request with the batch envelope', () => {
+    const calls = stubFetch([{ status: 202 }]);
+    const tracker = unloadTracker();
+    tracker.track(event);
+    win.dispatchEvent(new Event('beforeunload'));
+
+    expect(calls).toHaveLength(1);
     const init = calls[0]!.init;
     expect((init.headers as Record<string, string>).Authorization).toBe('Bearer dk_test');
     expect(init.keepalive).toBe(true);
     expect(JSON.parse(init.body as string).batch_id).toBeTruthy();
   });
 
-  it('unload sends one request within the keepalive quota and keeps the rest queued', () => {
+  it('visibilitychange sends only when the page becomes hidden', () => {
     const calls = stubFetch([{ status: 202 }]);
-    const tracker = new Tracker('dk_test', { flushIntervalMs: 60_000, flushAt: 100_000 });
-    for (let i = 0; i < 2000; i++) tracker.track(event);
-    tracker.destroy();
+    const tracker = unloadTracker();
+    tracker.track(event);
+    doc.dispatchEvent(new Event('visibilitychange'));
+    expect(calls).toHaveLength(0);
+
+    doc.visibilityState = 'hidden';
+    doc.dispatchEvent(new Event('visibilitychange'));
+    expect(calls).toHaveLength(1);
+  });
+
+  it('keeps the unload body within the byte quota even for multibyte text', () => {
+    const calls = stubFetch([{ status: 202 }]);
+    const tracker = unloadTracker();
+    for (let i = 0; i < 1500; i++) tracker.track({ ...event, metric: 'métrique_é_日本語' });
+    win.dispatchEvent(new Event('beforeunload'));
+
+    const body = calls[0]!.init.body as string;
+    expect(new TextEncoder().encode(body).length).toBeLessThanOrEqual(60_000);
+  });
+
+  it('requeues the chunk when the unload request fails transiently', async () => {
+    const calls = stubFetch([{ status: 503 }, { status: 202 }]);
+    const onError = vi.fn();
+    const tracker = unloadTracker({ onError });
+    tracker.track(event);
+    win.dispatchEvent(new Event('beforeunload'));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(onError).toHaveBeenCalledTimes(1);
+
+    win.dispatchEvent(new Event('beforeunload'));
+    expect(calls).toHaveLength(2);
+    const first = JSON.parse(calls[0]!.init.body as string);
+    const second = JSON.parse(calls[1]!.init.body as string);
+    expect(second.events[0].event_id).toBe(first.events[0].event_id);
+  });
+
+  it('reports a 207 on the unload path without requeueing', async () => {
+    const calls = stubFetch([
+      { status: 207, body: { accepted: 0, rejected: 1, batch_id: 'b', rejections: [{ event_id: 'e1', reason: 'bad' }] } },
+    ]);
+    const onError = vi.fn();
+    const tracker = unloadTracker({ onError });
+    tracker.track(event);
+    win.dispatchEvent(new Event('beforeunload'));
+    await new Promise((r) => setTimeout(r, 20));
+    win.dispatchEvent(new Event('beforeunload'));
 
     expect(calls).toHaveLength(1);
-    const body = calls[0]!.init.body as string;
-    expect(body.length).toBeLessThanOrEqual(60_000);
-    expect(JSON.parse(body).events.length).toBeLessThan(2000);
+    expect(onError.mock.calls[0]![0]).toBeInstanceOf(PartialAcceptError);
+  });
+
+  it('destroy sends every queued event, not only the first keepalive chunk, and removes the listeners', async () => {
+    const calls = stubFetch([{ status: 202 }]);
+    const tracker = unloadTracker({ disableCompression: true });
+    for (let i = 0; i < 1200; i++) tracker.track(event);
+    tracker.destroy();
+    await new Promise((r) => setTimeout(r, 50));
+
+    const sent = calls.reduce(
+      (n, c) => n + (JSON.parse(c.init.body as string).events as unknown[]).length,
+      0,
+    );
+    expect(sent).toBe(1200);
+    expect(calls.every((c) => c.init.keepalive !== true)).toBe(true);
+
+    const before = calls.length;
+    win.dispatchEvent(new Event('beforeunload'));
+    expect(calls).toHaveLength(before);
+  });
+
+  it('a throwing onError handler never causes a resend of a recorded 207 batch', async () => {
+    const calls = stubFetch([
+      { status: 207, body: { accepted: 0, rejected: 1, batch_id: 'b', rejections: [{ event_id: 'e1', reason: 'bad' }] } },
+    ]);
+    const tracker = unloadTracker({
+      retryCount: 2,
+      onError: () => {
+        throw new Error('handler failure');
+      },
+    });
+    tracker.track(event);
+    await tracker.flush();
+
+    expect(calls).toHaveLength(1);
+  });
+
+  it('a permanent 4xx is reported once and not retried', async () => {
+    const calls = stubFetch([{ status: 400, body: { message: 'bad' } }]);
+    const onError = vi.fn();
+    const tracker = unloadTracker({ onError, retryCount: 3 });
+    tracker.track(event);
+    await tracker.flush();
+
+    expect(calls).toHaveLength(1);
+    expect(onError).toHaveBeenCalledTimes(1);
+  });
+
+  it('a malformed 207 body is reported and not resent', async () => {
+    const calls = stubFetch([{ status: 207, body: { accepted: 'abc', rejected: null, rejections: [1, 'x', { event_id: 5 }] } }]);
+    const onError = vi.fn();
+    const tracker = unloadTracker({ onError, retryCount: 2 });
+    tracker.track(event);
+    await tracker.flush();
+
+    expect(calls).toHaveLength(1);
+    expect(onError.mock.calls[0]![0]).toBeInstanceOf(PartialAcceptError);
   });
 });
 

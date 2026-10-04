@@ -67,4 +67,36 @@ describe('Next.js server wire protocol', () => {
     expect(error).toBeInstanceOf(PartialAcceptError);
     expect(error.rejections).toEqual([{ event_id: 'e1', reason: 'bad' }]);
   });
+
+  it('a permanent 400 is reported by throwing once and never retried', async () => {
+    const calls = stubFetch([{ status: 400, body: { message: 'bad' } }]);
+
+    await expect(new ServerTracker('dk_test', { retryCount: 3 }).track(event)).rejects.toThrow('HTTP 400');
+    expect(calls).toHaveLength(1);
+  });
+
+  it('a throwing onError handler never causes a resend of a recorded 207 batch', async () => {
+    const calls = stubFetch([
+      { status: 207, body: { accepted: 0, rejected: 1, batch_id: 'b', rejections: [{ event_id: 'e1', reason: 'bad' }] } },
+    ]);
+    const tracker = new ServerTracker('dk_test', {
+      retryCount: 2,
+      onError: () => {
+        throw new Error('handler failure');
+      },
+    });
+
+    await expect(tracker.track(event)).resolves.toBeUndefined();
+    expect(calls).toHaveLength(1);
+  });
+
+  it('a malformed 207 body is reported and not resent', async () => {
+    const calls = stubFetch([{ status: 207, body: { accepted: 'abc', rejections: [1, 'x', { event_id: 5 }] } }]);
+    const onError = vi.fn();
+
+    await new ServerTracker('dk_test', { retryCount: 2, onError }).track(event);
+
+    expect(calls).toHaveLength(1);
+    expect(onError.mock.calls[0]![0]).toBeInstanceOf(PartialAcceptError);
+  });
 });

@@ -1,9 +1,12 @@
 import type { TrackEvent, ServerTrackerOptions } from './types';
 import {
   NonRetryableError,
-  parseRetryAfterMs,
   generateUUID,
+  notify,
+  parseRetryAfterMs,
+  readBoundedText,
   readPartialAccept,
+  sanitizeText,
   toWireBatch,
   type QueuedEvent,
 } from './wire';
@@ -68,7 +71,7 @@ export class ServerTracker {
 
         if (response.status === 207) {
           const partial = await readPartialAccept(response, batchId);
-          this.options.onError?.(partial);
+          notify(this.options.onError, partial);
           this.log(partial.message);
           return;
         }
@@ -83,7 +86,7 @@ export class ServerTracker {
           throw new Error(`HTTP ${response.status}`);
         }
 
-        throw new NonRetryableError(`HTTP ${response.status}: ${await response.text()}`);
+        throw new NonRetryableError(`HTTP ${response.status}: ${sanitizeText(await readBoundedText(response))}`);
       } catch (error) {
         const retryable = !(error instanceof NonRetryableError);
         if (!retryable || attempt === this.options.retryCount) throw error;
