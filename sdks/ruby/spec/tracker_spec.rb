@@ -104,4 +104,68 @@ RSpec.describe DoowTrack::Tracker do
     expect(stub).to have_been_requested.once
     expect(errors.first.status_code).to eq(401)
   end
+
+  it "does not resend a recorded 207 batch when on_error raises" do
+    stub = stub_request(:post, url).to_return(status: 207, body: { accepted: 0, rejected: 1, rejections: [{ event_id: "e", reason: "bad" }] }.to_json)
+    raising = described_class.new("dk_test", endpoint: endpoint, flush_interval: 0, flush_at: 1000, retry_count: 2, on_error: ->(_e) { raise "handler failure" })
+    track_one(raising)
+    raising.flush
+
+    expect(stub).to have_been_requested.once
+  end
+
+  it "reports a malformed 207 body without resending" do
+    stub = stub_request(:post, url).to_return(status: 207, body: { accepted: "abc", rejected: nil, rejections: [1, "x", { event_id: 5 }] }.to_json)
+    track_one(tracker)
+    tracker.flush
+
+    expect(stub).to have_been_requested.once
+    expect(errors.first).to be_a(DoowTrack::PartialAcceptError)
+  end
+
+  def request_count
+    WebMock::RequestRegistry.instance.times_executed(WebMock::RequestPattern.new(:post, url))
+  end
+
+  def wait_for(timeout = 5)
+    deadline = Time.now + timeout
+    Kernel.instance_method(:sleep).bind(self).call(0.02) until yield || Time.now > deadline
+  end
+
+  it "keeps the periodic flusher alive when on_error raises" do
+    allow_any_instance_of(Object).to receive(:sleep).and_call_original
+    stub_request(:post, url).to_return({ status: 400, body: "bad" }, { status: 202 })
+    flusher = described_class.new("dk_test", endpoint: endpoint, flush_interval: 0.05, flush_at: 1000, retry_count: 0, on_error: ->(_e) { raise "handler failure" })
+    track_one(flusher)
+    wait_for { request_count >= 1 }
+    track_one(flusher)
+    wait_for { request_count >= 2 }
+    flusher.shutdown
+
+    expect(request_count).to be >= 2
+  end
+
+  it "shutdown stops the flusher thread and still flushes the buffer" do
+    allow_any_instance_of(Object).to receive(:sleep).and_call_original
+    stub_request(:post, url).to_return(status: 202)
+    flusher = described_class.new("dk_test", endpoint: endpoint, flush_interval: 30, flush_at: 1000, retry_count: 0)
+    track_one(flusher)
+    flusher.shutdown
+
+    expect(request_count).to eq(1)
+    expect(flusher.instance_variable_get(:@flusher)).not_to be_alive
+  end
+
+  it "clamps Retry-After and tolerates garbage" do
+    expect(tracker.send(:retry_after_seconds, "2")).to eq(2)
+    expect(tracker.send(:retry_after_seconds, "86400")).to eq(30)
+    expect(tracker.send(:retry_after_seconds, "garbage")).to eq(0)
+    expect(tracker.send(:retry_after_seconds, nil)).to eq(0)
+  end
+
+  it "sanitizes and truncates server text" do
+    cleaned = DoowTrack.sanitize("line1\nline2\e[31m" + ("x" * 2000))
+    expect(cleaned).not_to match(/[\n\e]/)
+    expect(cleaned.length).to be <= 520
+  end
 end

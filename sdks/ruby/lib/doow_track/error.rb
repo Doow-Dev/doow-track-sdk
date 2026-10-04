@@ -3,6 +3,13 @@
 require "json"
 
 module DoowTrack
+  MAX_ERROR_TEXT = 512
+
+  def self.sanitize(value)
+    text = value.to_s.gsub(/[[:cntrl:]]/, " ")
+    text.length > MAX_ERROR_TEXT ? "#{text[0, MAX_ERROR_TEXT]}..." : text
+  end
+
   class Error < StandardError
     attr_reader :status_code, :error_class
 
@@ -53,13 +60,21 @@ module DoowTrack
         {}
       end
       data = {} unless data.is_a?(Hash)
-      rejections = data["rejections"].is_a?(Array) ? data["rejections"] : []
+      rejections = (data["rejections"].is_a?(Array) ? data["rejections"] : [])
+        .select { |r| r.is_a?(Hash) }
+        .map { |r| { "event_id" => DoowTrack.sanitize(r["event_id"] || "unknown"), "reason" => DoowTrack.sanitize(r["reason"]) } }
       new(
-        accepted: data["accepted"].to_i,
-        rejected: data["rejected"].to_i,
-        batch_id: data["batch_id"].to_s,
+        accepted: to_count(data["accepted"]),
+        rejected: to_count(data["rejected"]),
+        batch_id: DoowTrack.sanitize(data["batch_id"]),
         rejections: rejections
       )
+    end
+
+    def self.to_count(value)
+      Integer(value)
+    rescue ArgumentError, TypeError
+      0
     end
   end
 end

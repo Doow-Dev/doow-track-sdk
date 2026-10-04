@@ -4,11 +4,15 @@ require "net/http"
 require "json"
 require "zlib"
 require "stringio"
+require "time"
 require "securerandom"
 require "uri"
 
 module DoowTrack
   class Tracker
+    MAX_RETRY_AFTER_SECONDS = 30
+    SHUTDOWN_JOIN_SECONDS = 30
+
     DEFAULT_OPTIONS = {
       endpoint: "https://api.doow.co",
       enabled: true,
@@ -34,6 +38,7 @@ module DoowTrack
 
       @buffer = []
       @mutex = Mutex.new
+      @stopping = false
       @flusher = start_flusher
     end
 
@@ -70,7 +75,11 @@ module DoowTrack
     end
 
     def shutdown
-      @flusher&.kill
+      @stopping = true
+      if @flusher
+        @flusher.wakeup if @flusher.status == "sleep"
+        @flusher.join(SHUTDOWN_JOIN_SECONDS)
+      end
       flush
     end
 
@@ -80,15 +89,25 @@ module DoowTrack
       return nil if @options[:flush_interval] <= 0
 
       Thread.new do
-        loop do
+        until @stopping
           sleep @options[:flush_interval]
-          flush
+          break if @stopping
+
+          begin
+            flush
+          rescue StandardError => e
+            report(e)
+          end
         end
       end
     end
 
     def flush_async
-      Thread.new { flush }
+      Thread.new do
+        flush
+      rescue StandardError => e
+        report(e)
+      end
     end
 
     def send_batch(batch)
@@ -121,12 +140,12 @@ module DoowTrack
           return
         when 429, 500..599
           if last_attempt
-            report(Error.new("API error: #{response.body}", status_code: status))
+            report(Error.new("API error: #{DoowTrack.sanitize(response.body)}", status_code: status))
             return
           end
-          sleep(2**attempt)
+          sleep([2**attempt, status == 429 ? retry_after_seconds(response["Retry-After"]) : 0].max)
         else
-          report(Error.new("API error: #{response.body}", status_code: status))
+          report(Error.new("API error: #{DoowTrack.sanitize(response.body)}", status_code: status))
           return
         end
       end
@@ -175,8 +194,24 @@ module DoowTrack
       [io.string, "gzip"]
     end
 
+    def retry_after_seconds(header)
+      return 0 if header.nil? || header.to_s.strip.empty?
+
+      seconds = Float(header.to_s.strip, exception: false)
+      seconds ||= begin
+        Time.httpdate(header.to_s.strip) - Time.now
+      rescue ArgumentError
+        0
+      end
+      seconds.clamp(0, MAX_RETRY_AFTER_SECONDS)
+    end
+
     def report(error)
-      @options[:on_error]&.call(error)
+      begin
+        @options[:on_error]&.call(error)
+      rescue StandardError => e
+        log("[doow-track] on_error handler raised: #{e.message}")
+      end
       log("[doow-track] Error: #{error.message}")
     end
 
