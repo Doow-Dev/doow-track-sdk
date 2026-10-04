@@ -90,18 +90,55 @@ export function toWireBatch(batchId: string, events: QueuedEvent[]): WireBatch {
   };
 }
 
-export async function readPartialAccept(response: Response, batchId: string): Promise<PartialAcceptError> {
-  let data: { accepted?: number; rejected?: number; batch_id?: string; rejections?: EventRejection[] } = {};
+const MAX_ERROR_TEXT = 512;
+const MAX_BODY_CHARS = 1 << 20;
+
+export function sanitizeText(value: unknown): string {
+  // eslint-disable-next-line no-control-regex
+  const text = String(value).replace(/[\u0000-\u001f\u007f]/g, ' ');
+  return text.length > MAX_ERROR_TEXT ? `${text.slice(0, MAX_ERROR_TEXT)}...` : text;
+}
+
+export async function readBoundedText(response: Response): Promise<string> {
   try {
-    data = await response.json();
+    return (await response.text()).slice(0, MAX_BODY_CHARS);
+  } catch {
+    return '';
+  }
+}
+
+export function notify(handler: ((error: Error) => void) | undefined, error: Error): void {
+  if (!handler) return;
+  try {
+    handler(error);
+  } catch {
+    // A throwing handler must never trigger a resend or crash the host app.
+  }
+}
+
+function toCount(value: unknown): number {
+  const n = Number(value);
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 0;
+}
+
+export async function readPartialAccept(response: Response, batchId: string): Promise<PartialAcceptError> {
+  let data: Record<string, unknown> = {};
+  try {
+    const parsed: unknown = JSON.parse(await readBoundedText(response));
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      data = parsed as Record<string, unknown>;
+    }
   } catch {
     data = {};
   }
+  const rejections: EventRejection[] = (Array.isArray(data.rejections) ? data.rejections : [])
+    .filter((r): r is Record<string, unknown> => !!r && typeof r === 'object')
+    .map((r) => ({ event_id: sanitizeText(r.event_id ?? 'unknown'), reason: sanitizeText(r.reason ?? '') }));
   return new PartialAcceptError(
-    Number(data.accepted) || 0,
-    Number(data.rejected) || 0,
-    data.batch_id ?? batchId,
-    Array.isArray(data.rejections) ? data.rejections : [],
+    toCount(data.accepted),
+    toCount(data.rejected),
+    sanitizeText(data.batch_id ?? batchId),
+    rejections,
   );
 }
 
