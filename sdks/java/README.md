@@ -148,3 +148,13 @@ try {
 ## License
 
 MIT
+
+## Releasing
+
+Signing and Central publishing run only in the `release` profile:
+
+```bash
+mvn -B -Prelease deploy
+```
+
+A plain `mvn deploy` does not sign artifacts.
