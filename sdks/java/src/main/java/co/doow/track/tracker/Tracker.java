@@ -279,7 +279,7 @@ public class Tracker implements AutoCloseable {
 
     static String sanitize(String text) {
         if (text == null) return "";
-        String cleaned = text.replaceAll("[\\p{Cntrl}&&[^ ]]", " ");
+        String cleaned = text.replaceAll("\\p{Cc}", " ");
         return cleaned.length() > MAX_ERROR_TEXT ? cleaned.substring(0, MAX_ERROR_TEXT) + "..." : cleaned;
     }
 

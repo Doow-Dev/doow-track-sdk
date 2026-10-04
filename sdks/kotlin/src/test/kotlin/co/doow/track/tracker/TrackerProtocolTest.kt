@@ -197,8 +197,8 @@ class TrackerProtocolTest {
 
     @Test
     fun serverTextIsSanitizedAndTruncated() {
-        val cleaned = Tracker.sanitize("line1\nline2\u001b[31m" + "x".repeat(2000))
-        assertTrue(!cleaned.contains("\n") && !cleaned.contains("\u001b"))
+        val cleaned = Tracker.sanitize("line1\nline2\u001b[31m\u009b31m" + "x".repeat(2000))
+        assertTrue(!cleaned.contains("\n") && !cleaned.contains("\u001b") && !cleaned.contains("\u009b"))
         assertTrue(cleaned.length <= 520)
     }
 }

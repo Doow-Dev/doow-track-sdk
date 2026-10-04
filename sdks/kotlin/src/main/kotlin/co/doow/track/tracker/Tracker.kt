@@ -255,7 +255,7 @@ class Tracker(
         }
 
         fun sanitize(text: String): String {
-            val cleaned = text.replace(Regex("[\\p{Cntrl}&&[^ ]]"), " ")
+            val cleaned = text.replace(Regex("\\p{Cc}"), " ")
             return if (cleaned.length > MAX_ERROR_TEXT) cleaned.take(MAX_ERROR_TEXT) + "..." else cleaned
         }
 

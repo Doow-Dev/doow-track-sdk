@@ -178,6 +178,20 @@ class TrackerProtocolTest {
     }
 
     @Test
+    void malformedPartialAcceptBodyIsReportedWithoutResend() {
+        statuses = new int[] {207};
+        responseBody = "{\"accepted\":\"abc\",\"rejected\":null,\"rejections\":[1,\"x\",{\"event_id\":5},null]}";
+        Tracker tracker = tracker();
+        tracker.track(event());
+        tracker.flush();
+        tracker.shutdown();
+
+        assertEquals(1, bodies.size());
+        assertEquals(1, errors.size());
+        assertInstanceOf(PartialAcceptError.class, errors.get(0));
+    }
+
+    @Test
     void retryAfterIsClampedAndGarbageIsIgnored() {
         assertEquals(2000, Tracker.parseRetryAfterMs("2"));
         assertEquals(30_000, Tracker.parseRetryAfterMs("86400"));
@@ -187,10 +201,11 @@ class TrackerProtocolTest {
 
     @Test
     void serverTextIsSanitizedAndTruncated() {
-        String dirty = "line1\nline2\u001b[31m" + "x".repeat(2000);
+        String dirty = "line1\nline2\u001b[31m\u009b31m" + "x".repeat(2000);
         String cleaned = Tracker.sanitize(dirty);
         assertFalse(cleaned.contains("\n"));
         assertFalse(cleaned.contains("\u001b"));
+        assertFalse(cleaned.contains("\u009b"));
         assertTrue(cleaned.length() <= 520);
     }
 
