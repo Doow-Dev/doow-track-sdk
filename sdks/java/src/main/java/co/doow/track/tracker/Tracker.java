@@ -22,6 +22,9 @@ public class Tracker implements AutoCloseable {
     private final TrackerOptions options;
     private final ObjectMapper mapper;
     private static final String SDK_VERSION = "0.1.0";
+    private static final long MAX_RETRY_AFTER_MS = 30_000;
+    private static final int MAX_ERROR_TEXT = 512;
+    private static final int MAX_BODY_CHARS = 1 << 20;
 
     private final List<Pending> buffer = new ArrayList<>();
     private final Object lock = new Object();
@@ -53,7 +56,7 @@ public class Tracker implements AutoCloseable {
 
         if (options.getFlushIntervalMs() > 0) {
             scheduler.scheduleAtFixedRate(
-                this::flush,
+                this::flushQuietly,
                 options.getFlushIntervalMs(),
                 options.getFlushIntervalMs(),
                 TimeUnit.MILLISECONDS
@@ -89,7 +92,17 @@ public class Tracker implements AutoCloseable {
             buffer.add(pending);
 
             if (buffer.size() >= options.getFlushAt()) {
-                scheduler.execute(this::flush);
+                scheduler.execute(this::flushQuietly);
+            }
+        }
+    }
+
+    private void flushQuietly() {
+        try {
+            flush();
+        } catch (RuntimeException e) {
+            if (options.isDebug()) {
+                System.err.println("[doow-track] Flush error: " + e.getMessage());
             }
         }
     }
@@ -200,11 +213,13 @@ public class Tracker implements AutoCloseable {
                 }
 
                 if ((status == 429 || status >= 500) && !lastAttempt) {
-                    Thread.sleep((long) Math.pow(2, attempt) * 1000);
+                    long backoff = (long) Math.pow(2, attempt) * 1000;
+                    long serverDelay = status == 429 ? parseRetryAfterMs(conn.getHeaderField("Retry-After")) : 0;
+                    Thread.sleep(Math.max(backoff, serverDelay));
                     continue;
                 }
 
-                report(new DoowError("API error: " + readStream(conn.getErrorStream()), status));
+                report(new DoowError("API error: " + sanitize(readStream(conn.getErrorStream())), status));
                 return;
             } catch (IOException e) {
                 if (lastAttempt) {
@@ -236,17 +251,47 @@ public class Tracker implements AutoCloseable {
             batchId = root.path("batch_id").asText(fallbackBatchId);
             for (JsonNode r : root.path("rejections")) {
                 rejections.add(new PartialAcceptError.Rejection(
-                    r.path("event_id").asText("unknown"),
-                    r.path("reason").asText("")));
+                    sanitize(r.path("event_id").asText("unknown")),
+                    sanitize(r.path("reason").asText(""))));
             }
         } catch (IOException ignored) {
         }
         return new PartialAcceptError(accepted, rejected, batchId, rejections);
     }
 
+    static long parseRetryAfterMs(String header) {
+        if (header == null || header.isBlank()) return 0;
+        long ms;
+        try {
+            ms = (long) (Double.parseDouble(header.trim()) * 1000);
+        } catch (NumberFormatException e) {
+            try {
+                ms = java.time.Duration.between(
+                    java.time.Instant.now(),
+                    java.time.ZonedDateTime.parse(header.trim(), java.time.format.DateTimeFormatter.RFC_1123_DATE_TIME).toInstant()
+                ).toMillis();
+            } catch (java.time.format.DateTimeParseException ignored) {
+                return 0;
+            }
+        }
+        return Math.min(Math.max(ms, 0), MAX_RETRY_AFTER_MS);
+    }
+
+    static String sanitize(String text) {
+        if (text == null) return "";
+        String cleaned = text.replaceAll("[\\p{Cntrl}&&[^ ]]", " ");
+        return cleaned.length() > MAX_ERROR_TEXT ? cleaned.substring(0, MAX_ERROR_TEXT) + "..." : cleaned;
+    }
+
     private void report(Exception error) {
         if (options.getOnError() != null) {
-            options.getOnError().accept(error);
+            try {
+                options.getOnError().accept(error);
+            } catch (RuntimeException handlerError) {
+                if (options.isDebug()) {
+                    System.err.println("[doow-track] onError handler threw: " + handlerError.getMessage());
+                }
+            }
         }
         if (options.isDebug()) {
             System.err.println("[doow-track] Error: " + error.getMessage());
@@ -257,9 +302,10 @@ public class Tracker implements AutoCloseable {
         if (is == null) return "";
         try (BufferedReader reader = new BufferedReader(new InputStreamReader(is))) {
             StringBuilder sb = new StringBuilder();
-            String line;
-            while ((line = reader.readLine()) != null) {
-                sb.append(line);
+            char[] buf = new char[1024];
+            int n;
+            while ((n = reader.read(buf)) != -1 && sb.length() < MAX_BODY_CHARS) {
+                sb.append(buf, 0, n);
             }
             return sb.toString();
         }

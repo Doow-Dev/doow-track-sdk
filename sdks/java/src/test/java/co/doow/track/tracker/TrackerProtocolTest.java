@@ -139,6 +139,9 @@ class TrackerProtocolTest {
 
         assertEquals(2, bodies.size());
         assertEquals(bodies.get(0).path("batch_id").asText(), bodies.get(1).path("batch_id").asText());
+        assertEquals(
+            bodies.get(0).path("events").get(0).path("event_id").asText(),
+            bodies.get(1).path("events").get(0).path("event_id").asText());
         assertTrue(errors.isEmpty());
     }
 
@@ -151,5 +154,48 @@ class TrackerProtocolTest {
 
         assertEquals(List.of("gzip"), new ArrayList<>(encodings));
         assertEquals(300, bodies.get(0).path("events").size());
+    }
+
+    @Test
+    void throwingOnErrorHandlerDoesNotKillThePeriodicFlush() throws Exception {
+        statuses = new int[] {400, 202};
+        TrackerOptions options = new TrackerOptions()
+            .setEndpoint("http://127.0.0.1:" + server.getAddress().getPort())
+            .setFlushIntervalMs(50)
+            .setFlushAt(1000)
+            .setRetryCount(0)
+            .setOnError(e -> { throw new IllegalStateException("handler failure"); });
+        Tracker tracker = new Tracker("dk_test", options);
+
+        tracker.track(event());
+        awaitBodies(1);
+        tracker.track(event());
+        awaitBodies(2);
+        boolean secondFlushArrived = bodies.size() >= 2;
+        tracker.shutdown();
+
+        assertTrue(secondFlushArrived, "periodic flush stopped after onError threw");
+    }
+
+    @Test
+    void retryAfterIsClampedAndGarbageIsIgnored() {
+        assertEquals(2000, Tracker.parseRetryAfterMs("2"));
+        assertEquals(30_000, Tracker.parseRetryAfterMs("86400"));
+        assertEquals(0, Tracker.parseRetryAfterMs("garbage"));
+        assertEquals(0, Tracker.parseRetryAfterMs(null));
+    }
+
+    @Test
+    void serverTextIsSanitizedAndTruncated() {
+        String dirty = "line1\nline2\u001b[31m" + "x".repeat(2000);
+        String cleaned = Tracker.sanitize(dirty);
+        assertFalse(cleaned.contains("\n"));
+        assertFalse(cleaned.contains("\u001b"));
+        assertTrue(cleaned.length() <= 520);
+    }
+
+    private void awaitBodies(int count) throws InterruptedException {
+        long deadline = System.currentTimeMillis() + 5000;
+        while (bodies.size() < count && System.currentTimeMillis() < deadline) Thread.sleep(20);
     }
 }
