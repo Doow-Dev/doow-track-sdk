@@ -152,3 +152,117 @@ def test_retry_after_is_clamped_and_tolerates_garbage():
     assert _retry_after("86400") == MAX_RETRY_AFTER
     assert _retry_after("garbage") == 0.0
     assert _retry_after(None) == 0.0
+
+
+class _MemoryStore:
+    def __init__(self, batches):
+        self.batches = list(batches)
+
+    def push(self, batch):
+        self.batches.append(batch)
+
+    def shift(self):
+        return self.batches.pop(0) if self.batches else None
+
+    def length(self):
+        return len(self.batches)
+
+
+def _stored_batch():
+    payload = {"batch_id": "stored-1", "sdk_version": "0.1.0", "events": []}
+    return {"batch_id": "stored-1", "payload": json.dumps(payload), "timestamp": "2026-10-04T00:00:00Z"}
+
+
+def test_offline_drain_does_not_requeue_a_207_batch(httpx_mock):
+    httpx_mock.add_response(status_code=207, json=PARTIAL_BODY)
+    errors: list = []
+    store = _MemoryStore([_stored_batch()])
+    tracker = Tracker("dk_test", _options(errors))
+    tracker._options.offline_store = store
+    tracker._drain_offline_store()
+    tracker._shutdown.set()
+
+    assert store.batches == []
+    assert len(errors) == 1 and isinstance(errors[0], PartialAcceptError)
+
+
+def test_offline_drain_keeps_a_batch_on_transient_failure(httpx_mock):
+    httpx_mock.add_response(status_code=503)
+    errors: list = []
+    store = _MemoryStore([_stored_batch()])
+    tracker = Tracker("dk_test", _options(errors))
+    tracker._options.offline_store = store
+    tracker._drain_offline_store()
+    tracker._shutdown.set()
+
+    assert len(store.batches) == 1
+
+
+def test_malformed_207_body_is_reported_and_not_resent(httpx_mock):
+    httpx_mock.add_response(
+        status_code=207,
+        json={"accepted": "abc", "rejected": None, "rejections": [1, {"event_id": 5}, "x"]},
+    )
+    errors: list = []
+    tracker = Tracker("dk_test", _options(errors))
+    tracker.track(_event())
+    tracker.flush()
+    tracker._shutdown.set()
+
+    assert len(httpx_mock.get_requests()) == 1
+    assert isinstance(errors[0], PartialAcceptError)
+    assert errors[0].rejected == 0
+
+
+def test_throwing_on_error_handler_does_not_cause_a_resend(httpx_mock):
+    httpx_mock.add_response(status_code=207, json=PARTIAL_BODY)
+
+    def explode(_error):
+        raise RuntimeError("handler failure")
+
+    tracker = Tracker("dk_test", TrackerOptions(
+        endpoint="https://test.doow.co", flush_at=1000, flush_interval=1000.0,
+        retry_count=2, on_error=explode,
+    ))
+    tracker.track(_event())
+    tracker.flush()
+    tracker._shutdown.set()
+
+    assert len(httpx_mock.get_requests()) == 1
+
+
+def test_transport_errors_are_wrapped_so_the_request_is_not_exposed(httpx_mock):
+    httpx_mock.add_exception(httpx.ConnectError("boom"), is_reusable=True)
+    errors: list = []
+    tracker = Tracker("dk_test", _options(errors, retry_count=1))
+    tracker.track(_event())
+    tracker.flush()
+    tracker._shutdown.set()
+
+    assert len(errors) == 1
+    assert not hasattr(errors[0], "request")
+    assert "Authorization" not in str(errors[0]) and "dk_test" not in str(errors[0])
+
+
+def test_large_body_is_a_real_gzip_stream(httpx_mock):
+    import gzip as gzip_module
+
+    httpx_mock.add_response(status_code=202)
+    errors: list = []
+    tracker = Tracker("dk_test", _options(errors))
+    for _ in range(300):
+        tracker.track(_event())
+    tracker.flush()
+    tracker._shutdown.set()
+
+    request = httpx_mock.get_requests()[0]
+    assert request.headers["Content-Encoding"] == "gzip"
+    assert len(json.loads(gzip_module.decompress(request.content))["events"]) == 300
+
+
+def test_server_text_is_sanitized_and_truncated():
+    from doow_track.errors import APIError
+
+    error = APIError(status=500, message="line1\nline2\x1b[31m" + "x" * 2000)
+    assert "\n" not in error.message and "\x1b" not in error.message
+    assert len(error.message) <= 520

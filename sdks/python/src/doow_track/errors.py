@@ -9,6 +9,22 @@ class DoowError(Exception):
     pass
 
 
+MAX_ERROR_TEXT = 512
+
+
+def sanitize_text(value: Any) -> str:
+    """Strip control characters and cap server-supplied text before it enters a message."""
+    text = "".join(" " if (ord(ch) < 32 or ord(ch) == 127) else ch for ch in str(value))
+    return text if len(text) <= MAX_ERROR_TEXT else text[:MAX_ERROR_TEXT] + "..."
+
+
+def _to_int(value: Any) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
 class APIError(DoowError):
     """API error response."""
 
@@ -20,6 +36,7 @@ class APIError(DoowError):
         details: Optional[dict] = None,
     ):
         self.status = status
+        message = sanitize_text(message)
         self.message = message
         self.error_class = error_class
         self.details = details or {}
@@ -72,12 +89,20 @@ class PartialAcceptError(DoowError):
             data = {}
         if not isinstance(data, dict):
             data = {}
-        rejections = data.get("rejections")
+        raw = data.get("rejections")
+        rejections = [
+            {
+                "event_id": sanitize_text(r.get("event_id", "unknown")),
+                "reason": sanitize_text(r.get("reason", "")),
+            }
+            for r in (raw if isinstance(raw, list) else [])
+            if isinstance(r, dict)
+        ]
         return cls(
-            accepted=int(data.get("accepted") or 0),
-            rejected=int(data.get("rejected") or 0),
-            batch_id=str(data.get("batch_id") or ""),
-            rejections=rejections if isinstance(rejections, list) else [],
+            accepted=_to_int(data.get("accepted")),
+            rejected=_to_int(data.get("rejected")),
+            batch_id=sanitize_text(data.get("batch_id") or ""),
+            rejections=rejections,
         )
 
 

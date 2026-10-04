@@ -14,7 +14,7 @@ from typing import Any, Callable, Optional
 
 import httpx
 
-from .errors import APIError, PartialAcceptError
+from .errors import APIError, DoowError, PartialAcceptError, sanitize_text
 from .types import EventKind, RateLimit, SerializedEvent, TrackEvent
 
 SDK_VERSION = "0.1.0"
@@ -44,6 +44,22 @@ def _retry_after(value: Optional[str]) -> float:
         except Exception:
             return 0.0
     return max(0.0, min(seconds, MAX_RETRY_AFTER))
+
+
+def _wrap_transport_error(error: Exception) -> Exception:
+    """httpx errors keep the request, including the Authorization header, so never hand them out."""
+    if isinstance(error, DoowError):
+        return error
+    return DoowError(f"{type(error).__name__}: {sanitize_text(error)}")
+
+
+def _notify(handler: Optional[Callable[[Exception], None]], error: Exception) -> None:
+    if handler is None:
+        return
+    try:
+        handler(error)
+    except Exception:
+        pass
 
 
 def _is_permanent(status: int) -> bool:
@@ -269,7 +285,7 @@ class Tracker:
                     if error.status == 429:
                         threading.Event().wait(getattr(error, "retry_after", 0.0))
             except Exception as e:
-                last_error = e
+                last_error = _wrap_transport_error(e)
 
         # All retries failed - try offline store
         if self._options.offline_store and last_error:
@@ -283,8 +299,8 @@ class Tracker:
             except Exception as e:
                 self._handle_error(e)
 
-        if last_error and self._options.on_error:
-            self._options.on_error(last_error)
+        if last_error:
+            self._handle_error(last_error)
 
     def _do_send(self, body: bytes) -> Optional[Exception]:
         headers = {
@@ -337,7 +353,7 @@ class Tracker:
 
             return None
         except Exception as e:
-            return e  # type: ignore
+            return _wrap_transport_error(e)
 
     def _flush_loop(self) -> None:
         while not self._shutdown.wait(self._options.flush_interval):
@@ -357,6 +373,11 @@ class Tracker:
                 payload = json.loads(batch["payload"])
                 body = json.dumps(payload).encode()
                 error = self._do_send(body)
+                if isinstance(error, PartialAcceptError) or (
+                    isinstance(error, APIError) and _is_permanent(error.status)
+                ):
+                    self._handle_error(error)
+                    continue
                 if error:
                     self._options.offline_store.push(batch)
                     return
@@ -367,7 +388,7 @@ class Tracker:
 
     def _handle_error(self, error: Exception) -> None:
         if self._options.on_error:
-            self._options.on_error(error)
+            _notify(self._options.on_error, error)
         elif self._options.debug:
             print(f"[doow/track] error: {error}")
 
@@ -510,12 +531,11 @@ class AsyncTracker:
                     headers=headers,
                 )
             except Exception as e:
-                last_error = e
+                last_error = _wrap_transport_error(e)
                 continue
 
             if response.status_code == 207:
-                if self._options.on_error:
-                    self._options.on_error(PartialAcceptError.from_response(response))
+                _notify(self._options.on_error, PartialAcceptError.from_response(response))
                 return
             if response.status_code < 400:
                 self._log(f"batch {batch_id} sent successfully")
@@ -526,8 +546,8 @@ class AsyncTracker:
             if response.status_code == 429:
                 await asyncio.sleep(_retry_after(response.headers.get("Retry-After")))
 
-        if last_error and self._options.on_error:
-            self._options.on_error(last_error)
+        if last_error:
+            _notify(self._options.on_error, last_error)
 
     async def _flush_loop(self) -> None:
         while not self._shutdown:
