@@ -20,7 +20,8 @@ class DoowError extends Exception
 
     public static function sanitize(mixed $value): string
     {
-        $text = (string) preg_replace('/[\x00-\x1f\x7f]/', ' ', (string) (is_scalar($value) ? $value : json_encode($value)));
+        $raw = (string) (is_scalar($value) ? $value : json_encode($value));
+        $text = (string) preg_replace('/\p{Cc}/u', ' ', mb_scrub($raw, 'UTF-8'));
 
         return mb_strlen($text) > 512 ? mb_substr($text, 0, 512) . '...' : $text;
     }

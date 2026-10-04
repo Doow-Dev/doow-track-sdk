@@ -191,9 +191,10 @@ void main() {
   });
 
   test('server text is sanitized and truncated', () {
-    final cleaned = sanitizeText('line1\nline2\x1b[31m${'x' * 2000}');
+    final cleaned = sanitizeText('line1\nline2\x1b[31m\x9b31m${'x' * 2000}');
     expect(cleaned.contains('\n'), isFalse);
     expect(cleaned.contains('\x1b'), isFalse);
+    expect(cleaned.contains('\x9b'), isFalse);
     expect(cleaned.length, lessThanOrEqualTo(520));
   });
 }

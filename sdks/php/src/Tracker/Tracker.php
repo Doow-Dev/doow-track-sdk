@@ -51,6 +51,7 @@ class TrackerOptions
 class Tracker
 {
     private const SDK_VERSION = '0.1.0';
+    private const MAX_BODY_BYTES = 1048576;
 
     private string $apiKey;
     private TrackerOptions $options;
@@ -249,7 +250,17 @@ class Tracker
 
     private function readBody(\Psr\Http\Message\ResponseInterface $response): string
     {
-        return $response->getBody()->read(1 << 20);
+        $body = $response->getBody();
+        $content = '';
+        while (!$body->eof() && strlen($content) < self::MAX_BODY_BYTES) {
+            $chunk = $body->read(min(8192, self::MAX_BODY_BYTES - strlen($content)));
+            if ($chunk === '') {
+                break;
+            }
+            $content .= $chunk;
+        }
+
+        return $content;
     }
 
     public static function parseRetryAfter(string $header): ?float

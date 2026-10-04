@@ -203,8 +203,9 @@ final class TrackerProtocolTest extends TestCase
 
     public function testServerTextIsSanitizedAndTruncated(): void
     {
-        $cleaned = \Doow\Track\DoowError::sanitize("line1\nline2\x1b[31m" . str_repeat('x', 2000));
+        $cleaned = \Doow\Track\DoowError::sanitize("line1\nline2\x1b[31m\u{9b}31m" . str_repeat('x', 2000));
         $this->assertStringNotContainsString("\n", $cleaned);
+        $this->assertStringNotContainsString("\u{9b}", $cleaned);
         $this->assertLessThanOrEqual(520, mb_strlen($cleaned));
     }
 
@@ -216,5 +217,23 @@ final class TrackerProtocolTest extends TestCase
         foreach ([400, 401, 403, 404, 413, 422] as $status) {
             $this->assertFalse((new \Doow\Track\DoowError($status, 'x'))->isRetryable(), (string) $status);
         }
+    }
+
+    public function testInvalidUtf8InServerTextDoesNotEmptyTheMessage(): void
+    {
+        $cleaned = \Doow\Track\DoowError::sanitize("bad\xff\xfebytes");
+        $this->assertStringContainsString('bad', $cleaned);
+        $this->assertStringContainsString('bytes', $cleaned);
+    }
+
+    public function testChunkedBodiesAreReadToTheCapOrEof(): void
+    {
+        $big = json_encode(['message' => str_repeat('x', 3_000_000)]);
+        $tracker = $this->tracker([new Response(400, [], $big)], 0);
+        $tracker->track($this->event());
+        $tracker->flush();
+
+        $this->assertCount(1, $this->errors);
+        $this->assertLessThanOrEqual(600, mb_strlen($this->errors[0]->getMessage()));
     }
 }

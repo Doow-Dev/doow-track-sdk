@@ -3,7 +3,7 @@ import 'dart:convert';
 const _maxErrorText = 512;
 
 String sanitizeText(Object? value) {
-  final text = '$value'.replaceAll(RegExp(r'[\x00-\x1f\x7f]'), ' ');
+  final text = '$value'.replaceAll(RegExp(r'[\x00-\x1f\x7f-\x9f]'), ' ');
   return text.length > _maxErrorText ? '${text.substring(0, _maxErrorText)}...' : text;
 }
 
