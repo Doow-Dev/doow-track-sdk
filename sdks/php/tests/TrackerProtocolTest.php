@@ -104,6 +104,7 @@ final class TrackerProtocolTest extends TestCase
 
         $this->assertCount(2, $this->history);
         $this->assertSame($this->body(0)['batch_id'], $this->body(1)['batch_id']);
+        $this->assertSame($this->body(0)['events'][0]['event_id'], $this->body(1)['events'][0]['event_id']);
         $this->assertSame([], $this->errors);
     }
 
@@ -117,5 +118,103 @@ final class TrackerProtocolTest extends TestCase
 
         $this->assertSame('gzip', $this->history[0]['request']->getHeaderLine('Content-Encoding'));
         $this->assertCount(300, $this->body(0)['events']);
+    }
+
+    public function testPermanentClientErrorIsReportedOnceAndNotRetried(): void
+    {
+        $tracker = $this->tracker([new Response(400, [], '{"message":"bad"}')], 3);
+        $tracker->track($this->event());
+        $tracker->flush();
+
+        $this->assertCount(1, $this->history);
+        $this->assertCount(1, $this->errors);
+        $this->assertSame(400, $this->errors[0]->status);
+    }
+
+    public function testBlankSourceSystemDefaultsToSdk(): void
+    {
+        $tracker = $this->tracker([new Response(202)]);
+        $tracker->track(new TrackEvent(metric: 'm', quantity: 1.0, licenseId: 'l', sourceSystem: ' '));
+        $tracker->flush();
+
+        $this->assertSame('sdk', $this->body(0)['events'][0]['source_system']);
+    }
+
+    public function testAThrowingOnErrorHandlerNeverEscapesFlush(): void
+    {
+        $stack = HandlerStack::create(new MockHandler([new Response(400, [], '{"message":"bad"}')]));
+        $tracker = new Tracker('dk_test', new TrackerOptions(
+            flushAt: 1000,
+            onError: function (\Throwable $e): void {
+                throw new \RuntimeException('handler failure');
+            },
+            httpClient: new Client(['handler' => $stack]),
+        ));
+        $tracker->track($this->event());
+        $tracker->flush();
+
+        $this->assertTrue(true);
+    }
+
+    public function testMalformedPartialAcceptBodyIsReportedWithoutResend(): void
+    {
+        $tracker = $this->tracker([new Response(207, [], json_encode([
+            'accepted' => 'abc',
+            'rejected' => null,
+            'rejections' => [1, 'x', ['event_id' => 5]],
+        ]))]);
+        $tracker->track($this->event());
+        $tracker->flush();
+
+        $this->assertCount(1, $this->history);
+        $this->assertInstanceOf(PartialAcceptError::class, $this->errors[0]);
+    }
+
+    public function testTransportFailuresAreWrappedSoTheRequestIsNotExposed(): void
+    {
+        $stack = HandlerStack::create(new MockHandler([
+            new \GuzzleHttp\Exception\ConnectException('boom', new \GuzzleHttp\Psr7\Request('POST', 'https://x', ['Authorization' => 'Bearer dk_test'])),
+        ]));
+        $errors = [];
+        $tracker = new Tracker('dk_test', new TrackerOptions(
+            flushAt: 1000,
+            retryCount: 0,
+            onError: function (\Throwable $e) use (&$errors): void {
+                $errors[] = $e;
+            },
+            httpClient: new Client(['handler' => $stack]),
+        ));
+        $tracker->track($this->event());
+        $tracker->flush();
+
+        $this->assertCount(1, $errors);
+        $this->assertInstanceOf(\Doow\Track\DoowError::class, $errors[0]);
+        $this->assertStringNotContainsString('dk_test', $errors[0]->getMessage());
+        $this->assertNull($errors[0]->getPrevious());
+    }
+
+    public function testRetryAfterIsClampedAndGarbageIgnored(): void
+    {
+        $this->assertSame(2.0, Tracker::parseRetryAfter('2'));
+        $this->assertSame(30.0, Tracker::parseRetryAfter('86400'));
+        $this->assertNull(Tracker::parseRetryAfter('garbage'));
+        $this->assertNull(Tracker::parseRetryAfter(''));
+    }
+
+    public function testServerTextIsSanitizedAndTruncated(): void
+    {
+        $cleaned = \Doow\Track\DoowError::sanitize("line1\nline2\x1b[31m" . str_repeat('x', 2000));
+        $this->assertStringNotContainsString("\n", $cleaned);
+        $this->assertLessThanOrEqual(520, mb_strlen($cleaned));
+    }
+
+    public function testAnyServerErrorStatusIsRetryable(): void
+    {
+        foreach ([408, 429, 500, 502, 503, 504, 520, 522] as $status) {
+            $this->assertTrue((new \Doow\Track\DoowError($status, 'x'))->isRetryable(), (string) $status);
+        }
+        foreach ([400, 401, 403, 404, 413, 422] as $status) {
+            $this->assertFalse((new \Doow\Track\DoowError($status, 'x'))->isRetryable(), (string) $status);
+        }
     }
 }

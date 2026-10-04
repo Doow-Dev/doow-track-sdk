@@ -30,16 +30,16 @@ class PartialAcceptError extends Exception
         foreach (is_array($data['rejections'] ?? null) ? $data['rejections'] : [] as $rejection) {
             if (is_array($rejection)) {
                 $rejections[] = [
-                    'event_id' => (string) ($rejection['event_id'] ?? 'unknown'),
-                    'reason' => (string) ($rejection['reason'] ?? ''),
+                    'event_id' => DoowError::sanitize($rejection['event_id'] ?? 'unknown'),
+                    'reason' => DoowError::sanitize($rejection['reason'] ?? ''),
                 ];
             }
         }
 
         return new self(
-            (int) ($data['accepted'] ?? 0),
-            (int) ($data['rejected'] ?? 0),
-            (string) ($data['batch_id'] ?? $fallbackBatchId),
+            is_numeric($data['accepted'] ?? null) ? (int) $data['accepted'] : 0,
+            is_numeric($data['rejected'] ?? null) ? (int) $data['rejected'] : 0,
+            DoowError::sanitize($data['batch_id'] ?? $fallbackBatchId),
             $rejections,
         );
     }

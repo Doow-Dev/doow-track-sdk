@@ -126,7 +126,11 @@ class Tracker
         } catch (\Exception $e) {
             $this->log("flush error: {$e->getMessage()}");
             if ($this->options->onError) {
-                ($this->options->onError)($e);
+                try {
+                    ($this->options->onError)($e);
+                } catch (\Throwable) {
+                    $this->log('onError handler threw');
+                }
             }
         }
     }
@@ -146,7 +150,7 @@ class Tracker
                 'event_id' => $e['event_id'],
                 'license_id' => $e['license_id'],
                 'occurred_at' => $e['timestamp'],
-                'source_system' => $e['source_system'] ?? 'sdk',
+                'source_system' => trim((string) ($e['source_system'] ?? '')) === '' ? 'sdk' : $e['source_system'],
                 'kind' => $e['kind'],
                 'unit' => $e['unit'],
                 'attribution' => $e['attribution'],
@@ -169,6 +173,9 @@ class Tracker
         for ($attempt = 0; $attempt <= $this->options->retryCount; $attempt++) {
             if ($attempt > 0) {
                 $backoff = min(100 * (1 << ($attempt - 1)), 10000);
+                if ($lastError instanceof DoowError && $lastError->retryAfterSeconds !== null) {
+                    $backoff = max($backoff, (int) ($lastError->retryAfterSeconds * 1000));
+                }
                 usleep($backoff * 1000);
                 $this->log("retry attempt {$attempt} after {$backoff}ms");
             }
@@ -185,7 +192,7 @@ class Tracker
                     throw $e;
                 }
             } catch (GuzzleException $e) {
-                $lastError = $e;
+                $lastError = new DoowError(status: 0, message: get_class($e) . ': ' . $e->getMessage());
             }
         }
 
@@ -224,18 +231,44 @@ class Tracker
         $statusCode = $response->getStatusCode();
 
         if ($statusCode === 207) {
-            throw PartialAcceptError::fromBody($response->getBody()->getContents(), $batchId);
+            throw PartialAcceptError::fromBody($this->readBody($response), $batchId);
         }
 
         if ($statusCode >= 400) {
-            $data = json_decode($response->getBody()->getContents(), true) ?? [];
+            $data = json_decode($this->readBody($response), true);
+            $data = is_array($data) ? $data : [];
             throw new DoowError(
                 status: $statusCode,
-                message: $data['message'] ?? 'Unknown error',
-                errorClass: $data['errorClass'] ?? null,
+                message: DoowError::sanitize($data['message'] ?? 'Unknown error'),
+                errorClass: isset($data['errorClass']) ? DoowError::sanitize($data['errorClass']) : null,
                 details: $data,
+                retryAfterSeconds: $statusCode === 429 ? self::parseRetryAfter($response->getHeaderLine('Retry-After')) : null,
             );
         }
+    }
+
+    private function readBody(\Psr\Http\Message\ResponseInterface $response): string
+    {
+        return $response->getBody()->read(1 << 20);
+    }
+
+    public static function parseRetryAfter(string $header): ?float
+    {
+        $header = trim($header);
+        if ($header === '') {
+            return null;
+        }
+        if (is_numeric($header)) {
+            $seconds = (float) $header;
+        } else {
+            $at = strtotime($header);
+            if ($at === false) {
+                return null;
+            }
+            $seconds = (float) ($at - time());
+        }
+
+        return min(max($seconds, 0.0), 30.0);
     }
 
     public function shutdown(): void

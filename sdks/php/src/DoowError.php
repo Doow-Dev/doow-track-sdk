@@ -13,8 +13,16 @@ class DoowError extends Exception
         string $message,
         public readonly ?string $errorClass = null,
         public readonly array $details = [],
+        public readonly ?float $retryAfterSeconds = null,
     ) {
-        parent::__construct("doow: {$message} (status={$status})");
+        parent::__construct("doow: " . self::sanitize($message) . " (status={$status})");
+    }
+
+    public static function sanitize(mixed $value): string
+    {
+        $text = (string) preg_replace('/[\x00-\x1f\x7f]/', ' ', (string) (is_scalar($value) ? $value : json_encode($value)));
+
+        return mb_strlen($text) > 512 ? mb_substr($text, 0, 512) . '...' : $text;
     }
 
     public function isNotFound(): bool
@@ -44,6 +52,6 @@ class DoowError extends Exception
 
     public function isRetryable(): bool
     {
-        return in_array($this->status, [429, 500, 502, 503, 504], true);
+        return $this->status === 0 || $this->status === 408 || $this->status === 429 || $this->status >= 500;
     }
 }
