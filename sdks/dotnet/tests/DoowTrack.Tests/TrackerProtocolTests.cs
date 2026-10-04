@@ -33,6 +33,12 @@ public class TrackerProtocolTests
         }
     }
 
+    private sealed class ThrowingHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct) =>
+            throw new InvalidOperationException("handler exploded");
+    }
+
     private static (Tracker Tracker, List<Exception> Errors) Create(StubHandler handler, int retryCount = 1)
     {
         var errors = new List<Exception>();
@@ -109,6 +115,24 @@ public class TrackerProtocolTests
     }
 
     [Fact]
+    public async Task UnexpectedExceptionsReachOnErrorInsteadOfEscaping()
+    {
+        var errors = new List<Exception>();
+        var tracker = new Tracker("dk_test", new TrackerOptions
+        {
+            Endpoint = "https://test.doow.co",
+            FlushIntervalMs = 0,
+            RetryCount = 1,
+            OnError = errors.Add,
+            HttpHandler = new ThrowingHandler(),
+        });
+        tracker.Track(Event());
+        await tracker.FlushAsync();
+
+        Assert.IsType<InvalidOperationException>(Assert.Single(errors));
+    }
+
+    [Fact]
     public async Task RetryReusesTheBatchId()
     {
         var handler = new StubHandler((503, "{}"), (202, "{}"));
@@ -120,6 +144,9 @@ public class TrackerProtocolTests
         Assert.Equal(
             handler.Requests[0].Body.GetProperty("batch_id").GetString(),
             handler.Requests[1].Body.GetProperty("batch_id").GetString());
+        Assert.Equal(
+            handler.Requests[0].Body.GetProperty("events")[0].GetProperty("event_id").GetString(),
+            handler.Requests[1].Body.GetProperty("events")[0].GetProperty("event_id").GetString());
         Assert.Empty(errors);
     }
 

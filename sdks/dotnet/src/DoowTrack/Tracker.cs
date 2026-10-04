@@ -203,7 +203,12 @@ public class Tracker : IDisposable
                 Report(new DoowError($"API error: {responseBody}", status));
                 return;
             }
-            catch (Exception e) when (e is HttpRequestException or TaskCanceledException)
+            catch (Exception e) when (e is not HttpRequestException and not TaskCanceledException)
+            {
+                Report(e);
+                return;
+            }
+            catch (Exception e)
             {
                 if (lastAttempt)
                 {
@@ -249,7 +254,17 @@ public class Tracker : IDisposable
 
     private void Report(Exception error)
     {
-        _options.OnError?.Invoke(error);
+        try
+        {
+            _options.OnError?.Invoke(error);
+        }
+        catch (Exception handlerError)
+        {
+            if (_options.Debug)
+            {
+                Console.Error.WriteLine($"[doow-track] OnError handler threw: {handlerError.Message}");
+            }
+        }
         if (_options.Debug)
         {
             Console.Error.WriteLine($"[doow-track] Error: {error.Message}");
