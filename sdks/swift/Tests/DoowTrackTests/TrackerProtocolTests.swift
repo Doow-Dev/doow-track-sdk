@@ -1,11 +1,15 @@
 import Testing
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 @testable import DoowTrack
 
 final class StubURLProtocol: URLProtocol {
     static var responder: ((URLRequest) -> (Int, Data))?
     static var headers: [String: String] = [:]
     static var endlessBody = false
+    static var stallBody = false
     static var bytesServed = 0
     private var stopped = false
     private let stopLock = NSLock()
@@ -30,6 +34,7 @@ final class StubURLProtocol: URLProtocol {
         let (status, data) = Self.responder?(request) ?? (202, Data())
         let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: Self.headers)!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        if Self.stallBody { return }
         if Self.endlessBody {
             let chunk = Data(repeating: UInt8(ascii: "x"), count: 65536)
             DispatchQueue.global().async { [self] in
@@ -68,17 +73,19 @@ final class TrackerProtocolTests {
         StubURLProtocol.responder = nil
         StubURLProtocol.headers = [:]
         StubURLProtocol.endlessBody = false
+        StubURLProtocol.stallBody = false
         StubURLProtocol.bytesServed = 0
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [StubURLProtocol.self]
         session = URLSession(configuration: config)
     }
 
-    private func makeTracker(retryCount: Int = 2) throws -> Tracker {
+    private func makeTracker(retryCount: Int = 2, timeoutSeconds: Double = 10) throws -> Tracker {
         try Tracker("dk_test", options: TrackerOptions(
             endpoint: "https://test.doow.co",
             flushAt: 1000,
             flushIntervalSeconds: 0,
+            timeoutSeconds: timeoutSeconds,
             retryCount: retryCount,
             onError: { [unowned self] in self.errors.append($0) },
             session: session
@@ -212,6 +219,19 @@ final class TrackerProtocolTests {
         let ids = try StubURLProtocol.requests.map { try json($0.body)["batch_id"] as? String }
         #expect(Set(ids).count == 1)
         #expect(errors.isEmpty)
+    }
+
+    @Test func aResponseThatNeverFinishesIsCutOffByTheWallClockTimeout() throws {
+        StubURLProtocol.stallBody = true
+        StubURLProtocol.responder = { _ in (200, Data()) }
+        let tracker = try makeTracker(retryCount: 0, timeoutSeconds: 0.3)
+        track(tracker)
+        let started = Date()
+        tracker.flush()
+        let elapsed = Date().timeIntervalSince(started)
+
+        #expect(elapsed < 8)
+        #expect((errors.first as? URLError)?.code == .timedOut)
     }
 
     @Test func retryAfterIsClampedAndGarbageIgnored() {

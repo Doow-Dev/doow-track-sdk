@@ -156,3 +156,14 @@ jobs:
         working-directory: sdks/swift
       - run: swift test
         working-directory: sdks/swift
+
+  swift-linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    container: swift:6.0-jammy
+    steps:
+      - uses: actions/checkout@v4
+      - run: swift build
+        working-directory: sdks/swift
+      - run: swift test
+        working-directory: sdks/swift

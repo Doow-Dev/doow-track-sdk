@@ -89,10 +89,11 @@ struct WireBatch: Encodable {
     }
 }
 
-final class BoundedResponseCollector: NSObject, URLSessionDataDelegate {
+final class BoundedResponseCollector {
     private let limit: Int
     private let onComplete: () -> Void
     private var truncated = false
+    private var timedOut = false
     private(set) var data = Data()
     private(set) var response: HTTPURLResponse?
     private(set) var error: Error?
@@ -102,32 +103,80 @@ final class BoundedResponseCollector: NSObject, URLSessionDataDelegate {
         self.onComplete = onComplete
     }
 
+    func received(_ response: URLResponse) {
+        self.response = response as? HTTPURLResponse
+    }
+
+    func received(_ chunk: Data, from task: URLSessionTask) {
+        let room = limit - data.count
+        if chunk.count >= room {
+            data.append(chunk.prefix(max(room, 0)))
+            truncated = true
+            task.cancel()
+        } else {
+            data.append(chunk)
+        }
+    }
+
+    func timeOut() {
+        timedOut = true
+    }
+
+    func completed(with failure: Error?) {
+        if timedOut {
+            error = URLError(.timedOut)
+        } else if !(truncated && (failure as NSError?)?.code == NSURLErrorCancelled) {
+            error = failure
+        }
+        onComplete()
+    }
+}
+
+/// Foundation on Linux ignores per-task delegates, so callbacks are routed from one session delegate.
+final class BoundedResponseSession: NSObject, URLSessionDataDelegate {
+    private let lock = NSLock()
+    private var collectors: [Int: BoundedResponseCollector] = [:]
+    private(set) var session: URLSession!
+
+    init(configuration: URLSessionConfiguration) {
+        super.init()
+        session = URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
+    }
+
+    func register(_ collector: BoundedResponseCollector, for task: URLSessionTask) {
+        lock.lock()
+        collectors[task.taskIdentifier] = collector
+        lock.unlock()
+    }
+
+    func unregister(_ task: URLSessionTask) {
+        lock.lock()
+        collectors[task.taskIdentifier] = nil
+        lock.unlock()
+    }
+
+    private func collector(for task: URLSessionTask) -> BoundedResponseCollector? {
+        lock.lock()
+        defer { lock.unlock() }
+        return collectors[task.taskIdentifier]
+    }
+
     func urlSession(
         _ session: URLSession,
         dataTask: URLSessionDataTask,
         didReceive response: URLResponse,
         completionHandler: @escaping (URLSession.ResponseDisposition) -> Void
     ) {
-        self.response = response as? HTTPURLResponse
+        collector(for: dataTask)?.received(response)
         completionHandler(.allow)
     }
 
-    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive received: Data) {
-        let room = limit - data.count
-        if received.count >= room {
-            data.append(received.prefix(max(room, 0)))
-            truncated = true
-            dataTask.cancel()
-        } else {
-            data.append(received)
-        }
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+        collector(for: dataTask)?.received(data, from: dataTask)
     }
 
-    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError failure: Error?) {
-        if !(truncated && (failure as NSError?)?.code == NSURLErrorCancelled) {
-            error = failure
-        }
-        onComplete()
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        collector(for: task)?.completed(with: error)
     }
 }
 
@@ -138,6 +187,7 @@ struct BufferedEvent {
 
 let doowSdkVersion = "0.1.0"
 let maxResponseBytes = 1 << 20
+let responseGraceSeconds: Double = 5
 let maxRetryAfterSeconds: Double = 30
 
 func parseRetryAfter(_ header: String?) -> Double {
@@ -165,6 +215,7 @@ public class Tracker {
     private let encoder: JSONEncoder
     private var flushTimer: Timer?
     private var isClosed = false
+    private let responseSession: BoundedResponseSession
 
     public init(_ apiKey: String, options: TrackerOptions = TrackerOptions()) throws {
         let key = ProcessInfo.processInfo.environment["DOOW_TRACK_API_KEY"] ?? apiKey
@@ -173,6 +224,7 @@ public class Tracker {
         }
         self.apiKey = key
         self.options = options
+        self.responseSession = BoundedResponseSession(configuration: options.session.configuration)
 
         self.encoder = JSONEncoder()
         self.encoder.keyEncodingStrategy = .convertToSnakeCase
@@ -329,26 +381,17 @@ public class Tracker {
 
     private func perform(_ request: URLRequest) -> (Data?, HTTPURLResponse?, Error?) {
         let semaphore = DispatchSemaphore(value: 0)
-        #if canImport(FoundationNetworking)
-        var data: Data?
-        var response: HTTPURLResponse?
-        var error: Error?
-        options.session.dataTask(with: request) { received, urlResponse, failure in
-            data = received.map { Data($0.prefix(maxResponseBytes)) }
-            response = urlResponse as? HTTPURLResponse
-            error = failure
-            semaphore.signal()
-        }.resume()
-        semaphore.wait()
-        return (data, response, error)
-        #else
         let collector = BoundedResponseCollector(limit: maxResponseBytes) { semaphore.signal() }
-        let task = options.session.dataTask(with: request)
-        task.delegate = collector
+        let task = responseSession.session.dataTask(with: request)
+        responseSession.register(collector, for: task)
         task.resume()
-        semaphore.wait()
+        if semaphore.wait(timeout: .now() + options.timeoutSeconds + responseGraceSeconds) == .timedOut {
+            collector.timeOut()
+            task.cancel()
+            semaphore.wait()
+        }
+        responseSession.unregister(task)
         return (collector.data, collector.response, collector.error)
-        #endif
     }
 
     private func report(_ error: Error) {
@@ -360,6 +403,7 @@ public class Tracker {
         isClosed = true
         flushTimer?.invalidate()
         flush()
+        responseSession.session.finishTasksAndInvalidate()
     }
 
     private func log(_ message: String) {
