@@ -117,4 +117,27 @@ void main() {
     expect(ids.length, 2);
     expect(ids.toSet().length, 1);
   });
+
+  test('permanent client errors are reported once and not retried', () async {
+    var calls = 0;
+    final client = MockClient((request) async {
+      calls++;
+      return http.Response('bad', 400);
+    });
+    final errors = <DoowError>[];
+    final tracker = trackerFor(client, errors, retries: 3);
+
+    tracker.track(sampleEvent());
+    await tracker.shutdown();
+
+    expect(calls, 1);
+    expect(errors.single.statusCode, 400);
+  });
+
+  test('Retry-After is clamped and tolerates garbage', () {
+    expect(parseRetryAfter('2'), const Duration(seconds: 2));
+    expect(parseRetryAfter('86400'), const Duration(seconds: 30));
+    expect(parseRetryAfter('garbage'), isNull);
+    expect(parseRetryAfter(null), isNull);
+  });
 }

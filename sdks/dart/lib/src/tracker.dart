@@ -38,6 +38,24 @@ class TrackerOptions {
 }
 
 const _sdkVersion = '0.1.0';
+const _maxRetryAfter = Duration(seconds: 30);
+
+Duration? parseRetryAfter(String? header) {
+  if (header == null || header.isEmpty) return null;
+  final seconds = num.tryParse(header);
+  Duration? delay;
+  if (seconds != null) {
+    delay = Duration(milliseconds: (seconds * 1000).round());
+  } else {
+    try {
+      delay = HttpDate.parse(header).difference(DateTime.now());
+    } catch (_) {
+      return null;
+    }
+  }
+  if (delay.isNegative) return Duration.zero;
+  return delay > _maxRetryAfter ? _maxRetryAfter : delay;
+}
 
 String _uuidV4() {
   final random = Random.secure();
@@ -203,9 +221,8 @@ class Tracker {
           }
           final retryAfter =
               response.statusCode == 429 ? response.headers['retry-after'] : null;
-          final delay = retryAfter != null
-              ? Duration(seconds: int.tryParse(retryAfter) ?? 1)
-              : Duration(milliseconds: 100 * (1 << attempt));
+          final delay = parseRetryAfter(retryAfter) ??
+              Duration(milliseconds: 100 * (1 << attempt));
           await Future.delayed(delay);
           continue;
         }
