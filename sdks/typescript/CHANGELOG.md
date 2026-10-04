@@ -7,6 +7,14 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## Unreleased
+
+### Fixes
+
+- HTTP 207 rejections are read from the API's numeric `rejected` plus `rejections[]` shape, sanitized, and reported through `onError` without a resend.
+- Only 429, 5xx, and network errors are retried. A permanent 4xx is reported once, and a single event that exceeds the 413 payload limit is reported instead of being retried forever.
+- `Retry-After` is clamped to 30 seconds, and a throwing `onError` handler never escapes `flush`.
+
 ## [0.1.0] — 2026-04-20
 
 Initial release.
