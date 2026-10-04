@@ -139,6 +139,31 @@ void main() {
     expect(errors.single.statusCode, 400);
   });
 
+  test('a 429 with Retry-After waits at least that long and retries the same batch', () async {
+    final ids = <String>[];
+    var calls = 0;
+    final client = MockClient((request) async {
+      ids.add((jsonDecode(request.body) as Map)['batch_id'] as String);
+      calls++;
+      return calls == 1
+          ? http.Response('', 429, headers: {'retry-after': '1'})
+          : http.Response('', 202);
+    });
+    final errors = <DoowError>[];
+    final tracker = trackerFor(client, errors, retries: 1);
+
+    tracker.track(sampleEvent());
+    final started = DateTime.now();
+    await tracker.flush();
+    final elapsed = DateTime.now().difference(started);
+    await tracker.shutdown();
+
+    expect(ids.length, 2);
+    expect(ids.toSet().length, 1);
+    expect(elapsed, greaterThanOrEqualTo(const Duration(milliseconds: 900)));
+    expect(errors, isEmpty);
+  });
+
   test('Retry-After is clamped and tolerates garbage', () {
     expect(parseRetryAfter('2'), const Duration(seconds: 2));
     expect(parseRetryAfter('86400'), const Duration(seconds: 30));

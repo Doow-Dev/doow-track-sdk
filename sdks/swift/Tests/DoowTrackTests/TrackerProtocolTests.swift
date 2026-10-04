@@ -4,6 +4,7 @@ import Foundation
 
 final class StubURLProtocol: URLProtocol {
     static var responder: ((URLRequest) -> (Int, Data))?
+    static var headers: [String: String] = [:]
     static var requests: [(request: URLRequest, body: Data)] = []
 
     override class func canInit(with request: URLRequest) -> Bool { true }
@@ -23,7 +24,7 @@ final class StubURLProtocol: URLProtocol {
         }
         Self.requests.append((request, body))
         let (status, data) = Self.responder?(request) ?? (202, Data())
-        let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!
+        let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: Self.headers)!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: data)
         client?.urlProtocolDidFinishLoading(self)
@@ -40,6 +41,7 @@ final class TrackerProtocolTests {
     init() {
         StubURLProtocol.requests = []
         StubURLProtocol.responder = nil
+        StubURLProtocol.headers = [:]
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [StubURLProtocol.self]
         session = URLSession(configuration: config)
@@ -160,6 +162,26 @@ final class TrackerProtocolTests {
         let error = try #require(errors.first as? DoowError)
         #expect(error.statusCode == 400)
         #expect(error.message.count <= 540)
+    }
+
+    @Test func rateLimitedBatchWaitsForRetryAfterAndRetriesTheSameBatch() throws {
+        var calls = 0
+        StubURLProtocol.headers = ["Retry-After": "2"]
+        StubURLProtocol.responder = { _ in
+            calls += 1
+            return (calls == 1 ? 429 : 202, Data())
+        }
+        let tracker = try makeTracker()
+        track(tracker)
+        let started = Date()
+        tracker.flush()
+        let elapsed = Date().timeIntervalSince(started)
+
+        #expect(StubURLProtocol.requests.count == 2)
+        #expect(elapsed >= 1.9)
+        let ids = try StubURLProtocol.requests.map { try json($0.body)["batch_id"] as? String }
+        #expect(Set(ids).count == 1)
+        #expect(errors.isEmpty)
     }
 
     @Test func retryAfterIsClampedAndGarbageIgnored() {
