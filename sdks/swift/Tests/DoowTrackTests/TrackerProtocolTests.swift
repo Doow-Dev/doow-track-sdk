@@ -131,6 +131,38 @@ final class TrackerProtocolTests {
         #expect(StubURLProtocol.requests.count == 2)
         let ids = try StubURLProtocol.requests.map { try json($0.body)["batch_id"] as? String }
         #expect(Set(ids).count == 1)
+        let eventIds = try StubURLProtocol.requests.map { request -> String? in
+            let events = try json(request.body)["events"] as? [[String: Any]]
+            return events?.first?["event_id"] as? String
+        }
+        #expect(eventIds.count == 2)
+        #expect(Set(eventIds).count == 1)
+    }
+
+    @Test func malformedPartialAcceptBodyIsReportedWithoutResend() throws {
+        StubURLProtocol.responder = { _ in
+            (207, Data(#"{"accepted":"abc","rejected":null,"rejections":[1,"x",{"event_id":5}]}"#.utf8))
+        }
+        let tracker = try makeTracker()
+        track(tracker)
+        tracker.flush()
+
+        #expect(StubURLProtocol.requests.count == 1)
+        #expect(errors.first is PartialAcceptError)
+    }
+
+    @Test func retryAfterIsClampedAndGarbageIgnored() {
+        #expect(parseRetryAfter("2") == 2)
+        #expect(parseRetryAfter("86400") == 30)
+        #expect(parseRetryAfter("garbage") == 0)
+        #expect(parseRetryAfter(nil) == 0)
+    }
+
+    @Test func serverTextIsSanitizedAndTruncated() {
+        let cleaned = sanitizeText("line1\nline2\u{1b}[31m" + String(repeating: "x", count: 2000))
+        #expect(!cleaned.contains("\n"))
+        #expect(!cleaned.contains("\u{1b}"))
+        #expect(cleaned.count <= 520)
     }
 
     #if canImport(Compression)

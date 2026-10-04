@@ -95,6 +95,25 @@ struct BufferedEvent {
 }
 
 let doowSdkVersion = "0.1.0"
+let maxResponseBytes = 1 << 20
+let maxRetryAfterSeconds: Double = 30
+
+func parseRetryAfter(_ header: String?) -> Double {
+    guard let value = header?.trimmingCharacters(in: .whitespaces), !value.isEmpty else { return 0 }
+    var seconds: Double
+    if let numeric = Double(value) {
+        seconds = numeric
+    } else {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "GMT")
+        formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss zzz"
+        guard let date = formatter.date(from: value) else { return 0 }
+        seconds = date.timeIntervalSinceNow
+    }
+    if !seconds.isFinite || seconds < 0 { return 0 }
+    return min(seconds, maxRetryAfterSeconds)
+}
 
 public class Tracker {
     private let apiKey: String
@@ -248,8 +267,10 @@ public class Tracker {
 
             guard let status = httpResponse?.statusCode else { return }
 
+            let boundedData = responseData.map { Data($0.prefix(maxResponseBytes)) }
+
             if status == 207 {
-                let partial = responseData.flatMap { try? JSONDecoder().decode(PartialAcceptError.self, from: $0) }
+                let partial = boundedData.flatMap { try? JSONDecoder().decode(PartialAcceptError.self, from: $0) }
                     ?? PartialAcceptError(accepted: 0, rejected: 0, batchId: batchId, rejections: [])
                 report(partial)
                 return
@@ -261,12 +282,16 @@ public class Tracker {
             }
 
             if (status == 429 || status >= 500) && !isLastAttempt {
-                Thread.sleep(forTimeInterval: pow(2, Double(attempt)))
+                var delay = pow(2, Double(attempt))
+                if status == 429 {
+                    delay = max(delay, parseRetryAfter(httpResponse?.value(forHTTPHeaderField: "Retry-After")))
+                }
+                Thread.sleep(forTimeInterval: delay)
                 continue
             }
 
-            let errorBody = responseData.flatMap { String(data: $0, encoding: .utf8) } ?? ""
-            report(DoowError("API error: \(errorBody)", statusCode: status))
+            let errorBody = boundedData.flatMap { String(data: $0, encoding: .utf8) } ?? ""
+            report(DoowError("API error: \(sanitizeText(errorBody))", statusCode: status))
             return
         }
     }

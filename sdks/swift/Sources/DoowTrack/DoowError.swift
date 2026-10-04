@@ -1,12 +1,19 @@
 import Foundation
 
+func sanitizeText(_ text: String) -> String {
+    let cleaned = String(text.unicodeScalars.map { scalar in
+        CharacterSet.controlCharacters.contains(scalar) ? " " : Character(scalar)
+    })
+    return cleaned.count > 512 ? String(cleaned.prefix(512)) + "..." : cleaned
+}
+
 public struct DoowError: Error, LocalizedError {
     public let message: String
     public let statusCode: Int
     public let errorClass: String?
 
     public init(_ message: String, statusCode: Int = 0, errorClass: String? = nil) {
-        self.message = message
+        self.message = sanitizeText(message)
         self.statusCode = statusCode
         self.errorClass = errorClass
     }
@@ -23,6 +30,11 @@ public struct DoowError: Error, LocalizedError {
 public struct EventRejection: Codable, Equatable {
     public let eventId: String
     public let reason: String
+
+    public init(eventId: String, reason: String) {
+        self.eventId = eventId
+        self.reason = reason
+    }
 
     enum CodingKeys: String, CodingKey {
         case eventId = "event_id"
@@ -52,8 +64,10 @@ public struct PartialAcceptError: Error, LocalizedError, Decodable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         accepted = try c.decodeIfPresent(Int.self, forKey: .accepted) ?? 0
         rejected = try c.decodeIfPresent(Int.self, forKey: .rejected) ?? 0
-        batchId = try c.decodeIfPresent(String.self, forKey: .batchId) ?? ""
-        rejections = try c.decodeIfPresent([EventRejection].self, forKey: .rejections) ?? []
+        batchId = sanitizeText(try c.decodeIfPresent(String.self, forKey: .batchId) ?? "")
+        rejections = (try c.decodeIfPresent([EventRejection].self, forKey: .rejections) ?? []).map {
+            EventRejection(eventId: sanitizeText($0.eventId), reason: sanitizeText($0.reason))
+        }
     }
 
     public var errorDescription: String? {
