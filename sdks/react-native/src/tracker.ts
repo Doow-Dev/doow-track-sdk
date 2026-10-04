@@ -4,6 +4,7 @@ import type { TrackEvent, TrackerOptions } from './types';
 import {
   NonRetryableError,
   generateUUID,
+  parseRetryAfterMs,
   readPartialAccept,
   toWireBatch,
   type QueuedEvent,
@@ -175,8 +176,9 @@ export class Tracker {
           if (attempt === this.options.retryCount) {
             throw new Error(`HTTP ${response.status} after ${attempt + 1} attempts`);
           }
-          const retryAfter = response.status === 429 ? response.headers.get('Retry-After') : null;
-          const delay = retryAfter ? parseInt(retryAfter, 10) * 1000 : 100 * Math.pow(2, attempt);
+          const retryAfter =
+            response.status === 429 ? parseRetryAfterMs(response.headers.get('Retry-After')) : undefined;
+          const delay = retryAfter ?? 100 * Math.pow(2, attempt);
           await this.sleep(delay);
           continue;
         }

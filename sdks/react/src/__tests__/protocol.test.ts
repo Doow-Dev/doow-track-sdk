@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Tracker } from '../tracker';
-import { PartialAcceptError } from '../wire';
+import { PartialAcceptError, MAX_RETRY_AFTER_MS, parseRetryAfterMs } from '../wire';
 
 interface Call {
   url: string;
@@ -113,5 +113,27 @@ describe('React tracker wire protocol', () => {
     expect((init.headers as Record<string, string>).Authorization).toBe('Bearer dk_test');
     expect(init.keepalive).toBe(true);
     expect(JSON.parse(init.body as string).batch_id).toBeTruthy();
+  });
+
+  it('unload sends one request within the keepalive quota and keeps the rest queued', () => {
+    const calls = stubFetch([{ status: 202 }]);
+    const tracker = new Tracker('dk_test', { flushIntervalMs: 60_000, flushAt: 100_000 });
+    for (let i = 0; i < 2000; i++) tracker.track(event);
+    tracker.destroy();
+
+    expect(calls).toHaveLength(1);
+    const body = calls[0]!.init.body as string;
+    expect(body.length).toBeLessThanOrEqual(60_000);
+    expect(JSON.parse(body).events.length).toBeLessThan(2000);
+  });
+});
+
+describe('parseRetryAfterMs', () => {
+  it('clamps large values, handles dates, and ignores garbage', () => {
+    expect(parseRetryAfterMs('2')).toBe(2000);
+    expect(parseRetryAfterMs('86400')).toBe(MAX_RETRY_AFTER_MS);
+    expect(parseRetryAfterMs(new Date(Date.now() + 5000).toUTCString())).toBeGreaterThan(0);
+    expect(parseRetryAfterMs('garbage')).toBeUndefined();
+    expect(parseRetryAfterMs(null)).toBeUndefined();
   });
 });
