@@ -14,7 +14,7 @@ MAX_ERROR_TEXT = 512
 
 def sanitize_text(value: Any) -> str:
     """Strip control characters and cap server-supplied text before it enters a message."""
-    text = "".join(" " if (ord(ch) < 32 or ord(ch) == 127) else ch for ch in str(value))
+    text = "".join(" " if (ord(ch) < 32 or 127 <= ord(ch) <= 159) else ch for ch in str(value))
     return text if len(text) <= MAX_ERROR_TEXT else text[:MAX_ERROR_TEXT] + "..."
 
 

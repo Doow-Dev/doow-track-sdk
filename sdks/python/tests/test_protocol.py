@@ -263,6 +263,6 @@ def test_large_body_is_a_real_gzip_stream(httpx_mock):
 def test_server_text_is_sanitized_and_truncated():
     from doow_track.errors import APIError
 
-    error = APIError(status=500, message="line1\nline2\x1b[31m" + "x" * 2000)
-    assert "\n" not in error.message and "\x1b" not in error.message
+    error = APIError(status=500, message="line1\nline2\x1b[31m\x9b31m" + "x" * 2000)
+    assert "\n" not in error.message and "\x1b" not in error.message and "\x9b" not in error.message
     assert len(error.message) <= 520
