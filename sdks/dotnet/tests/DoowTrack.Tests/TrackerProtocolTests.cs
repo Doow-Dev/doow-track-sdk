@@ -241,4 +241,16 @@ public class TrackerProtocolTests
         Assert.Empty(handler.Requests);
         Assert.Single(errors);
     }
+
+    [Fact]
+    public async Task OversizedErrorBodiesAreCappedBeforeTheyReachTheMessage()
+    {
+        var handler = new StubHandler((400, new string('x', 3_000_000)));
+        var (tracker, errors) = Create(handler);
+        tracker.Track(Event());
+        await tracker.FlushAsync();
+
+        var error = Assert.IsType<DoowError>(Assert.Single(errors));
+        Assert.True(error.Message.Length <= 540);
+    }
 }

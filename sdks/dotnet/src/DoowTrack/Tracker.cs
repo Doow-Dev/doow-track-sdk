@@ -185,7 +185,8 @@ public class Tracker : IDisposable
                 content.Headers.ContentType = new("application/json");
                 if (gzipped) content.Headers.Add("Content-Encoding", "gzip");
 
-                using var response = await _httpClient.PostAsync(url, content);
+                using var request = new HttpRequestMessage(HttpMethod.Post, url) { Content = content };
+                using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
                 var status = (int)response.StatusCode;
                 var responseBody = await ReadBoundedAsync(response);
 
@@ -273,9 +274,17 @@ public class Tracker : IDisposable
 
     private static async Task<string> ReadBoundedAsync(HttpResponseMessage response)
     {
-        if (response.Content.Headers.ContentLength > MaxBodyChars) return string.Empty;
-        var text = await response.Content.ReadAsStringAsync();
-        return text.Length > MaxBodyChars ? text[..MaxBodyChars] : text;
+        await using var stream = await response.Content.ReadAsStreamAsync();
+        using var reader = new StreamReader(stream, Encoding.UTF8);
+        var buffer = new char[4096];
+        var text = new StringBuilder();
+        while (text.Length < MaxBodyChars)
+        {
+            var read = await reader.ReadAsync(buffer, 0, Math.Min(buffer.Length, MaxBodyChars - text.Length));
+            if (read == 0) break;
+            text.Append(buffer, 0, read);
+        }
+        return text.ToString();
     }
 
     internal static string Sanitize(string? text)
