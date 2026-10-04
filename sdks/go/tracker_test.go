@@ -392,3 +392,85 @@ func TestTracker_LargeBodiesAreRealGzip(t *testing.T) {
 		t.Fatalf("expected 300 gzip events, got encoding=%q events=%d", encoding, events)
 	}
 }
+
+func TestTracker_PermanentClientErrorIsNotRetriedOrStored(t *testing.T) {
+	var mu sync.Mutex
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		calls++
+		mu.Unlock()
+		w.WriteHeader(http.StatusBadRequest)
+	}))
+	defer server.Close()
+
+	store := &memoryStore{}
+	var errs []error
+	tracker := NewTracker("dk_test_key", &TrackerOptions{
+		Endpoint:      server.URL,
+		FlushAt:       1000,
+		FlushInterval: time.Hour,
+		RetryCount:    3,
+		OfflineStore:  store,
+		OnError: func(err error) {
+			mu.Lock()
+			errs = append(errs, err)
+			mu.Unlock()
+		},
+	})
+	tracker.Track(TrackEvent{Metric: "api_calls", Quantity: 1, LicenseID: "lic_1"})
+	tracker.Shutdown()
+
+	mu.Lock()
+	defer mu.Unlock()
+	if calls != 1 {
+		t.Fatalf("400 must not be retried, got %d requests", calls)
+	}
+	if len(store.batches) != 0 {
+		t.Fatalf("permanent failure must not reach the offline store")
+	}
+	if len(errs) != 1 {
+		t.Fatalf("expected one reported error, got %d", len(errs))
+	}
+}
+
+func TestParseRetryAfter(t *testing.T) {
+	if got := parseRetryAfter("2"); got != 2*time.Second {
+		t.Fatalf("seconds form: %v", got)
+	}
+	if got := parseRetryAfter("86400"); got != maxRetryAfter {
+		t.Fatalf("must clamp, got %v", got)
+	}
+	if got := parseRetryAfter("garbage"); got != 0 {
+		t.Fatalf("unparseable must be 0, got %v", got)
+	}
+}
+
+type memoryStore struct {
+	mu      sync.Mutex
+	batches []SerializedBatch
+}
+
+func (m *memoryStore) Push(b SerializedBatch) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.batches = append(m.batches, b)
+	return nil
+}
+
+func (m *memoryStore) Shift() (*SerializedBatch, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.batches) == 0 {
+		return nil, nil
+	}
+	b := m.batches[0]
+	m.batches = m.batches[1:]
+	return &b, nil
+}
+
+func (m *memoryStore) Length() (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.batches), nil
+}

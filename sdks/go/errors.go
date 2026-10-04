@@ -1,6 +1,9 @@
 package doow
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+)
 
 // APIError represents an error from the Doow API
 type APIError struct {
@@ -8,6 +11,8 @@ type APIError struct {
 	Message string                 `json:"message"`
 	Code    string                 `json:"code,omitempty"`
 	Details map[string]interface{} `json:"details,omitempty"`
+
+	RetryAfter time.Duration `json:"-"`
 }
 
 func (e *APIError) Error() string {
@@ -57,4 +62,9 @@ func (e *PartialAcceptError) Error() string {
 		return fmt.Sprintf("doow: batch %s partially accepted: %d rejected (%s: %s)", e.BatchID, e.Rejected, e.Rejections[0].EventID, e.Rejections[0].Reason)
 	}
 	return fmt.Sprintf("doow: batch %s partially accepted: %d rejected", e.BatchID, e.Rejected)
+}
+
+// IsPermanent reports a 4xx other than 429, which no retry can fix.
+func (e *APIError) IsPermanent() bool {
+	return e.Status >= 400 && e.Status < 500 && e.Status != 429
 }

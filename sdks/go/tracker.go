@@ -333,15 +333,20 @@ func (t *Tracker) sendBatch(events []SerializedEvent) error {
 
 	// Retry with exponential backoff
 	var lastErr error
+	var serverDelay time.Duration
 	for attempt := 0; attempt <= t.retryCount; attempt++ {
 		if attempt > 0 {
 			backoff := time.Duration(1<<uint(attempt-1)) * 100 * time.Millisecond
 			if backoff > 10*time.Second {
 				backoff = 10 * time.Second
 			}
+			if serverDelay > backoff {
+				backoff = serverDelay
+			}
 			time.Sleep(backoff)
 			t.log("retry attempt %d after %v", attempt, backoff)
 		}
+		serverDelay = 0
 
 		err := t.doSend(body)
 		if err == nil {
@@ -356,16 +361,12 @@ func (t *Tracker) sendBatch(events []SerializedEvent) error {
 			return partial
 		}
 
-		// Check if retryable
 		if apiErr, ok := err.(*APIError); ok {
-			if apiErr.Status == 401 || apiErr.Status == 403 {
+			if apiErr.IsPermanent() {
 				t.onError(err)
-				return err // Not retryable
+				return err
 			}
-			if apiErr.Status == 429 {
-				// Rate limited - wait longer
-				time.Sleep(5 * time.Second)
-			}
+			serverDelay = apiErr.RetryAfter
 		}
 	}
 
@@ -455,6 +456,7 @@ func (t *Tracker) doSend(body []byte) error {
 			apiErr = APIError{Status: resp.StatusCode, Message: resp.Status}
 		}
 		apiErr.Status = resp.StatusCode
+		apiErr.RetryAfter = parseRetryAfter(resp.Header.Get("Retry-After"))
 		return &apiErr
 	}
 
@@ -500,7 +502,14 @@ func (t *Tracker) drainOfflineStore() {
 
 		body, _ := json.Marshal(payload)
 		if err := t.doSend(body); err != nil {
-			// Put it back
+			if partial, ok := err.(*PartialAcceptError); ok {
+				t.onError(partial)
+				continue
+			}
+			if apiErr, ok := err.(*APIError); ok && apiErr.IsPermanent() {
+				t.onError(err)
+				continue
+			}
 			t.offlineStore.Push(*batch)
 			return
 		}
@@ -523,4 +532,25 @@ func (t *Tracker) Shutdown() error {
 // GetRateLimit returns the last known rate limit info
 func (t *Tracker) GetRateLimit() *RateLimit {
 	return t.rateLimit
+}
+
+const maxRetryAfter = 30 * time.Second
+
+func parseRetryAfter(header string) time.Duration {
+	if header == "" {
+		return 0
+	}
+	var d time.Duration
+	if seconds, err := strconv.ParseFloat(header, 64); err == nil {
+		d = time.Duration(seconds * float64(time.Second))
+	} else if at, err := http.ParseTime(header); err == nil {
+		d = time.Until(at)
+	}
+	if d < 0 {
+		return 0
+	}
+	if d > maxRetryAfter {
+		return maxRetryAfter
+	}
+	return d
 }
