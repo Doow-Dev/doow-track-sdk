@@ -121,12 +121,15 @@ struct PartialAcceptBody {
 const MAX_BODY_BYTES: usize = 1 << 20;
 const MAX_RETRY_AFTER: Duration = Duration::from_secs(30);
 
-async fn read_capped(resp: reqwest::Response) -> Vec<u8> {
-    if resp.content_length().map_or(false, |len| len as usize > MAX_BODY_BYTES) {
-        return Vec::new();
+async fn read_capped(mut resp: reqwest::Response) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    while let Ok(Some(chunk)) = resp.chunk().await {
+        let room = MAX_BODY_BYTES - bytes.len();
+        bytes.extend_from_slice(&chunk[..chunk.len().min(room)]);
+        if bytes.len() >= MAX_BODY_BYTES {
+            break;
+        }
     }
-    let mut bytes = resp.bytes().await.map(|b| b.to_vec()).unwrap_or_default();
-    bytes.truncate(MAX_BODY_BYTES);
     bytes
 }
 
@@ -135,7 +138,7 @@ pub(crate) fn parse_retry_after(header: Option<&str>) -> Option<Duration> {
     if !seconds.is_finite() || seconds < 0.0 {
         return None;
     }
-    Some(Duration::from_secs_f64(seconds).min(MAX_RETRY_AFTER))
+    Some(Duration::from_secs_f64(seconds.min(MAX_RETRY_AFTER.as_secs_f64())))
 }
 
 pub(crate) fn build_payload(batch_id: &str, events: &[SerializedEvent]) -> BatchPayload {
@@ -642,6 +645,46 @@ mod tests {
             *errors.lock().unwrap(),
             vec!["e2:license_id is required".to_string()]
         );
+    }
+
+    #[test]
+    fn absurd_retry_after_values_are_clamped_not_panicking() {
+        for header in ["1e30", "1e308", "340282366920938463463374607431768211456", "inf", "NaN", "-5"] {
+            let _ = parse_retry_after(Some(header));
+        }
+        assert_eq!(parse_retry_after(Some("1e30")), Some(MAX_RETRY_AFTER));
+    }
+
+    #[tokio::test]
+    async fn malformed_partial_accept_body_is_reported_without_resend() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/telemetry/events"))
+            .respond_with(ResponseTemplate::new(207).set_body_json(serde_json::json!({
+                "accepted": "abc", "rejected": null, "rejections": [1, "x", {"event_id": 5}]
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let errors = Arc::new(StdMutex::new(Vec::new()));
+        let tracker = tracker_for(&server, errors);
+        let result = tracker.send_batch(vec![event("e1")]).await;
+        assert!(matches!(result, Err(DoowError::PartialAccept { .. })));
+    }
+
+    #[tokio::test]
+    async fn oversized_response_bodies_are_truncated_while_streaming() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/telemetry/events"))
+            .respond_with(ResponseTemplate::new(400).set_body_string("x".repeat(MAX_BODY_BYTES + 4096)))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let errors = Arc::new(StdMutex::new(Vec::new()));
+        let tracker = tracker_for(&server, errors);
+        let result = tracker.send_batch(vec![event("e1")]).await;
+        assert!(matches!(result, Err(DoowError::Api { status: 400, .. })));
     }
 
     #[test]

@@ -14,3 +14,5 @@
 - HTTP 207 partial acceptance is reported through `on_error` and is not retried.
 - `Retry-After` is honored and clamped to 30 seconds. A panicking `on_error` handler no longer unwinds into the caller.
 - A blank `source_system` defaults to `sdk`.
+- `on_error` panics are caught with `catch_unwind`, which does not apply when the application builds with `panic = "abort"`.
+- Response bodies are read in chunks and capped at 1 MiB.
