@@ -18,6 +18,7 @@ public class TrackerOptions
     public bool DisableCompression { get; init; } = false;
     public Dictionary<string, object>? Attribution { get; init; }
     public Action<Exception>? OnError { get; init; }
+    public HttpMessageHandler? HttpHandler { get; init; }
 }
 
 public class Tracker : IDisposable
@@ -25,7 +26,9 @@ public class Tracker : IDisposable
     private readonly string _apiKey;
     private readonly TrackerOptions _options;
     private readonly HttpClient _httpClient;
-    private readonly List<TrackEvent> _buffer = new();
+    private const string SdkVersion = "0.1.1";
+
+    private readonly List<Pending> _buffer = new();
     private readonly object _lock = new();
     private readonly Timer? _flushTimer;
     private readonly JsonSerializerOptions _jsonOptions;
@@ -41,7 +44,7 @@ public class Tracker : IDisposable
             throw new DoowError("Invalid API key format. Must start with 'dk_'.");
         }
 
-        _httpClient = new HttpClient
+        _httpClient = new HttpClient(_options.HttpHandler ?? new HttpClientHandler())
         {
             Timeout = TimeSpan.FromMilliseconds(_options.TimeoutMs)
         };
@@ -80,7 +83,7 @@ public class Tracker : IDisposable
                 }
                 return;
             }
-            _buffer.Add(finalEvent);
+            _buffer.Add(new Pending(Guid.NewGuid().ToString(), finalEvent));
 
             if (_buffer.Count >= _options.FlushAt)
             {
@@ -89,44 +92,98 @@ public class Tracker : IDisposable
         }
     }
 
+    internal record Pending(string EventId, TrackEvent Event);
+
+    internal static object BuildPayload(string batchId, IEnumerable<Pending> batch) => new
+    {
+        batch_id = batchId,
+        sdk_version = SdkVersion,
+        events = batch.Select(p => new WireEvent
+        {
+            EventId = p.EventId,
+            LicenseId = p.Event.LicenseId,
+            OccurredAt = p.Event.Timestamp ?? DateTimeOffset.UtcNow,
+            SourceSystem = string.IsNullOrWhiteSpace(p.Event.SourceSystem) ? "sdk" : p.Event.SourceSystem,
+            Kind = p.Event.Kind,
+            Unit = p.Event.Unit,
+            Attribution = p.Event.Attribution,
+            Metadata = p.Event.Metadata,
+            Measurements = new[]
+            {
+                new WireMeasurement
+                {
+                    MetricName = p.Event.Metric,
+                    Quantity = p.Event.Quantity,
+                    MetricTupleHint = p.Event.MetricTupleHint,
+                }
+            }
+        }).ToList()
+    };
+
+    internal record WireMeasurement
+    {
+        public required string MetricName { get; init; }
+        public double Quantity { get; init; }
+        public MetricTupleHint? MetricTupleHint { get; init; }
+    }
+
+    internal record WireEvent
+    {
+        public required string EventId { get; init; }
+        public required string LicenseId { get; init; }
+        public DateTimeOffset OccurredAt { get; init; }
+        public required string SourceSystem { get; init; }
+        public EventKind Kind { get; init; }
+        public string? Unit { get; init; }
+        public Dictionary<string, object>? Attribution { get; init; }
+        public Dictionary<string, object>? Metadata { get; init; }
+        public required WireMeasurement[] Measurements { get; init; }
+    }
+
     public async Task FlushAsync()
     {
-        List<TrackEvent> batch;
+        List<Pending> batch;
         lock (_lock)
         {
             if (_buffer.Count == 0) return;
-            batch = new List<TrackEvent>(_buffer);
+            batch = new List<Pending>(_buffer);
             _buffer.Clear();
         }
 
-        var payload = new { events = batch };
-        var json = JsonSerializer.Serialize(payload, _jsonOptions);
+        var batchId = Guid.NewGuid().ToString();
+        var jsonBytes = JsonSerializer.SerializeToUtf8Bytes(BuildPayload(batchId, batch), _jsonOptions);
+        var gzipped = !_options.DisableCompression && jsonBytes.Length > 1024;
+        var body = jsonBytes;
+        if (gzipped)
+        {
+            using var memoryStream = new MemoryStream();
+            using (var gzipStream = new GZipStream(memoryStream, CompressionMode.Compress))
+            {
+                gzipStream.Write(jsonBytes);
+            }
+            body = memoryStream.ToArray();
+        }
+
         var url = $"{_options.Endpoint.TrimEnd('/')}/telemetry/events";
 
         for (int attempt = 0; attempt <= _options.RetryCount; attempt++)
         {
+            var lastAttempt = attempt >= _options.RetryCount;
             try
             {
-                HttpContent content;
-                var jsonBytes = Encoding.UTF8.GetBytes(json);
+                var content = new ByteArrayContent(body);
+                content.Headers.ContentType = new("application/json");
+                if (gzipped) content.Headers.Add("Content-Encoding", "gzip");
 
-                if (!_options.DisableCompression && jsonBytes.Length > 1024)
-                {
-                    using var memoryStream = new MemoryStream();
-                    using (var gzipStream = new GZipStream(memoryStream, CompressionMode.Compress))
-                    {
-                        gzipStream.Write(jsonBytes);
-                    }
-                    content = new ByteArrayContent(memoryStream.ToArray());
-                    content.Headers.ContentType = new("application/json");
-                    content.Headers.Add("Content-Encoding", "gzip");
-                }
-                else
-                {
-                    content = new StringContent(json, Encoding.UTF8, "application/json");
-                }
+                using var response = await _httpClient.PostAsync(url, content);
+                var status = (int)response.StatusCode;
+                var responseBody = await response.Content.ReadAsStringAsync();
 
-                var response = await _httpClient.PostAsync(url, content);
+                if (status == 207)
+                {
+                    Report(ParsePartialAccept(responseBody, batchId));
+                    return;
+                }
 
                 if (response.IsSuccessStatusCode)
                 {
@@ -137,32 +194,65 @@ public class Tracker : IDisposable
                     return;
                 }
 
-                if ((int)response.StatusCode >= 500 && attempt < _options.RetryCount)
+                if ((status == 429 || status >= 500) && !lastAttempt)
                 {
                     await Task.Delay((int)Math.Pow(2, attempt) * 1000);
                     continue;
                 }
 
-                var errorBody = await response.Content.ReadAsStringAsync();
-                throw new DoowError($"API error: {errorBody}", (int)response.StatusCode);
+                Report(new DoowError($"API error: {responseBody}", status));
+                return;
             }
-            catch (HttpRequestException e) when (attempt < _options.RetryCount)
+            catch (Exception e) when (e is HttpRequestException or TaskCanceledException)
             {
+                if (lastAttempt)
+                {
+                    Report(e);
+                    return;
+                }
                 if (_options.Debug)
                 {
                     Console.Error.WriteLine($"[doow-track] Retry {attempt + 1}/{_options.RetryCount}: {e.Message}");
                 }
                 await Task.Delay((int)Math.Pow(2, attempt) * 1000);
             }
-            catch (Exception e) when (e is not DoowError)
+        }
+    }
+
+    private static PartialAcceptError ParsePartialAccept(string body, string fallbackBatchId)
+    {
+        int accepted = 0, rejected = 0;
+        var batchId = fallbackBatchId;
+        var rejections = new List<EventRejection>();
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            var root = doc.RootElement;
+            if (root.TryGetProperty("accepted", out var a) && a.TryGetInt32(out var ai)) accepted = ai;
+            if (root.TryGetProperty("rejected", out var r) && r.TryGetInt32(out var ri)) rejected = ri;
+            if (root.TryGetProperty("batch_id", out var b) && b.ValueKind == JsonValueKind.String) batchId = b.GetString()!;
+            if (root.TryGetProperty("rejections", out var list) && list.ValueKind == JsonValueKind.Array)
             {
-                _options.OnError?.Invoke(e);
-                if (_options.Debug)
+                foreach (var item in list.EnumerateArray())
                 {
-                    Console.Error.WriteLine($"[doow-track] Error: {e.Message}");
+                    rejections.Add(new EventRejection(
+                        item.TryGetProperty("event_id", out var id) ? id.GetString() ?? "unknown" : "unknown",
+                        item.TryGetProperty("reason", out var reason) ? reason.GetString() ?? "" : ""));
                 }
-                return;
             }
+        }
+        catch (JsonException)
+        {
+        }
+        return new PartialAcceptError(accepted, rejected, batchId, rejections);
+    }
+
+    private void Report(Exception error)
+    {
+        _options.OnError?.Invoke(error);
+        if (_options.Debug)
+        {
+            Console.Error.WriteLine($"[doow-track] Error: {error.Message}");
         }
     }
 
