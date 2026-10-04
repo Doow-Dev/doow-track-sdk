@@ -1,7 +1,7 @@
 //! Telemetry tracker for Doow SDK.
 
-use crate::error::{DoowError, Result};
-use crate::types::{EventKind, SerializedEvent, TrackEvent};
+use crate::error::{DoowError, Rejection, Result};
+use crate::types::{EventKind, MetricTupleHint, SerializedEvent, TrackEvent};
 use chrono::Utc;
 use flate2::write::GzEncoder;
 use flate2::Compression;
@@ -22,6 +22,16 @@ const DEFAULT_MAX_QUEUE_SIZE: usize = 10_000;
 const DEFAULT_TIMEOUT_MS: u64 = 10_000;
 const DEFAULT_RETRY_COUNT: u32 = 3;
 
+/// Callback invoked for every delivery failure, including partial rejections
+#[derive(Clone)]
+pub struct ErrorHandler(pub Arc<dyn Fn(&DoowError) + Send + Sync>);
+
+impl std::fmt::Debug for ErrorHandler {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ErrorHandler")
+    }
+}
+
 /// Tracker configuration options
 #[derive(Debug, Clone)]
 pub struct TrackerOptions {
@@ -35,6 +45,7 @@ pub struct TrackerOptions {
     pub retry_count: u32,
     pub disable_compression: bool,
     pub attribution: HashMap<String, serde_json::Value>,
+    pub on_error: Option<ErrorHandler>,
 }
 
 impl Default for TrackerOptions {
@@ -61,20 +72,21 @@ impl Default for TrackerOptions {
             retry_count: DEFAULT_RETRY_COUNT,
             disable_compression: false,
             attribution: HashMap::new(),
+            on_error: None,
         }
     }
 }
 
 #[derive(Serialize)]
-struct WireMeasurement {
+pub(crate) struct WireMeasurement {
     metric_name: String,
     quantity: f64,
     #[serde(skip_serializing_if = "Option::is_none")]
-    metric_tuple_hint: Option<String>,
+    metric_tuple_hint: Option<MetricTupleHint>,
 }
 
 #[derive(Serialize)]
-struct WireEvent {
+pub(crate) struct WireEvent {
     event_id: String,
     license_id: String,
     occurred_at: String,
@@ -88,10 +100,46 @@ struct WireEvent {
 }
 
 #[derive(Serialize)]
-struct BatchPayload {
+pub(crate) struct BatchPayload {
     batch_id: String,
     sdk_version: String,
     events: Vec<WireEvent>,
+}
+
+#[derive(Deserialize)]
+struct PartialAcceptBody {
+    #[serde(default)]
+    accepted: u32,
+    #[serde(default)]
+    rejected: u32,
+    #[serde(default)]
+    batch_id: String,
+    #[serde(default)]
+    rejections: Vec<Rejection>,
+}
+
+pub(crate) fn build_payload(batch_id: &str, events: &[SerializedEvent]) -> BatchPayload {
+    BatchPayload {
+        batch_id: batch_id.to_string(),
+        sdk_version: SDK_VERSION.to_string(),
+        events: events
+            .iter()
+            .map(|e| WireEvent {
+                event_id: e.event_id.clone(),
+                license_id: e.license_id.clone(),
+                occurred_at: e.timestamp.clone(),
+                source_system: e.source_system.clone().unwrap_or_else(|| "sdk".to_string()),
+                kind: e.kind.clone(),
+                attribution: e.attribution.clone(),
+                metadata: e.metadata.clone(),
+                measurements: vec![WireMeasurement {
+                    metric_name: e.metric.clone(),
+                    quantity: e.quantity,
+                    metric_tuple_hint: e.metric_tuple_hint.clone(),
+                }],
+            })
+            .collect(),
+    }
 }
 
 #[derive(Deserialize)]
@@ -166,6 +214,15 @@ impl Tracker {
         }
     }
 
+    fn report(options: &TrackerOptions, error: &DoowError) {
+        if options.debug {
+            eprintln!("[doow/track] {}", error);
+        }
+        if let Some(handler) = &options.on_error {
+            (handler.0)(error);
+        }
+    }
+
     /// Track a usage event
     pub async fn track(&self, event: TrackEvent) {
         if !self.options.enabled {
@@ -226,36 +283,14 @@ impl Tracker {
         };
 
         if let Err(e) = self.send_batch(events).await {
-            self.log(&format!("flush error: {}", e));
+            Self::report(&self.options, &e);
         }
     }
 
     async fn send_batch(&self, events: Vec<SerializedEvent>) -> Result<()> {
         let batch_id = Uuid::new_v4().to_string();
 
-        let wire_events: Vec<WireEvent> = events
-            .iter()
-            .map(|e| WireEvent {
-                event_id: e.event_id.clone(),
-                license_id: e.license_id.clone(),
-                occurred_at: e.timestamp.clone(),
-                source_system: e.source_system.clone().unwrap_or_else(|| "sdk".to_string()),
-                kind: e.kind.clone(),
-                attribution: e.attribution.clone(),
-                metadata: e.metadata.clone(),
-                measurements: vec![WireMeasurement {
-                    metric_name: e.metric.clone(),
-                    quantity: e.quantity,
-                    metric_tuple_hint: e.metric_tuple_hint.as_ref().and_then(|h| serde_json::to_string(h).ok()),
-                }],
-            })
-            .collect();
-
-        let payload = BatchPayload {
-            batch_id: batch_id.clone(),
-            sdk_version: SDK_VERSION.to_string(),
-            events: wire_events,
-        };
+        let payload = build_payload(&batch_id, &events);
 
         let body = serde_json::to_vec(&payload)?;
         self.log(&format!(
@@ -314,11 +349,27 @@ impl Tracker {
 
         let resp = req.body(req_body).send().await?;
 
+        let status = resp.status().as_u16();
+
+        if status == 207 {
+            let body: PartialAcceptBody = resp.json().await.unwrap_or(PartialAcceptBody {
+                accepted: 0,
+                rejected: 0,
+                batch_id: String::new(),
+                rejections: Vec::new(),
+            });
+            return Err(DoowError::PartialAccept {
+                accepted: body.accepted,
+                rejected: body.rejected,
+                batch_id: body.batch_id,
+                rejections: body.rejections,
+            });
+        }
+
         if resp.status().is_success() {
             return Ok(());
         }
 
-        let status = resp.status().as_u16();
         let error_resp: ApiErrorResponse = resp.json().await.unwrap_or(ApiErrorResponse {
             message: None,
             error_class: None,
@@ -362,9 +413,7 @@ impl Tracker {
                     };
 
                     if let Err(e) = tracker.send_batch(events).await {
-                        if options.debug {
-                            eprintln!("[doow/track] periodic flush error: {}", e);
-                        }
+                        Self::report(&options, &e);
                     }
                 }
                 _ = shutdown_rx.recv() => {
@@ -383,7 +432,9 @@ impl Tracker {
                             shutdown_tx: None,
                             shutdown_complete: shutdown_complete.clone(),
                         };
-                        let _ = tracker.send_batch(events).await;
+                        if let Err(e) = tracker.send_batch(events).await {
+                            Self::report(&options, &e);
+                        }
                     }
 
                     *shutdown_complete.write().await = true;
@@ -406,5 +457,113 @@ impl Tracker {
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::{EventKind, SerializedEvent};
+    use std::sync::Mutex as StdMutex;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    fn event(id: &str) -> SerializedEvent {
+        SerializedEvent {
+            event_id: id.to_string(),
+            metric: "api_calls".to_string(),
+            quantity: 1.0,
+            license_id: "lic_1".to_string(),
+            unit: None,
+            kind: EventKind::default(),
+            timestamp: "2026-10-04T00:00:00Z".to_string(),
+            source_system: None,
+            metric_tuple_hint: Some(MetricTupleHint {
+                app_name: "app".to_string(),
+                license_name: "lic".to_string(),
+                metric_name: "calls".to_string(),
+            }),
+            attribution: None,
+            metadata: None,
+        }
+    }
+
+    #[test]
+    fn tuple_hint_serializes_as_object() {
+        let json = serde_json::to_value(build_payload("b1", &[event("e1")])).unwrap();
+        let hint = &json["events"][0]["measurements"][0]["metric_tuple_hint"];
+        assert!(hint.is_object(), "hint must be an object, got {hint}");
+        assert_eq!(hint["app_name"], "app");
+        assert_eq!(hint["license_name"], "lic");
+        assert_eq!(hint["metric_name"], "calls");
+        assert_eq!(json["batch_id"], "b1");
+        assert_eq!(json["events"][0]["source_system"], "sdk");
+    }
+
+    fn tracker_for(server: &MockServer, errors: Arc<StdMutex<Vec<String>>>) -> Tracker {
+        let sink = errors.clone();
+        Tracker::new(
+            "dk_test",
+            Some(TrackerOptions {
+                endpoint: server.uri(),
+                retry_count: 2,
+                flush_at: 1000,
+                on_error: Some(ErrorHandler(Arc::new(move |e| {
+                    if let DoowError::PartialAccept { rejections, .. } = e {
+                        for r in rejections {
+                            sink.lock().unwrap().push(format!("{}:{}", r.event_id, r.reason));
+                        }
+                    }
+                }))),
+                ..Default::default()
+            }),
+        )
+    }
+
+    #[tokio::test]
+    async fn accepted_batch_posts_once_and_reports_nothing() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/telemetry/events"))
+            .respond_with(ResponseTemplate::new(202).set_body_json(
+                serde_json::json!({"accepted": 1, "rejected": 0, "batch_id": "b"}),
+            ))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let errors = Arc::new(StdMutex::new(Vec::new()));
+        let tracker = tracker_for(&server, errors.clone());
+        tracker.send_batch(vec![event("e1")]).await.unwrap();
+        assert!(errors.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn partial_accept_reports_each_rejection_without_retry() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/telemetry/events"))
+            .respond_with(ResponseTemplate::new(207).set_body_json(serde_json::json!({
+                "accepted": 1,
+                "rejected": 1,
+                "batch_id": "b",
+                "rejections": [{"event_id": "e2", "reason": "license_id is required"}]
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let errors = Arc::new(StdMutex::new(Vec::new()));
+        let tracker = tracker_for(&server, errors.clone());
+        tracker.track(TrackEvent {
+            metric: "m".to_string(),
+            quantity: 1.0,
+            license_id: "l".to_string(),
+            ..Default::default()
+        })
+        .await;
+        tracker.flush().await;
+        assert_eq!(
+            *errors.lock().unwrap(),
+            vec!["e2:license_id is required".to_string()]
+        );
     }
 }
