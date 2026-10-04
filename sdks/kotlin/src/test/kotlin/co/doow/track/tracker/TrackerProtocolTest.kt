@@ -160,16 +160,45 @@ class TrackerProtocolTest {
             )
         )
         tracker.track(event())
-        waitFor { bodies.size >= 1 }
+        assertTrue(waitFor { bodies.size >= 1 }, "first periodic flush never arrived")
         tracker.track(event())
-        waitFor { bodies.size >= 2 }
+        val secondArrived = waitFor { bodies.size >= 2 }
         tracker.shutdown()
 
-        assertEquals(2, bodies.size)
+        assertTrue(secondArrived, "periodic flush stopped after onError threw")
     }
 
-    private fun waitFor(condition: () -> Boolean) {
+    private fun waitFor(condition: () -> Boolean): Boolean {
         val deadline = System.currentTimeMillis() + 5000
         while (!condition() && System.currentTimeMillis() < deadline) Thread.sleep(20)
+        return condition()
+    }
+
+    @Test
+    fun malformedPartialAcceptBodyIsReportedNotResent() {
+        statuses = intArrayOf(207)
+        responseBody = """{"accepted":"abc","rejected":null,"rejections":[1,{"event_id":5}]}"""
+        val tracker = tracker()
+        tracker.track(event())
+        tracker.flush()
+        tracker.shutdown()
+
+        assertEquals(1, bodies.size)
+        assertIs<PartialAcceptError>(errors.single())
+    }
+
+    @Test
+    fun retryAfterIsClampedAndGarbageIsIgnored() {
+        assertEquals(2000L, Tracker.parseRetryAfterMs("2"))
+        assertEquals(30_000L, Tracker.parseRetryAfterMs("86400"))
+        assertEquals(0L, Tracker.parseRetryAfterMs("garbage"))
+        assertEquals(0L, Tracker.parseRetryAfterMs(null))
+    }
+
+    @Test
+    fun serverTextIsSanitizedAndTruncated() {
+        val cleaned = Tracker.sanitize("line1\nline2\u001b[31m" + "x".repeat(2000))
+        assertTrue(!cleaned.contains("\n") && !cleaned.contains("\u001b"))
+        assertTrue(cleaned.length <= 520)
     }
 }

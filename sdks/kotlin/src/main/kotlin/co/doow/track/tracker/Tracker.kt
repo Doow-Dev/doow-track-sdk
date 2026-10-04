@@ -12,8 +12,7 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.intOrNull
 import java.util.UUID
 import kotlinx.serialization.encodeToString
@@ -131,7 +130,7 @@ class Tracker(
                 val status = conn.responseCode
 
                 if (status == 207) {
-                    report(parsePartialAccept(conn.inputStream.bufferedReader().readText(), batchId))
+                    report(parsePartialAccept(readBounded(conn.inputStream.bufferedReader()), batchId))
                     return
                 }
 
@@ -141,12 +140,14 @@ class Tracker(
                 }
 
                 if ((status == 429 || status >= 500) && !lastAttempt) {
-                    Thread.sleep(2.0.pow(attempt).toLong() * 1000)
+                    val backoff = 2.0.pow(attempt).toLong() * 1000
+                    val serverDelay = if (status == 429) parseRetryAfterMs(conn.getHeaderField("Retry-After")) else 0L
+                    Thread.sleep(maxOf(backoff, serverDelay))
                     continue
                 }
 
-                val errorBody = conn.errorStream?.bufferedReader()?.readText() ?: ""
-                report(DoowError("API error: $errorBody", status))
+                val errorBody = conn.errorStream?.bufferedReader()?.let { readBounded(it) } ?: ""
+                report(DoowError("API error: ${sanitize(errorBody)}", status))
                 return
             } catch (e: InterruptedException) {
                 Thread.currentThread().interrupt()
@@ -163,21 +164,21 @@ class Tracker(
 
     private fun parsePartialAccept(body: String, fallbackBatchId: String): PartialAcceptError {
         val root: JsonObject = try {
-            json.parseToJsonElement(body).jsonObject
+            json.parseToJsonElement(body) as? JsonObject ?: JsonObject(emptyMap())
         } catch (e: Exception) {
             JsonObject(emptyMap())
         }
-        val rejections = (root["rejections"] as? kotlinx.serialization.json.JsonArray).orEmpty().map {
-            val r = it.jsonObject
+        val rejections = (root["rejections"] as? kotlinx.serialization.json.JsonArray).orEmpty().mapNotNull {
+            val r = it as? JsonObject ?: return@mapNotNull null
             PartialAcceptError.Rejection(
-                r["event_id"]?.jsonPrimitive?.content ?: "unknown",
-                r["reason"]?.jsonPrimitive?.content ?: ""
+                sanitize((r["event_id"] as? JsonPrimitive)?.content ?: "unknown"),
+                sanitize((r["reason"] as? JsonPrimitive)?.content ?: "")
             )
         }
         return PartialAcceptError(
-            accepted = root["accepted"]?.jsonPrimitive?.intOrNull ?: 0,
-            rejected = root["rejected"]?.jsonPrimitive?.intOrNull ?: 0,
-            batchId = root["batch_id"]?.jsonPrimitive?.content ?: fallbackBatchId,
+            accepted = (root["accepted"] as? JsonPrimitive)?.intOrNull ?: 0,
+            rejected = (root["rejected"] as? JsonPrimitive)?.intOrNull ?: 0,
+            batchId = sanitize((root["batch_id"] as? JsonPrimitive)?.content ?: fallbackBatchId),
             rejections = rejections
         )
     }
@@ -234,6 +235,40 @@ class Tracker(
 
     internal companion object {
         const val SDK_VERSION = "0.1.0"
+        private const val MAX_RETRY_AFTER_MS = 30_000L
+        private const val MAX_ERROR_TEXT = 512
+        private const val MAX_BODY_CHARS = 1 shl 20
+
+        fun parseRetryAfterMs(header: String?): Long {
+            val value = header?.trim().orEmpty()
+            if (value.isEmpty()) return 0
+            val ms = value.toDoubleOrNull()?.let { (it * 1000).toLong() }
+                ?: try {
+                    java.time.Duration.between(
+                        java.time.Instant.now(),
+                        java.time.ZonedDateTime.parse(value, java.time.format.DateTimeFormatter.RFC_1123_DATE_TIME).toInstant()
+                    ).toMillis()
+                } catch (e: java.time.format.DateTimeParseException) {
+                    return 0
+                }
+            return ms.coerceIn(0, MAX_RETRY_AFTER_MS)
+        }
+
+        fun sanitize(text: String): String {
+            val cleaned = text.replace(Regex("[\\p{Cntrl}&&[^ ]]"), " ")
+            return if (cleaned.length > MAX_ERROR_TEXT) cleaned.take(MAX_ERROR_TEXT) + "..." else cleaned
+        }
+
+        fun readBounded(reader: java.io.Reader): String {
+            val sb = StringBuilder()
+            val buf = CharArray(1024)
+            while (sb.length < MAX_BODY_CHARS) {
+                val n = reader.read(buf)
+                if (n == -1) break
+                sb.append(buf, 0, n)
+            }
+            return sb.toString()
+        }
 
         fun buildPayload(batchId: String, batch: List<Pending>) = WireBatch(
             batchId = batchId,
