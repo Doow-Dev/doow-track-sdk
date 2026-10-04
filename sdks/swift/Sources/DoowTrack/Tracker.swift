@@ -89,6 +89,48 @@ struct WireBatch: Encodable {
     }
 }
 
+final class BoundedResponseCollector: NSObject, URLSessionDataDelegate {
+    private let limit: Int
+    private let onComplete: () -> Void
+    private var truncated = false
+    private(set) var data = Data()
+    private(set) var response: HTTPURLResponse?
+    private(set) var error: Error?
+
+    init(limit: Int, onComplete: @escaping () -> Void) {
+        self.limit = limit
+        self.onComplete = onComplete
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        dataTask: URLSessionDataTask,
+        didReceive response: URLResponse,
+        completionHandler: @escaping (URLSession.ResponseDisposition) -> Void
+    ) {
+        self.response = response as? HTTPURLResponse
+        completionHandler(.allow)
+    }
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive received: Data) {
+        let room = limit - data.count
+        if received.count >= room {
+            data.append(received.prefix(max(room, 0)))
+            truncated = true
+            dataTask.cancel()
+        } else {
+            data.append(received)
+        }
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError failure: Error?) {
+        if !(truncated && (failure as NSError?)?.code == NSURLErrorCancelled) {
+            error = failure
+        }
+        onComplete()
+    }
+}
+
 struct BufferedEvent {
     let eventId: String
     let event: TrackEvent
@@ -243,18 +285,7 @@ public class Tracker {
             }
             request.httpBody = body
 
-            let semaphore = DispatchSemaphore(value: 0)
-            var responseData: Data?
-            var responseError: Error?
-            var httpResponse: HTTPURLResponse?
-
-            options.session.dataTask(with: request) { data, response, error in
-                responseData = data
-                responseError = error
-                httpResponse = response as? HTTPURLResponse
-                semaphore.signal()
-            }.resume()
-            semaphore.wait()
+            let (responseData, httpResponse, responseError) = perform(request)
 
             if let error = responseError {
                 if isLastAttempt {
@@ -294,6 +325,30 @@ public class Tracker {
             report(DoowError("API error: \(sanitizeText(errorBody))", statusCode: status))
             return
         }
+    }
+
+    private func perform(_ request: URLRequest) -> (Data?, HTTPURLResponse?, Error?) {
+        let semaphore = DispatchSemaphore(value: 0)
+        #if canImport(FoundationNetworking)
+        var data: Data?
+        var response: HTTPURLResponse?
+        var error: Error?
+        options.session.dataTask(with: request) { received, urlResponse, failure in
+            data = received.map { Data($0.prefix(maxResponseBytes)) }
+            response = urlResponse as? HTTPURLResponse
+            error = failure
+            semaphore.signal()
+        }.resume()
+        semaphore.wait()
+        return (data, response, error)
+        #else
+        let collector = BoundedResponseCollector(limit: maxResponseBytes) { semaphore.signal() }
+        let task = options.session.dataTask(with: request)
+        task.delegate = collector
+        task.resume()
+        semaphore.wait()
+        return (collector.data, collector.response, collector.error)
+        #endif
     }
 
     private func report(_ error: Error) {

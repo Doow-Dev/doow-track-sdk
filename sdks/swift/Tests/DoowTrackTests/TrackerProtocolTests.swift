@@ -151,6 +151,17 @@ final class TrackerProtocolTests {
         #expect(errors.first is PartialAcceptError)
     }
 
+    @Test func oversizedErrorBodiesAreCappedWhileStreaming() throws {
+        StubURLProtocol.responder = { _ in (400, Data(String(repeating: "x", count: 3_000_000).utf8)) }
+        let tracker = try makeTracker()
+        track(tracker)
+        tracker.flush()
+
+        let error = try #require(errors.first as? DoowError)
+        #expect(error.statusCode == 400)
+        #expect(error.message.count <= 540)
+    }
+
     @Test func retryAfterIsClampedAndGarbageIgnored() {
         #expect(parseRetryAfter("2") == 2)
         #expect(parseRetryAfter("86400") == 30)
