@@ -234,3 +234,49 @@ func TestTracker_Retry(t *testing.T) {
 		t.Errorf("expected at least 3 attempts, got %d", attempts)
 	}
 }
+
+func TestTracker_PartialAcceptReportsRejections(t *testing.T) {
+	var calls int
+	var mu sync.Mutex
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		calls++
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusMultiStatus)
+		w.Write([]byte(`{"accepted":1,"rejected":1,"batch_id":"b1","rejections":[{"event_id":"evt-x","reason":"license_id is required"}]}`))
+	}))
+	defer server.Close()
+
+	var errs []error
+	tracker := NewTracker("dk_test_key", &TrackerOptions{
+		Endpoint:      server.URL,
+		FlushAt:       2,
+		FlushInterval: time.Hour,
+		RetryCount:    2,
+		OnError: func(err error) {
+			mu.Lock()
+			errs = append(errs, err)
+			mu.Unlock()
+		},
+	})
+	tracker.Track(TrackEvent{Metric: "api_calls", Quantity: 1, LicenseID: "lic_1"})
+	tracker.Track(TrackEvent{Metric: "api_calls", Quantity: 1, LicenseID: "lic_1"})
+	tracker.Shutdown()
+
+	mu.Lock()
+	defer mu.Unlock()
+	if calls != 1 {
+		t.Fatalf("207 must not be retried, got %d requests", calls)
+	}
+	if len(errs) != 1 {
+		t.Fatalf("expected one error, got %d", len(errs))
+	}
+	partial, ok := errs[0].(*PartialAcceptError)
+	if !ok {
+		t.Fatalf("expected *PartialAcceptError, got %T", errs[0])
+	}
+	if partial.Rejected != 1 || len(partial.Rejections) != 1 || partial.Rejections[0].EventID != "evt-x" {
+		t.Fatalf("unexpected rejections: %+v", partial)
+	}
+}

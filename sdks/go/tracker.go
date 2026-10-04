@@ -66,6 +66,7 @@ type Tracker struct {
 	done       chan struct{}
 	flushSem   chan struct{}
 	rateLimit  *RateLimit
+	inflight   sync.WaitGroup
 }
 
 // NewTracker creates a new telemetry tracker
@@ -253,7 +254,11 @@ func (t *Tracker) Track(event TrackEvent) {
 	t.mu.Unlock()
 
 	if shouldFlush {
-		go t.Flush()
+		t.inflight.Add(1)
+		go func() {
+			defer t.inflight.Done()
+			t.Flush()
+		}()
 	}
 }
 
@@ -346,6 +351,11 @@ func (t *Tracker) sendBatch(events []SerializedEvent) error {
 
 		lastErr = err
 
+		if partial, ok := err.(*PartialAcceptError); ok {
+			t.onError(partial)
+			return partial
+		}
+
 		// Check if retryable
 		if apiErr, ok := err.(*APIError); ok {
 			if apiErr.Status == 401 || apiErr.Status == 403 {
@@ -431,6 +441,14 @@ func (t *Tracker) doSend(body []byte) error {
 		}
 	}
 
+	if resp.StatusCode == http.StatusMultiStatus {
+		var partial PartialAcceptError
+		if err := json.NewDecoder(resp.Body).Decode(&partial); err != nil {
+			t.log("unparseable 207 body: %v", err)
+		}
+		return &partial
+	}
+
 	if resp.StatusCode >= 400 {
 		var apiErr APIError
 		if err := json.NewDecoder(resp.Body).Decode(&apiErr); err != nil {
@@ -461,6 +479,7 @@ func (t *Tracker) flushLoop() {
 			}
 		case <-t.shutdown:
 			t.Flush()
+			t.inflight.Wait()
 			return
 		}
 	}

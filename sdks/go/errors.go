@@ -36,3 +36,25 @@ func (e *APIError) IsForbidden() bool {
 func (e *APIError) IsRateLimited() bool {
 	return e.Status == 429
 }
+
+// Rejection is one event the API refused inside an otherwise accepted batch.
+type Rejection struct {
+	EventID string `json:"event_id"`
+	Reason  string `json:"reason"`
+}
+
+// PartialAcceptError reports an HTTP 207 response. The batch id is already
+// recorded server side, so the batch is never retried.
+type PartialAcceptError struct {
+	Accepted   int         `json:"accepted"`
+	Rejected   int         `json:"rejected"`
+	BatchID    string      `json:"batch_id"`
+	Rejections []Rejection `json:"rejections"`
+}
+
+func (e *PartialAcceptError) Error() string {
+	if len(e.Rejections) > 0 {
+		return fmt.Sprintf("doow: batch %s partially accepted: %d rejected (%s: %s)", e.BatchID, e.Rejected, e.Rejections[0].EventID, e.Rejections[0].Reason)
+	}
+	return fmt.Sprintf("doow: batch %s partially accepted: %d rejected", e.BatchID, e.Rejected)
+}
