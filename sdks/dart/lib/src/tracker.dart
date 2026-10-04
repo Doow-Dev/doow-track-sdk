@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 import 'package:http/http.dart' as http;
 import 'package:archive/archive.dart';
 import 'types.dart';
@@ -18,6 +19,7 @@ class TrackerOptions {
   final bool disableCompression;
   final Map<String, dynamic>? attribution;
   final void Function(DoowError)? onError;
+  final http.Client? httpClient;
 
   const TrackerOptions({
     this.endpoint = 'https://api.doow.co',
@@ -31,7 +33,43 @@ class TrackerOptions {
     this.disableCompression = false,
     this.attribution,
     this.onError,
+    this.httpClient,
   });
+}
+
+const _sdkVersion = '0.1.0';
+
+String _uuidV4() {
+  final random = Random.secure();
+  final bytes = List<int>.generate(16, (_) => random.nextInt(256));
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  final hex = bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+  return '${hex.substring(0, 8)}-${hex.substring(8, 12)}-${hex.substring(12, 16)}-'
+      '${hex.substring(16, 20)}-${hex.substring(20)}';
+}
+
+Map<String, dynamic> toWireEvent(Map<String, dynamic> data) {
+  final hint = data['metric_tuple_hint'];
+  return {
+    'event_id': data['event_id'] ?? _uuidV4(),
+    'license_id': data['license_id'],
+    'occurred_at': data['timestamp'],
+    'source_system': (data['source_system'] as String?)?.trim().isNotEmpty == true
+        ? data['source_system']
+        : 'sdk',
+    'kind': data['kind'],
+    if (data['unit'] != null) 'unit': data['unit'],
+    if (data['attribution'] != null) 'attribution': data['attribution'],
+    if (data['metadata'] != null) 'metadata': data['metadata'],
+    'measurements': [
+      {
+        'metric_name': data['metric'],
+        'quantity': data['quantity'],
+        if (hint != null) 'metric_tuple_hint': hint,
+      },
+    ],
+  };
 }
 
 class Tracker {
@@ -68,6 +106,7 @@ class Tracker {
       disableCompression: options.disableCompression,
       attribution: options.attribution,
       onError: options.onError,
+      httpClient: options.httpClient,
     );
   }
 
@@ -90,7 +129,7 @@ class Tracker {
       data['attribution'] = merged;
     }
 
-    _queue.add(data);
+    _queue.add(toWireEvent({...data, 'event_id': _uuidV4()}));
     _log('Queued event: ${event.metric}');
 
     if (_queue.length >= _options.flushAt) {
@@ -99,7 +138,7 @@ class Tracker {
   }
 
   Future<void> flush() async {
-    if (_queue.isEmpty || _shutdown) return;
+    if (_queue.isEmpty) return;
 
     final batch = List<Map<String, dynamic>>.from(_queue);
     _queue.clear();
@@ -109,13 +148,18 @@ class Tracker {
     try {
       await _sendWithRetry(batch);
     } catch (e) {
-      _options.onError?.call(DoowError(e.toString()));
+      _options.onError?.call(e is DoowError ? e : DoowError(e.toString()));
       _log('Flush failed: $e');
     }
   }
 
   Future<void> _sendWithRetry(List<Map<String, dynamic>> batch) async {
-    final payload = jsonEncode({'events': batch});
+    final batchId = _uuidV4();
+    final payload = jsonEncode({
+      'batch_id': batchId,
+      'sdk_version': _sdkVersion,
+      'events': batch,
+    });
     final bytes = utf8.encode(payload);
 
     List<int> body;
@@ -131,23 +175,34 @@ class Tracker {
       body = bytes;
     }
 
+    final client = _options.httpClient;
+    final uri = Uri.parse('${_options.endpoint}/telemetry/events');
+
     for (var attempt = 0; attempt <= _options.retryCount; attempt++) {
+      final isLastAttempt = attempt == _options.retryCount;
       try {
-        final response = await http
-            .post(
-              Uri.parse('${_options.endpoint}/telemetry/events'),
-              headers: headers,
-              body: body,
-            )
+        final response = await (client != null
+                ? client.post(uri, headers: headers, body: body)
+                : http.post(uri, headers: headers, body: body))
             .timeout(_options.timeout);
+
+        if (response.statusCode == 207) {
+          _options.onError?.call(PartialAcceptError.fromBody(response.body, batchId));
+          return;
+        }
 
         if (response.statusCode >= 200 && response.statusCode < 300) {
           _log('Batch sent successfully');
           return;
         }
 
-        if (response.statusCode == 429) {
-          final retryAfter = response.headers['retry-after'];
+        if (response.statusCode == 429 || response.statusCode >= 500) {
+          if (isLastAttempt) {
+            throw DoowError('HTTP ${response.statusCode} after ${attempt + 1} attempts',
+                statusCode: response.statusCode);
+          }
+          final retryAfter =
+              response.statusCode == 429 ? response.headers['retry-after'] : null;
           final delay = retryAfter != null
               ? Duration(seconds: int.tryParse(retryAfter) ?? 1)
               : Duration(milliseconds: 100 * (1 << attempt));
@@ -155,24 +210,21 @@ class Tracker {
           continue;
         }
 
-        if (response.statusCode >= 500) {
-          await Future.delayed(Duration(milliseconds: 100 * (1 << attempt)));
-          continue;
-        }
-
         throw DoowError('HTTP ${response.statusCode}: ${response.body}',
             statusCode: response.statusCode);
-      } on TimeoutException {
-        if (attempt == _options.retryCount) rethrow;
+      } on DoowError {
+        rethrow;
+      } catch (_) {
+        if (isLastAttempt) rethrow;
         await Future.delayed(Duration(milliseconds: 100 * (1 << attempt)));
       }
     }
   }
 
   Future<void> shutdown() async {
-    _shutdown = true;
     _flushTimer?.cancel();
     await flush();
+    _shutdown = true;
   }
 
   void _log(String message) {
