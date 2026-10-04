@@ -19,7 +19,7 @@
     "build": "tsup src/index.ts --format cjs,esm --dts --clean",
     "dev": "tsup src/index.ts --format cjs,esm --dts --watch",
     "lint": "eslint src",
-    "test": "vitest"
+    "test": "vitest run"
   },
   "peerDependencies": {
     "react": ">=17.0.0"
