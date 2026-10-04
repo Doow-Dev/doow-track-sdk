@@ -151,17 +151,27 @@ public class Tracker : IDisposable
         }
 
         var batchId = Guid.NewGuid().ToString();
-        var jsonBytes = JsonSerializer.SerializeToUtf8Bytes(BuildPayload(batchId, batch), _jsonOptions);
-        var gzipped = !_options.DisableCompression && jsonBytes.Length > 1024;
-        var body = jsonBytes;
-        if (gzipped)
+        byte[] body;
+        bool gzipped;
+        try
         {
-            using var memoryStream = new MemoryStream();
-            using (var gzipStream = new GZipStream(memoryStream, CompressionMode.Compress))
+            var jsonBytes = JsonSerializer.SerializeToUtf8Bytes(BuildPayload(batchId, batch), _jsonOptions);
+            gzipped = !_options.DisableCompression && jsonBytes.Length > 1024;
+            body = jsonBytes;
+            if (gzipped)
             {
-                gzipStream.Write(jsonBytes);
+                using var memoryStream = new MemoryStream();
+                using (var gzipStream = new GZipStream(memoryStream, CompressionMode.Compress))
+                {
+                    gzipStream.Write(jsonBytes);
+                }
+                body = memoryStream.ToArray();
             }
-            body = memoryStream.ToArray();
+        }
+        catch (Exception e)
+        {
+            Report(e);
+            return;
         }
 
         var url = $"{_options.Endpoint.TrimEnd('/')}/telemetry/events";
@@ -177,7 +187,7 @@ public class Tracker : IDisposable
 
                 using var response = await _httpClient.PostAsync(url, content);
                 var status = (int)response.StatusCode;
-                var responseBody = await response.Content.ReadAsStringAsync();
+                var responseBody = await ReadBoundedAsync(response);
 
                 if (status == 207)
                 {
@@ -196,11 +206,13 @@ public class Tracker : IDisposable
 
                 if ((status == 429 || status >= 500) && !lastAttempt)
                 {
-                    await Task.Delay((int)Math.Pow(2, attempt) * 1000);
+                    var backoff = TimeSpan.FromSeconds(Math.Pow(2, attempt));
+                    if (status == 429) backoff = TimeSpan.FromTicks(Math.Max(backoff.Ticks, ParseRetryAfter(response).Ticks));
+                    await Task.Delay(backoff);
                     continue;
                 }
 
-                Report(new DoowError($"API error: {responseBody}", status));
+                Report(new DoowError($"API error: {Sanitize(responseBody)}", status));
                 return;
             }
             catch (Exception e) when (e is not HttpRequestException and not TaskCanceledException)
@@ -235,21 +247,56 @@ public class Tracker : IDisposable
             var root = doc.RootElement;
             if (root.TryGetProperty("accepted", out var a) && a.TryGetInt32(out var ai)) accepted = ai;
             if (root.TryGetProperty("rejected", out var r) && r.TryGetInt32(out var ri)) rejected = ri;
-            if (root.TryGetProperty("batch_id", out var b) && b.ValueKind == JsonValueKind.String) batchId = b.GetString()!;
+            if (root.TryGetProperty("batch_id", out var b) && b.ValueKind == JsonValueKind.String) batchId = Sanitize(b.GetString()!);
             if (root.TryGetProperty("rejections", out var list) && list.ValueKind == JsonValueKind.Array)
             {
                 foreach (var item in list.EnumerateArray())
                 {
                     rejections.Add(new EventRejection(
-                        item.TryGetProperty("event_id", out var id) ? id.GetString() ?? "unknown" : "unknown",
-                        item.TryGetProperty("reason", out var reason) ? reason.GetString() ?? "" : ""));
+                        Sanitize(item.TryGetProperty("event_id", out var id) ? AsText(id, "unknown") : "unknown"),
+                        Sanitize(item.TryGetProperty("reason", out var reason) ? AsText(reason, "") : "")));
                 }
             }
         }
-        catch (JsonException)
+        catch (Exception e) when (e is JsonException or InvalidOperationException)
         {
         }
         return new PartialAcceptError(accepted, rejected, batchId, rejections);
+    }
+
+    private static string AsText(JsonElement element, string fallback) =>
+        element.ValueKind == JsonValueKind.Null ? fallback : element.ToString();
+
+    private const int MaxBodyChars = 1 << 20;
+    private const int MaxErrorText = 512;
+    private static readonly TimeSpan MaxRetryAfter = TimeSpan.FromSeconds(30);
+
+    private static async Task<string> ReadBoundedAsync(HttpResponseMessage response)
+    {
+        if (response.Content.Headers.ContentLength > MaxBodyChars) return string.Empty;
+        var text = await response.Content.ReadAsStringAsync();
+        return text.Length > MaxBodyChars ? text[..MaxBodyChars] : text;
+    }
+
+    internal static string Sanitize(string? text)
+    {
+        if (string.IsNullOrEmpty(text)) return string.Empty;
+        var cleaned = string.Create(text.Length, text, (span, source) =>
+        {
+            for (var i = 0; i < source.Length; i++) span[i] = char.IsControl(source[i]) ? ' ' : source[i];
+        });
+        return cleaned.Length > MaxErrorText ? cleaned[..MaxErrorText] + "..." : cleaned;
+    }
+
+    internal static TimeSpan ParseRetryAfter(HttpResponseMessage response)
+    {
+        var header = response.Headers.RetryAfter;
+        TimeSpan delay;
+        if (header?.Delta is { } delta) delay = delta;
+        else if (header?.Date is { } date) delay = date - DateTimeOffset.UtcNow;
+        else return TimeSpan.Zero;
+        if (delay < TimeSpan.Zero) return TimeSpan.Zero;
+        return delay > MaxRetryAfter ? MaxRetryAfter : delay;
     }
 
     private void Report(Exception error)

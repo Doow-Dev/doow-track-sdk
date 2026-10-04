@@ -162,4 +162,83 @@ public class TrackerProtocolTests
         Assert.Equal("gzip", request.Encoding);
         Assert.Equal(300, request.Body.GetProperty("events").GetArrayLength());
     }
+
+    [Fact]
+    public async Task OccurredAtIsIso8601()
+    {
+        var handler = new StubHandler((202, "{}"));
+        var (tracker, _) = Create(handler);
+        tracker.Track(Event());
+        await tracker.FlushAsync();
+
+        var occurredAt = handler.Requests.Single().Body.GetProperty("events")[0].GetProperty("occurred_at").GetString();
+        Assert.True(DateTimeOffset.TryParse(occurredAt, out _));
+        Assert.Matches(@"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}", occurredAt!);
+    }
+
+    [Fact]
+    public async Task ThrowingOnErrorHandlerDoesNotResendARecordedPartialBatch()
+    {
+        var handler = new StubHandler((207, "{\"accepted\":0,\"rejected\":1,\"batch_id\":\"b\",\"rejections\":[{\"event_id\":\"e\",\"reason\":\"bad\"}]}"));
+        var tracker = new Tracker("dk_test", new TrackerOptions
+        {
+            Endpoint = "https://test.doow.co",
+            FlushIntervalMs = 0,
+            RetryCount = 2,
+            OnError = _ => throw new InvalidOperationException("handler failure"),
+            HttpHandler = handler,
+        });
+        tracker.Track(Event());
+        await tracker.FlushAsync();
+
+        Assert.Single(handler.Requests);
+    }
+
+    [Fact]
+    public async Task MalformedPartialAcceptBodyIsReportedWithoutResend()
+    {
+        var handler = new StubHandler((207, "{\"accepted\":\"abc\",\"rejected\":null,\"rejections\":[1,\"x\",{\"event_id\":5}]}"));
+        var (tracker, errors) = Create(handler);
+        tracker.Track(Event());
+        await tracker.FlushAsync();
+
+        Assert.Single(handler.Requests);
+        Assert.IsType<PartialAcceptError>(Assert.Single(errors));
+    }
+
+    [Fact]
+    public void SanitizeStripsControlCharactersAndTruncates()
+    {
+        var cleaned = Tracker.Sanitize("line1\nline2\u001b[31m" + new string('x', 2000));
+        Assert.DoesNotContain('\n', cleaned);
+        Assert.DoesNotContain('\u001b', cleaned);
+        Assert.True(cleaned.Length <= 520);
+    }
+
+    [Fact]
+    public void RetryAfterIsClamped()
+    {
+        var response = new HttpResponseMessage(HttpStatusCode.TooManyRequests);
+        response.Headers.RetryAfter = new System.Net.Http.Headers.RetryConditionHeaderValue(TimeSpan.FromHours(24));
+        Assert.Equal(TimeSpan.FromSeconds(30), Tracker.ParseRetryAfter(response));
+
+        response.Headers.RetryAfter = new System.Net.Http.Headers.RetryConditionHeaderValue(TimeSpan.FromSeconds(2));
+        Assert.Equal(TimeSpan.FromSeconds(2), Tracker.ParseRetryAfter(response));
+
+        Assert.Equal(TimeSpan.Zero, Tracker.ParseRetryAfter(new HttpResponseMessage(HttpStatusCode.TooManyRequests)));
+    }
+
+    [Fact]
+    public async Task UnserializableAttributionIsReportedNotThrown()
+    {
+        var handler = new StubHandler((202, "{}"));
+        var (tracker, errors) = Create(handler);
+        var cyclic = new Dictionary<string, object>();
+        cyclic["self"] = cyclic;
+        tracker.Track(Event() with { Attribution = cyclic });
+        await tracker.FlushAsync();
+
+        Assert.Empty(handler.Requests);
+        Assert.Single(errors);
+    }
 }
