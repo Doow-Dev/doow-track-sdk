@@ -4,7 +4,10 @@ import type { TrackEvent, TrackerOptions } from './types';
 import {
   NonRetryableError,
   generateUUID,
+  notify,
   parseRetryAfterMs,
+  readBoundedText,
+  sanitizeText,
   readPartialAccept,
   toWireBatch,
   type QueuedEvent,
@@ -136,7 +139,7 @@ export class Tracker {
         this.queue = [...batch, ...this.queue];
         await this.persistQueue();
       }
-      this.options.onError?.(error as Error);
+      notify(this.options.onError, error as Error);
       this.log(`Flush failed: ${error}`);
     }
   }
@@ -163,7 +166,7 @@ export class Tracker {
         clearTimeout(timeout);
 
         if (response.status === 207) {
-          this.options.onError?.(await readPartialAccept(response, batchId));
+          notify(this.options.onError, await readPartialAccept(response, batchId));
           return;
         }
 
@@ -183,7 +186,7 @@ export class Tracker {
           continue;
         }
 
-        throw new NonRetryableError(`HTTP ${response.status}: ${await response.text()}`);
+        throw new NonRetryableError(`HTTP ${response.status}: ${sanitizeText(await readBoundedText(response))}`);
       } catch (error) {
         if (error instanceof NonRetryableError || attempt === this.options.retryCount) throw error;
         await this.sleep(100 * Math.pow(2, attempt));

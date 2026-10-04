@@ -103,4 +103,32 @@ describe('React Native wire protocol', () => {
     expect(calls).toHaveLength(1);
     expect(onError).toHaveBeenCalledTimes(1);
   });
+
+  it('a throwing onError handler never causes a resend of a recorded 207 batch', async () => {
+    const calls = stubFetch([
+      { status: 207, body: { accepted: 0, rejected: 1, batch_id: 'b', rejections: [{ event_id: 'e1', reason: 'bad' }] } },
+    ]);
+    const tracker = new Tracker('dk_test', {
+      persistQueue: false,
+      retryCount: 2,
+      onError: () => {
+        throw new Error('handler failure');
+      },
+    });
+    tracker.track(event);
+    await tracker.flush();
+
+    expect(calls).toHaveLength(1);
+  });
+
+  it('a malformed 207 body is reported and not resent', async () => {
+    const calls = stubFetch([{ status: 207, body: { accepted: 'abc', rejections: [1, 'x', { event_id: 5 }] } }]);
+    const onError = vi.fn();
+    const tracker = new Tracker('dk_test', { persistQueue: false, onError, retryCount: 2 });
+    tracker.track(event);
+    await tracker.flush();
+
+    expect(calls).toHaveLength(1);
+    expect(onError.mock.calls[0]![0]).toBeInstanceOf(PartialAcceptError);
+  });
 });
