@@ -58,7 +58,11 @@ class Tracker(
             flushJob = scope.launch {
                 while (isActive) {
                     delay(options.flushIntervalMs)
-                    flush()
+                    try {
+                        flush()
+                    } catch (e: Exception) {
+                        log("[doow-track] Flush loop error: ${e.message}")
+                    }
                 }
             }
         }
@@ -86,8 +90,12 @@ class Tracker(
     fun flush() {
         if (buffer.isEmpty()) return
 
-        val batch = buffer.toList()
-        buffer.clear()
+        val batch = synchronized(buffer) {
+            val drained = buffer.toList()
+            buffer.removeAll(drained.toSet())
+            drained
+        }
+        if (batch.isEmpty()) return
 
         sendBatch(batch)
     }
@@ -140,7 +148,10 @@ class Tracker(
                 val errorBody = conn.errorStream?.bufferedReader()?.readText() ?: ""
                 report(DoowError("API error: $errorBody", status))
                 return
-            } catch (e: java.io.IOException) {
+            } catch (e: InterruptedException) {
+                Thread.currentThread().interrupt()
+                return
+            } catch (e: Exception) {
                 if (lastAttempt) {
                     report(e)
                     return
@@ -172,7 +183,11 @@ class Tracker(
     }
 
     private fun report(error: Exception) {
-        options.onError?.invoke(error)
+        try {
+            options.onError?.invoke(error)
+        } catch (e: Exception) {
+            log("[doow-track] onError handler threw: ${e.message}")
+        }
         log("[doow-track] Error: ${error.message}")
     }
 

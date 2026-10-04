@@ -128,6 +128,10 @@ class TrackerProtocolTest {
 
         assertEquals(2, bodies.size)
         assertEquals(bodies[0]["batch_id"], bodies[1]["batch_id"])
+        assertEquals(
+            bodies[0]["events"]!!.jsonArray[0].jsonObject["event_id"],
+            bodies[1]["events"]!!.jsonArray[0].jsonObject["event_id"]
+        )
         assertTrue(errors.isEmpty())
     }
 
@@ -140,5 +144,32 @@ class TrackerProtocolTest {
 
         assertEquals(listOf<String?>("gzip"), encodings.toList())
         assertEquals(300, bodies[0]["events"]!!.jsonArray.size)
+    }
+
+    @Test
+    fun throwingOnErrorHandlerDoesNotKillTheFlushLoop() {
+        statuses = intArrayOf(400, 202)
+        val tracker = Tracker(
+            "dk_test",
+            TrackerOptions(
+                endpoint = "http://127.0.0.1:${server.address.port}",
+                flushIntervalMs = 50,
+                flushAt = 1000,
+                retryCount = 0,
+                onError = { throw IllegalStateException("handler failure") }
+            )
+        )
+        tracker.track(event())
+        waitFor { bodies.size >= 1 }
+        tracker.track(event())
+        waitFor { bodies.size >= 2 }
+        tracker.shutdown()
+
+        assertEquals(2, bodies.size)
+    }
+
+    private fun waitFor(condition: () -> Boolean) {
+        val deadline = System.currentTimeMillis() + 5000
+        while (!condition() && System.currentTimeMillis() < deadline) Thread.sleep(20)
     }
 }
