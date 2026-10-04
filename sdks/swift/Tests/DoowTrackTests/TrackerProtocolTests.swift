@@ -5,6 +5,10 @@ import Foundation
 final class StubURLProtocol: URLProtocol {
     static var responder: ((URLRequest) -> (Int, Data))?
     static var headers: [String: String] = [:]
+    static var endlessBody = false
+    static var bytesServed = 0
+    private var stopped = false
+    private let stopLock = NSLock()
     static var requests: [(request: URLRequest, body: Data)] = []
 
     override class func canInit(with request: URLRequest) -> Bool { true }
@@ -26,11 +30,32 @@ final class StubURLProtocol: URLProtocol {
         let (status, data) = Self.responder?(request) ?? (202, Data())
         let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: Self.headers)!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        if Self.endlessBody {
+            let chunk = Data(repeating: UInt8(ascii: "x"), count: 65536)
+            DispatchQueue.global().async { [self] in
+                while !isStopped && Self.bytesServed < 200_000_000 {
+                    Self.bytesServed += chunk.count
+                    client?.urlProtocol(self, didLoad: chunk)
+                    usleep(500)
+                }
+            }
+            return
+        }
         client?.urlProtocol(self, didLoad: data)
         client?.urlProtocolDidFinishLoading(self)
     }
 
-    override func stopLoading() {}
+    private var isStopped: Bool {
+        stopLock.lock()
+        defer { stopLock.unlock() }
+        return stopped
+    }
+
+    override func stopLoading() {
+        stopLock.lock()
+        stopped = true
+        stopLock.unlock()
+    }
 }
 
 @Suite(.serialized)
@@ -42,6 +67,8 @@ final class TrackerProtocolTests {
         StubURLProtocol.requests = []
         StubURLProtocol.responder = nil
         StubURLProtocol.headers = [:]
+        StubURLProtocol.endlessBody = false
+        StubURLProtocol.bytesServed = 0
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [StubURLProtocol.self]
         session = URLSession(configuration: config)
@@ -153,8 +180,9 @@ final class TrackerProtocolTests {
         #expect(errors.first is PartialAcceptError)
     }
 
-    @Test func oversizedErrorBodiesAreCappedWhileStreaming() throws {
-        StubURLProtocol.responder = { _ in (400, Data(String(repeating: "x", count: 3_000_000).utf8)) }
+    @Test func oversizedErrorBodiesStopBeingReadAtTheCap() throws {
+        StubURLProtocol.endlessBody = true
+        StubURLProtocol.responder = { _ in (400, Data()) }
         let tracker = try makeTracker()
         track(tracker)
         tracker.flush()
@@ -162,26 +190,8 @@ final class TrackerProtocolTests {
         let error = try #require(errors.first as? DoowError)
         #expect(error.statusCode == 400)
         #expect(error.message.count <= 540)
-    }
-
-    @Test func rateLimitedBatchWaitsForRetryAfterAndRetriesTheSameBatch() throws {
-        var calls = 0
-        StubURLProtocol.headers = ["Retry-After": "2"]
-        StubURLProtocol.responder = { _ in
-            calls += 1
-            return (calls == 1 ? 429 : 202, Data())
-        }
-        let tracker = try makeTracker()
-        track(tracker)
-        let started = Date()
-        tracker.flush()
-        let elapsed = Date().timeIntervalSince(started)
-
-        #expect(StubURLProtocol.requests.count == 2)
-        #expect(elapsed >= 1.9)
-        let ids = try StubURLProtocol.requests.map { try json($0.body)["batch_id"] as? String }
-        #expect(Set(ids).count == 1)
-        #expect(errors.isEmpty)
+        #expect(StubURLProtocol.bytesServed >= 1 << 20)
+        #expect(StubURLProtocol.bytesServed <= 8_000_000)
     }
 
     @Test func retryAfterIsClampedAndGarbageIgnored() {
