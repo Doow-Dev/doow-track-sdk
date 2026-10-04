@@ -186,9 +186,13 @@ public class Tracker : IDisposable
                 if (gzipped) content.Headers.Add("Content-Encoding", "gzip");
 
                 using var request = new HttpRequestMessage(HttpMethod.Post, url) { Content = content };
-                using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
+                using var attemptTimeout = new CancellationTokenSource(TimeSpan.FromMilliseconds(_options.TimeoutMs));
+                using var response = await _httpClient.SendAsync(
+                    request,
+                    HttpCompletionOption.ResponseHeadersRead,
+                    attemptTimeout.Token);
                 var status = (int)response.StatusCode;
-                var responseBody = await ReadBoundedAsync(response);
+                var responseBody = await ReadBoundedAsync(response, attemptTimeout.Token);
 
                 if (status == 207)
                 {
@@ -272,15 +276,15 @@ public class Tracker : IDisposable
     private const int MaxErrorText = 512;
     private static readonly TimeSpan MaxRetryAfter = TimeSpan.FromSeconds(30);
 
-    private static async Task<string> ReadBoundedAsync(HttpResponseMessage response)
+    internal static async Task<string> ReadBoundedAsync(HttpResponseMessage response, CancellationToken cancellation)
     {
-        await using var stream = await response.Content.ReadAsStreamAsync();
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellation);
         using var reader = new StreamReader(stream, Encoding.UTF8);
         var buffer = new char[4096];
         var text = new StringBuilder();
         while (text.Length < MaxBodyChars)
         {
-            var read = await reader.ReadAsync(buffer, 0, Math.Min(buffer.Length, MaxBodyChars - text.Length));
+            var read = await reader.ReadAsync(buffer.AsMemory(0, Math.Min(buffer.Length, MaxBodyChars - text.Length)), cancellation);
             if (read == 0) break;
             text.Append(buffer, 0, read);
         }

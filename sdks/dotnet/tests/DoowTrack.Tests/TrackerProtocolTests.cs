@@ -285,15 +285,114 @@ public class TrackerProtocolTests
         Assert.Single(errors);
     }
 
-    [Fact]
-    public async Task OversizedErrorBodiesAreCappedBeforeTheyReachTheMessage()
+    private sealed class EndlessContent : HttpContent
     {
-        var handler = new StubHandler((400, new string('x', 3_000_000)));
-        var (tracker, errors) = Create(handler);
+        public long BytesServed;
+        private readonly bool _stallAfterFirstChunk;
+
+        public EndlessContent(bool stallAfterFirstChunk = false) => _stallAfterFirstChunk = stallAfterFirstChunk;
+
+        protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context) =>
+            throw new NotSupportedException();
+
+        protected override bool TryComputeLength(out long length)
+        {
+            length = -1;
+            return false;
+        }
+
+        protected override Task<Stream> CreateContentReadStreamAsync() => Task.FromResult<Stream>(new EndlessStream(this));
+
+        private sealed class EndlessStream : Stream
+        {
+            private readonly EndlessContent _owner;
+            private bool _firstRead = true;
+
+            public EndlessStream(EndlessContent owner) => _owner = owner;
+
+            public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+            {
+                if (_owner._stallAfterFirstChunk && !_firstRead)
+                {
+                    await Task.Delay(Timeout.Infinite, cancellationToken);
+                }
+                _firstRead = false;
+                var count = Math.Min(buffer.Length, 4096);
+                buffer.Span[..count].Fill((byte)'x');
+                _owner.BytesServed += count;
+                return count;
+            }
+
+            public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+            public override bool CanRead => true;
+            public override bool CanSeek => false;
+            public override bool CanWrite => false;
+            public override long Length => throw new NotSupportedException();
+            public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+            public override void Flush() { }
+            public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+            public override void SetLength(long value) => throw new NotSupportedException();
+            public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        }
+    }
+
+    private sealed class FixedResponseHandler : HttpMessageHandler
+    {
+        private readonly Func<HttpResponseMessage> _response;
+        public int Calls;
+
+        public FixedResponseHandler(Func<HttpResponseMessage> response) => _response = response;
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            Calls++;
+            return Task.FromResult(_response());
+        }
+    }
+
+    [Fact]
+    public async Task OversizedErrorBodiesStopBeingReadAtTheCap()
+    {
+        var content = new EndlessContent();
+        var handler = new FixedResponseHandler(() => new HttpResponseMessage(HttpStatusCode.BadRequest) { Content = content });
+        var errors = new List<Exception>();
+        var tracker = new Tracker("dk_test", new TrackerOptions
+        {
+            Endpoint = "https://test.doow.co",
+            FlushIntervalMs = 0,
+            RetryCount = 0,
+            OnError = errors.Add,
+            HttpHandler = handler,
+        });
         tracker.Track(Event());
         await tracker.FlushAsync();
 
         var error = Assert.IsType<DoowError>(Assert.Single(errors));
         Assert.True(error.Message.Length <= 540);
+        Assert.InRange(content.BytesServed, 1, (1 << 20) + 8192);
+    }
+
+    [Fact]
+    public async Task AStalledResponseBodyIsCutOffByTheRequestTimeout()
+    {
+        var handler = new FixedResponseHandler(
+            () => new HttpResponseMessage(HttpStatusCode.BadRequest) { Content = new EndlessContent(stallAfterFirstChunk: true) });
+        var errors = new List<Exception>();
+        var tracker = new Tracker("dk_test", new TrackerOptions
+        {
+            Endpoint = "https://test.doow.co",
+            FlushIntervalMs = 0,
+            RetryCount = 0,
+            TimeoutMs = 500,
+            OnError = errors.Add,
+            HttpHandler = handler,
+        });
+        tracker.Track(Event());
+
+        var flush = tracker.FlushAsync();
+        var finished = await Task.WhenAny(flush, Task.Delay(TimeSpan.FromSeconds(5)));
+
+        Assert.Same(flush, finished);
+        Assert.Single(errors);
     }
 }
