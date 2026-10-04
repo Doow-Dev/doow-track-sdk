@@ -95,7 +95,7 @@ const MAX_BODY_CHARS = 1 << 20;
 
 export function sanitizeText(value: unknown): string {
   // eslint-disable-next-line no-control-regex
-  const text = String(value).replace(/[\u0000-\u001f\u007f]/g, ' ');
+  const text = String(value).replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ');
   return text.length > MAX_ERROR_TEXT ? `${text.slice(0, MAX_ERROR_TEXT)}...` : text;
 }
 

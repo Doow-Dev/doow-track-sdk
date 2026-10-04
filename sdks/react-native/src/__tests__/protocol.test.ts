@@ -16,7 +16,7 @@ vi.mock('@react-native-async-storage/async-storage', () => {
 });
 
 import { Tracker } from '../tracker';
-import { PartialAcceptError } from '../wire';
+import { PartialAcceptError, sanitizeText } from '../wire';
 
 function stubFetch(responses: Array<{ status: number; body?: unknown }>) {
   const calls: Array<{ init: RequestInit }> = [];
@@ -130,5 +130,13 @@ describe('React Native wire protocol', () => {
 
     expect(calls).toHaveLength(1);
     expect(onError.mock.calls[0]![0]).toBeInstanceOf(PartialAcceptError);
+  });
+});
+
+describe('sanitizeText', () => {
+  it('strips C0 and C1 control characters and truncates', () => {
+    const cleaned = sanitizeText(`line1\nline2\u001b[31m\u009b31m${'x'.repeat(2000)}`);
+    expect(cleaned).not.toMatch(/[\u0000-\u001f\u007f-\u009f]/);
+    expect(cleaned.length).toBeLessThanOrEqual(520);
   });
 });

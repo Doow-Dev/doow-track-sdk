@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Tracker } from '../tracker';
-import { PartialAcceptError, MAX_RETRY_AFTER_MS, parseRetryAfterMs } from '../wire';
+import { PartialAcceptError, MAX_RETRY_AFTER_MS, parseRetryAfterMs, sanitizeText } from '../wire';
 
 interface Call {
   url: string;
@@ -281,5 +281,13 @@ describe('parseRetryAfterMs', () => {
     expect(parseRetryAfterMs(new Date(Date.now() + 5000).toUTCString())).toBeGreaterThan(0);
     expect(parseRetryAfterMs('garbage')).toBeUndefined();
     expect(parseRetryAfterMs(null)).toBeUndefined();
+  });
+});
+
+describe('sanitizeText', () => {
+  it('strips C0 and C1 control characters and truncates', () => {
+    const cleaned = sanitizeText(`line1\nline2\u001b[31m\u009b31m${'x'.repeat(2000)}`);
+    expect(cleaned).not.toMatch(/[\u0000-\u001f\u007f-\u009f]/);
+    expect(cleaned.length).toBeLessThanOrEqual(520);
   });
 });
