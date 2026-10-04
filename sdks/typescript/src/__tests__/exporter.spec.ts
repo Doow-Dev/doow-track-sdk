@@ -119,10 +119,15 @@ describe('Exporter — S78', () => {
     it('same batch_id on retry', async () => {
       let attempt = 0;
       const batchIds: string[] = [];
+      const eventIds: string[] = [];
       const transport: CustomTransport = {
         send: async (payload) => {
-          const body = JSON.parse(payload.body.toString()) as { batch_id: string };
+          const body = JSON.parse(payload.body.toString()) as {
+            batch_id: string;
+            events: Array<{ event_id: string }>;
+          };
           batchIds.push(body.batch_id);
+          eventIds.push(body.events[0]!.event_id);
           attempt++;
           if (attempt < 2) throw new Error('network error');
           return { status: 202, headers: {}, body: '{}' };
@@ -134,6 +139,8 @@ describe('Exporter — S78', () => {
 
       expect(batchIds).toHaveLength(2);
       expect(batchIds[0]).toBe(batchIds[1]);
+      expect(eventIds).toHaveLength(2);
+      expect(eventIds[0]).toBe(eventIds[1]);
     });
   });
 
@@ -302,6 +309,45 @@ describe('Exporter — S78', () => {
       const reason = (onError.mock.calls[0]![0] as { rejections: Array<{ reason: string }> }).rejections[0]!.reason;
       expect(reason).not.toMatch(/[\n\u001b]/);
       expect(reason.length).toBeLessThanOrEqual(520);
+    });
+
+    it('a single event that exceeds the payload limit is reported once, not retried forever', async () => {
+      const onError = vi.fn();
+      const { transport, calls } = makeTransport(413);
+      const exporter = makeExporter(transport, { onError, retryCount: 2 });
+
+      await exporter.flush(makeEvents(1));
+
+      expect(calls).toHaveLength(1);
+      expect(onError).toHaveBeenCalledWith(expect.objectContaining({ statusCode: 413 }));
+    });
+
+    it('an oversized batch is halved until its events fit, then the stragglers are reported', async () => {
+      const onError = vi.fn();
+      const { transport, calls } = makeTransport(413);
+      const exporter = makeExporter(transport, { onError, retryCount: 0 });
+
+      await exporter.flush(makeEvents(2));
+
+      expect(calls.length).toBeLessThanOrEqual(3);
+      expect(onError).toHaveBeenCalled();
+    });
+
+    it('strips C1 control characters from rejection reasons', async () => {
+      const onError = vi.fn();
+      const transport: CustomTransport = {
+        send: async () => ({
+          status: 207,
+          headers: {},
+          body: JSON.stringify({ rejected: 1, rejections: [{ event_id: 'e', reason: 'a\u009b31mb' }] }),
+        }),
+      };
+      const exporter = makeExporter(transport, { onError, retryCount: 0 });
+
+      await exporter.flush(makeEvents(1));
+
+      const reason = (onError.mock.calls[0]![0] as { rejections: Array<{ reason: string }> }).rejections[0]!.reason;
+      expect(reason).not.toContain('\u009b');
     });
 
     it('permanent 400 is reported once and never retried', async () => {

@@ -43,7 +43,7 @@ const MAX_ERROR_TEXT = 512;
 
 function sanitizeText(value: unknown): string {
   // eslint-disable-next-line no-control-regex
-  const text = String(value).replace(/[\u0000-\u001f\u007f]/g, ' ');
+  const text = String(value).replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ');
   return text.length > MAX_ERROR_TEXT ? `${text.slice(0, MAX_ERROR_TEXT)}...` : text;
 }
 
@@ -292,6 +292,16 @@ export class Exporter {
       }
 
       if (sdkErr.statusCode === 413) {
+        if (events.length <= 1) {
+          this._report({
+            kind: 'TRANSPORT_ERROR',
+            message: 'A single event exceeds the payload limit (413)',
+            statusCode: 413,
+            rejectedEventIds: events.map((e) => e.event_id),
+          });
+          return;
+        }
+
         // Adaptive recovery — halve batch
         const half = Math.max(1, Math.floor(events.length / 2));
         this._adaptiveBatchSize = half;
