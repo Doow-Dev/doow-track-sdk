@@ -121,6 +121,47 @@ final class TrackerProtocolTests {
         #expect(errors.isEmpty)
     }
 
+    private func makeBacklogTracker() throws -> Tracker {
+        try Tracker("dk_test", options: TrackerOptions(
+            endpoint: "https://test.doow.co",
+            flushAt: 5000,
+            flushIntervalSeconds: 0,
+            maxQueueSize: 5000,
+            retryCount: 0,
+            disableCompression: true,
+            onError: { [unowned self] in self.errors.append($0) },
+            session: session
+        ))
+    }
+
+    @Test func flushOfMoreThan500EventsSendsChunksOfAtMost500WithDistinctBatchIds() throws {
+        let tracker = try makeBacklogTracker()
+        for _ in 0..<1200 { track(tracker) }
+        tracker.flush()
+
+        let bodies = try StubURLProtocol.requests.map { try json($0.body) }
+        let sizes = bodies.map { ($0["events"] as? [[String: Any]])?.count ?? 0 }
+        #expect(sizes == [500, 500, 200])
+        #expect(Set(bodies.compactMap { $0["batch_id"] as? String }).count == 3)
+        let eventIds = bodies.flatMap { ($0["events"] as? [[String: Any]] ?? []).compactMap { $0["event_id"] as? String } }
+        #expect(Set(eventIds).count == 1200)
+        #expect(errors.isEmpty)
+    }
+
+    @Test func laterChunksAreStillSentAfterAChunkFailsPermanently() throws {
+        var calls = 0
+        StubURLProtocol.responder = { _ in
+            calls += 1
+            return (calls == 1 ? 400 : 202, Data("bad".utf8))
+        }
+        let tracker = try makeBacklogTracker()
+        for _ in 0..<700 { track(tracker) }
+        tracker.flush()
+
+        #expect(StubURLProtocol.requests.count == 2)
+        #expect(errors.count == 1)
+    }
+
     @Test func blankSourceSystemDefaultsToSdk() throws {
         let tracker = try makeTracker()
         tracker.track(TrackEvent(metric: "api_calls", quantity: 1, licenseId: "lic_1", sourceSystem: " "))

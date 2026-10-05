@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Batch size
+
+- `flush` sends more than 500 events as separate requests of at most 500 events, each with its own batch id, so a large backlog no longer exceeds the API's per-minute event limit and loops on `429`.
+
 ### Additions
 
 - `TrackerOptions` accepts a `session` (`URLSession`) so tests and apps can inject a configured session.

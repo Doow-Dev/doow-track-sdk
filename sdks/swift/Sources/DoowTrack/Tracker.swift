@@ -208,6 +208,8 @@ func parseRetryAfter(_ header: String?) -> Double {
 }
 
 public class Tracker {
+    static let maxBatchEvents = 500
+
     private let apiKey: String
     private let options: TrackerOptions
     private var buffer: [BufferedEvent] = []
@@ -283,7 +285,12 @@ public class Tracker {
         buffer.removeAll()
         lock.unlock()
 
-        sendBatch(batch)
+        var start = 0
+        while start < batch.count {
+            let end = min(start + Tracker.maxBatchEvents, batch.count)
+            sendBatch(Array(batch[start..<end]))
+            start = end
+        }
     }
 
     static func makeBatch(batchId: String, events: [BufferedEvent]) -> WireBatch {
