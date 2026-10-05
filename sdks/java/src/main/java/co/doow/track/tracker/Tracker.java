@@ -236,7 +236,7 @@ public class Tracker implements AutoCloseable {
                     return false;
                 }
 
-                if ((status == 429 || status >= 500) && !lastAttempt) {
+                if ((status == 408 || status == 429 || status >= 500) && !lastAttempt) {
                     long backoff = (long) Math.pow(2, attempt) * 1000;
                     long serverDelay = (status == 429 || status == 503) ? parseRetryAfterMs(conn.getHeaderField("Retry-After")) : 0;
                     Thread.sleep(Math.max(backoff, serverDelay));
@@ -250,7 +250,7 @@ public class Tracker implements AutoCloseable {
                     errorBody = "";
                 }
                 report(new DoowError("API error: " + sanitize(errorBody), status));
-                return status == 429 || status >= 500;
+                return status == 408 || status == 429 || status >= 500;
             } catch (IOException e) {
                 if (lastAttempt) {
                     report(e);

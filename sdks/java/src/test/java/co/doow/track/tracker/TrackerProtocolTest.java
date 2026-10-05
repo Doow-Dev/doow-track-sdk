@@ -181,6 +181,19 @@ class TrackerProtocolTest {
     }
 
     @Test
+    void aRequestTimeoutIsRetriedWithTheSameBatchId() {
+        statuses = new int[] {408, 202};
+        Tracker tracker = tracker();
+        tracker.track(event());
+        tracker.flush();
+        tracker.shutdown();
+
+        assertEquals(2, bodies.size());
+        assertEquals(bodies.get(0).path("batch_id").asText(), bodies.get(1).path("batch_id").asText());
+        assertTrue(errors.isEmpty());
+    }
+
+    @Test
     void aTransientFailureHoldsCountTriggeredFlushes() throws Exception {
         statuses = new int[] {503};
         TrackerOptions options = new TrackerOptions()
