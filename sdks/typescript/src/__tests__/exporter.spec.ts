@@ -384,6 +384,28 @@ describe('Exporter — S78', () => {
       expect(onError).toHaveBeenCalledWith(expect.objectContaining({ statusCode: 400 }));
     });
 
+    it('a 408 request timeout is retried like a transient error', async () => {
+      const onError = vi.fn();
+      const bodies: Array<{ batch_id: string }> = [];
+      let attempt = 0;
+      const transport = {
+        async send(payload: { body: string }) {
+          attempt += 1;
+          bodies.push(JSON.parse(payload.body));
+          return attempt === 1
+            ? { status: 408, headers: {}, body: '{}' }
+            : { status: 202, headers: {}, body: '{}' };
+        },
+      };
+      const exporter = makeExporter(transport as never, { onError, retryCount: 1, disableCompression: true });
+
+      await exporter.flush(makeEvents(1));
+
+      expect(bodies).toHaveLength(2);
+      expect(bodies[1]!.batch_id).toBe(bodies[0]!.batch_id);
+      expect(onError).not.toHaveBeenCalled();
+    });
+
     it('a throwing onError handler never escapes flush', async () => {
       const onError = vi.fn(() => {
         throw new Error('handler failure');

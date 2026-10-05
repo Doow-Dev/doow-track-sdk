@@ -337,7 +337,12 @@ export class Exporter {
         return await this._sendWithRetry(events, retriesLeft - 1, resolvedBatchId);
       }
 
-      if (sdkErr.statusCode !== undefined && sdkErr.statusCode >= 400 && sdkErr.statusCode < 500) {
+      if (
+        sdkErr.statusCode !== undefined &&
+        sdkErr.statusCode >= 400 &&
+        sdkErr.statusCode < 500 &&
+        sdkErr.statusCode !== 408
+      ) {
         this._report({
           kind: sdkErr.kind ?? 'TRANSPORT_ERROR',
           message: sdkErr.message,
