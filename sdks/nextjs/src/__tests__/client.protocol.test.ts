@@ -126,6 +126,26 @@ describe('Next.js client wire protocol', () => {
     expect(resent.slice(0, 500)).toEqual(failedChunk);
   });
 
+  it('destroy during an outage stops after the first failed chunk and reports how many events were dropped', async () => {
+    const calls = stubFetch([{ status: 503 }]);
+    const onError = vi.fn();
+    const tracker = new Tracker('dk_test', {
+      flushAt: 100_000,
+      maxQueueSize: 5000,
+      flushIntervalMs: 60_000,
+      disableCompression: true,
+      retryCount: 0,
+      onError,
+    });
+    for (let i = 0; i < 1200; i++) tracker.track(event);
+    tracker.destroy();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(calls).toHaveLength(1);
+    const messages = onError.mock.calls.map(([e]) => (e as Error).message);
+    expect(messages.some((m) => m.includes('Dropped 700 queued events'))).toBe(true);
+  });
+
   it('a 408 request timeout is retried with the same batch and event ids', async () => {
     const calls = stubFetch([{ status: 408 }, { status: 202 }]);
     const onError = vi.fn();

@@ -257,7 +257,14 @@ export class ClientTracker {
       } catch (error) {
         notify(this.options.onError, error as Error);
         this.log(`Drain failed: ${error}`);
-        if (!(error instanceof NonRetryableError)) return;
+        if (!(error instanceof NonRetryableError)) {
+          const dropped = this.queue.length;
+          this.queue = [];
+          if (dropped > 0) {
+            notify(this.options.onError, new Error(`Dropped ${dropped} queued events at shutdown after a transient failure`));
+          }
+          return;
+        }
       }
     }
   }
