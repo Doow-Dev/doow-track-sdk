@@ -125,6 +125,38 @@ RSpec.describe DoowTrack::Tracker do
     expect(buffered.first(500).map(&:event_id)).to eq(failed_chunk)
   end
 
+  it "retries a 408 request timeout with the same batch id" do
+    bodies = []
+    stub_request(:post, url).to_return do |request|
+      bodies << body_of(request)
+      { status: bodies.size == 1 ? 408 : 202 }
+    end
+    track_one(tracker)
+    tracker.flush
+
+    expect(bodies.size).to eq(2)
+    expect(bodies[1]["batch_id"]).to eq(bodies[0]["batch_id"])
+    expect(errors).to be_empty
+  end
+
+  it "reports a chunk that cannot be serialized and still sends the rest" do
+    backlog = described_class.new(
+      "dk_test",
+      endpoint: endpoint,
+      flush_interval: 0,
+      flush_at: 5000,
+      retry_count: 0,
+      on_error: ->(e) { errors << e }
+    )
+    stub_request(:post, url).to_return(status: 202)
+    track_one(backlog, metadata: { bad: Float::NAN })
+    600.times { track_one(backlog) }
+    backlog.flush
+
+    expect(errors.size).to eq(1)
+    expect(a_request(:post, url)).to have_been_made.once
+  end
+
   it "holds count-triggered flushes after a transient failure" do
     backlog = described_class.new(
       "dk_test",

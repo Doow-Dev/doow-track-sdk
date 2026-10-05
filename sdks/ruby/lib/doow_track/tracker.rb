@@ -140,7 +140,12 @@ module DoowTrack
     def send_batch(batch)
       url = URI("#{@options[:endpoint].chomp('/')}/telemetry/events")
       batch_id = SecureRandom.uuid
-      json = build_payload(batch_id, batch).to_json
+      begin
+        json = build_payload(batch_id, batch).to_json
+      rescue StandardError => e
+        report(e)
+        return :abandoned
+      end
       body, encoding = encode_body(json)
 
       (@options[:retry_count] + 1).times do |attempt|
@@ -165,7 +170,7 @@ module DoowTrack
         when 200..299
           log("[doow-track] Flushed #{batch.size} events")
           return :delivered
-        when 429, 500..599
+        when 408, 429, 500..599
           if last_attempt
             report(Error.new("API error: #{DoowTrack.sanitize(response.body)}", status_code: status))
             return :failed
