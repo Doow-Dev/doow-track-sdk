@@ -132,6 +132,58 @@ def test_permanent_client_error_is_reported_without_retry(httpx_mock):
     assert len(errors) == 1
 
 
+def _backlog_options(errors: list, **overrides) -> TrackerOptions:
+    return TrackerOptions(
+        endpoint="https://test.doow.co",
+        flush_at=5000,
+        flush_interval=1000.0,
+        on_error=errors.append,
+        retry_count=0,
+        **overrides,
+    )
+
+
+def _chunk_summary(httpx_mock):
+    bodies = [json.loads(r.content) for r in httpx_mock.get_requests()]
+    sizes = [len(b["events"]) for b in bodies]
+    batch_ids = {b["batch_id"] for b in bodies}
+    event_ids = [e["event_id"] for b in bodies for e in b["events"]]
+    return sizes, batch_ids, event_ids
+
+
+def test_flush_of_more_than_500_events_sends_chunks_of_at_most_500(httpx_mock):
+    httpx_mock.add_response(status_code=202, json={"accepted": 500, "rejected": 0}, is_reusable=True)
+    errors: list = []
+    tracker = Tracker("dk_test", _backlog_options(errors, disable_compression=True))
+    for _ in range(1200):
+        tracker.track(_event())
+    tracker.flush()
+    tracker._shutdown.set()
+
+    sizes, batch_ids, event_ids = _chunk_summary(httpx_mock)
+    assert sizes == [500, 500, 200]
+    assert len(batch_ids) == 3
+    assert len(set(event_ids)) == 1200
+    assert errors == []
+
+
+@pytest.mark.asyncio
+async def test_async_flush_of_more_than_500_events_sends_chunks_of_at_most_500(httpx_mock):
+    httpx_mock.add_response(status_code=202, json={"accepted": 500, "rejected": 0}, is_reusable=True)
+    errors: list = []
+    tracker = AsyncTracker("dk_test", _backlog_options(errors, disable_compression=True))
+    for _ in range(1200):
+        await tracker.track(_event())
+    await tracker.flush()
+    await tracker.shutdown()
+
+    sizes, batch_ids, event_ids = _chunk_summary(httpx_mock)
+    assert sizes == [500, 500, 200]
+    assert len(batch_ids) == 3
+    assert len(set(event_ids)) == 1200
+    assert errors == []
+
+
 @pytest.mark.asyncio
 async def test_async_permanent_client_error_is_not_retried(httpx_mock):
     httpx_mock.add_response(status_code=422, json={"message": "bad"})

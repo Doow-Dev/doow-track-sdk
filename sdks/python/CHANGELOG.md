@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Batch size
+
+- `Tracker.flush` and `AsyncTracker.flush` send more than 500 events as separate requests of at most 500 events, each with its own batch id, so a large backlog no longer exceeds the API's per-minute event limit and loops on `429`.
+
 ### Additions
 
 - New exports: `PartialAcceptError` and `sanitize_text`. `on_error` receives a `PartialAcceptError` for HTTP 207 partial acceptance.

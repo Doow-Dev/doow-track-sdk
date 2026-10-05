@@ -26,6 +26,7 @@ DEFAULT_MAX_QUEUE_SIZE = 10000
 DEFAULT_TIMEOUT = 10.0
 DEFAULT_RETRY_COUNT = 3
 DEFAULT_SHUTDOWN_TIMEOUT = 5.0
+MAX_BATCH_EVENTS = 500
 
 
 
@@ -249,7 +250,8 @@ class Tracker:
                 self._log("batch dropped by before_flush hook")
                 return
 
-        self._send_batch(events)
+        for start in range(0, len(events), MAX_BATCH_EVENTS):
+            self._send_batch(events[start : start + MAX_BATCH_EVENTS])
 
     def _send_batch(self, events: list[SerializedEvent]) -> None:
         batch_id = str(uuid.uuid4())
@@ -498,7 +500,8 @@ class AsyncTracker:
             if not events:
                 return
 
-        await self._send_batch(events)
+        for start in range(0, len(events), MAX_BATCH_EVENTS):
+            await self._send_batch(events[start : start + MAX_BATCH_EVENTS])
 
     async def _send_batch(self, events: list[SerializedEvent]) -> None:
         batch_id = str(uuid.uuid4())
