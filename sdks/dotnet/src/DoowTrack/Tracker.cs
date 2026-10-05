@@ -221,7 +221,15 @@ public class Tracker : IDisposable
                     HttpCompletionOption.ResponseHeadersRead,
                     attemptTimeout.Token);
                 var status = (int)response.StatusCode;
-                var responseBody = await ReadBoundedAsync(response, attemptTimeout.Token);
+                string responseBody;
+                try
+                {
+                    responseBody = await ReadBoundedAsync(response, attemptTimeout.Token);
+                }
+                catch (Exception readFailure) when (readFailure is IOException or HttpRequestException or OperationCanceledException)
+                {
+                    responseBody = string.Empty;
+                }
 
                 if (status == 207)
                 {
