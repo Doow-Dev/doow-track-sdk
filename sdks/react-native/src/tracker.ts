@@ -37,6 +37,7 @@ export class Tracker {
   private queue: QueuedEvent[] = [];
   private flushTimer: ReturnType<typeof setInterval> | null = null;
   private shutdown = false;
+  private holdUntil = 0;
   private appStateSubscription: { remove: () => void } | null = null;
 
   constructor(apiKey: string, options: TrackerOptions = {}) {
@@ -119,7 +120,7 @@ export class Tracker {
     this.persistQueue();
     this.log(`Queued event: ${event.metric}`);
 
-    if (this.queue.length >= this.options.flushAt) {
+    if (this.queue.length >= this.options.flushAt && Date.now() >= this.holdUntil) {
       this.flush();
     }
   }
@@ -140,6 +141,7 @@ export class Tracker {
         notify(this.options.onError, error as Error);
         this.log(`Flush failed: ${error}`);
         if (!(error instanceof NonRetryableError)) {
+          this.holdUntil = Date.now() + this.options.flushIntervalMs;
           this.queue = [...batch.slice(i), ...this.queue];
           await this.persistQueue();
           return;

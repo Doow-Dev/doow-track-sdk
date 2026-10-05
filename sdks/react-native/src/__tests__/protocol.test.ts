@@ -134,6 +134,26 @@ describe('React Native wire protocol', () => {
     expect(resent.slice(0, 500)).toEqual(secondChunk);
   });
 
+  it('a transient failure holds count-triggered flushes until the next interval', async () => {
+    const calls = stubFetch([{ status: 503 }]);
+    const tracker = new Tracker('dk_test', {
+      persistQueue: false,
+      flushAt: 2,
+      flushIntervalMs: 60_000,
+      retryCount: 0,
+    });
+    tracker.track(event);
+    tracker.track(event);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(calls).toHaveLength(1);
+
+    tracker.track(event);
+    tracker.track(event);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(calls).toHaveLength(1);
+  });
+
   it('a permanent 4xx is reported and dropped instead of looping', async () => {
     const calls = stubFetch([{ status: 400, body: { message: 'bad' } }]);
     const onError = vi.fn();
