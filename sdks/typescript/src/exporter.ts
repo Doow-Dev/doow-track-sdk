@@ -528,7 +528,7 @@ export class Exporter {
       );
     }
 
-    // Other 4xx — don't retry
+    // Other 4xx are not retried here; the caller retries 408 because it is a timeout
     throw new SdkHttpError('TRANSPORT_ERROR', `HTTP ${response.status}`, response.status);
   }
 
