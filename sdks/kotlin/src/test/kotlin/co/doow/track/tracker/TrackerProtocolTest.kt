@@ -106,6 +106,46 @@ class TrackerProtocolTest {
         assertEquals("license_id is required", error.rejections.single().reason)
     }
 
+    private fun backlogTracker() = Tracker(
+        "dk_test",
+        TrackerOptions(
+            endpoint = "http://127.0.0.1:${server.address.port}",
+            flushIntervalMs = 0,
+            flushAt = 5000,
+            maxQueueSize = 5000,
+            retryCount = 0,
+            onError = { errors.add(it) }
+        )
+    )
+
+    @Test
+    fun flushOfMoreThan500EventsSendsChunksOfAtMost500WithDistinctBatchIds() {
+        val tracker = backlogTracker()
+        repeat(1200) { tracker.track(event()) }
+        tracker.flush()
+        tracker.shutdown()
+
+        assertEquals(listOf(500, 500, 200), bodies.map { it["events"]!!.jsonArray.size })
+        assertEquals(3, bodies.map { it["batch_id"]!!.jsonPrimitive.content }.distinct().size)
+        val eventIds = bodies.flatMap { body ->
+            body["events"]!!.jsonArray.map { it.jsonObject["event_id"]!!.jsonPrimitive.content }
+        }
+        assertEquals(1200, eventIds.distinct().size)
+        assertTrue(errors.isEmpty())
+    }
+
+    @Test
+    fun laterChunksAreStillSentAfterAChunkFailsPermanently() {
+        statuses = intArrayOf(400, 202)
+        val tracker = backlogTracker()
+        repeat(700) { tracker.track(event()) }
+        tracker.flush()
+        tracker.shutdown()
+
+        assertEquals(2, bodies.size)
+        assertEquals(1, errors.size)
+    }
+
     @Test
     fun clientErrorIsReportedAndLaterFlushesStillRun() {
         statuses = intArrayOf(400, 202)

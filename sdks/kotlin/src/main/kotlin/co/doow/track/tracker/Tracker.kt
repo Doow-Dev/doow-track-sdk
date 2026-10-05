@@ -96,7 +96,7 @@ class Tracker(
         }
         if (batch.isEmpty()) return
 
-        sendBatch(batch)
+        batch.chunked(MAX_BATCH_EVENTS).forEach { sendBatch(it) }
     }
 
     internal data class Pending(val eventId: String, val event: TrackEvent)
@@ -238,6 +238,7 @@ class Tracker(
         private const val MAX_RETRY_AFTER_MS = 30_000L
         private const val MAX_ERROR_TEXT = 512
         private const val MAX_BODY_CHARS = 1 shl 20
+        private const val MAX_BATCH_EVENTS = 500
 
         fun parseRetryAfterMs(header: String?): Long {
             val value = header?.trim().orEmpty()
