@@ -5,6 +5,7 @@ import gzip
 import json
 import os
 import threading
+import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -27,6 +28,11 @@ DEFAULT_TIMEOUT = 10.0
 DEFAULT_RETRY_COUNT = 3
 DEFAULT_SHUTDOWN_TIMEOUT = 5.0
 MAX_BATCH_EVENTS = 500
+
+_DELIVERED = "delivered"
+_ABANDONED = "abandoned"
+_STORED = "stored"
+_FAILED = "failed"
 
 
 
@@ -173,6 +179,7 @@ class Tracker:
 
         self._buffer: list[SerializedEvent] = []
         self._lock = threading.Lock()
+        self._hold_until = 0.0
         self._shutdown = threading.Event()
         self._rate_limit: Optional[RateLimit] = None
         self._client = httpx.Client(timeout=self._options.timeout)
@@ -230,7 +237,10 @@ class Tracker:
                 self._buffer.pop(0)
                 self._log("queue full, dropped oldest event")
             self._buffer.append(serialized)
-            should_flush = len(self._buffer) >= self._options.flush_at
+            should_flush = (
+                len(self._buffer) >= self._options.flush_at
+                and time.monotonic() >= self._hold_until
+            )
 
         if should_flush:
             threading.Thread(target=self.flush, daemon=True).start()
@@ -251,9 +261,21 @@ class Tracker:
                 return
 
         for start in range(0, len(events), MAX_BATCH_EVENTS):
-            self._send_batch(events[start : start + MAX_BATCH_EVENTS])
+            outcome = self._send_batch(events[start : start + MAX_BATCH_EVENTS])
+            if outcome in (_STORED, _FAILED):
+                resume = start + (MAX_BATCH_EVENTS if outcome == _STORED else 0)
+                self._requeue(events[resume:])
+                self._hold_until = time.monotonic() + self._options.flush_interval
+                return
 
-    def _send_batch(self, events: list[SerializedEvent]) -> None:
+    def _requeue(self, events: list[SerializedEvent]) -> None:
+        if not events or self._shutdown.is_set():
+            return
+        with self._lock:
+            self._buffer[:0] = events
+            del self._buffer[self._options.max_queue_size :]
+
+    def _send_batch(self, events: list[SerializedEvent]) -> str:
         batch_id = str(uuid.uuid4())
 
         payload = _build_payload(batch_id, events)
@@ -273,23 +295,24 @@ class Tracker:
                 error = self._do_send(body)
                 if error is None:
                     self._log(f"batch {batch_id} sent successfully")
-                    return
+                    return _DELIVERED
                 last_error = error
 
                 if isinstance(error, PartialAcceptError):
                     self._handle_error(error)
-                    return
+                    return _DELIVERED
 
                 if isinstance(error, APIError):
                     if _is_permanent(error.status):
                         self._handle_error(error)
-                        return
+                        return _ABANDONED
                     if error.status in (429, 503):
                         threading.Event().wait(getattr(error, "retry_after", 0.0))
             except Exception as e:
                 last_error = _wrap_transport_error(e)
 
         # All retries failed - try offline store
+        stored = False
         if self._options.offline_store and last_error:
             try:
                 self._options.offline_store.push({
@@ -298,11 +321,13 @@ class Tracker:
                     "timestamp": datetime.utcnow().isoformat(),
                 })
                 self._log(f"batch {batch_id} saved to offline store")
+                stored = True
             except Exception as e:
                 self._handle_error(e)
 
         if last_error:
             self._handle_error(last_error)
+        return _STORED if stored else _FAILED
 
     def _do_send(self, body: bytes) -> Optional[Exception]:
         headers = {
@@ -431,6 +456,7 @@ class AsyncTracker:
 
         self._buffer: list[SerializedEvent] = []
         self._lock = asyncio.Lock()
+        self._hold_until = 0.0
         self._shutdown = False
         self._rate_limit: Optional[RateLimit] = None
         self._client: Optional[httpx.AsyncClient] = None
@@ -482,7 +508,10 @@ class AsyncTracker:
             if len(self._buffer) >= self._options.max_queue_size:
                 self._buffer.pop(0)
             self._buffer.append(serialized)
-            should_flush = len(self._buffer) >= self._options.flush_at
+            should_flush = (
+                len(self._buffer) >= self._options.flush_at
+                and time.monotonic() >= self._hold_until
+            )
 
         if should_flush:
             asyncio.create_task(self.flush())
@@ -501,9 +530,20 @@ class AsyncTracker:
                 return
 
         for start in range(0, len(events), MAX_BATCH_EVENTS):
-            await self._send_batch(events[start : start + MAX_BATCH_EVENTS])
+            outcome = await self._send_batch(events[start : start + MAX_BATCH_EVENTS])
+            if outcome == _FAILED:
+                await self._requeue(events[start:])
+                self._hold_until = time.monotonic() + self._options.flush_interval
+                return
 
-    async def _send_batch(self, events: list[SerializedEvent]) -> None:
+    async def _requeue(self, events: list[SerializedEvent]) -> None:
+        if not events or self._shutdown:
+            return
+        async with self._lock:
+            self._buffer[:0] = events
+            del self._buffer[self._options.max_queue_size :]
+
+    async def _send_batch(self, events: list[SerializedEvent]) -> str:
         batch_id = str(uuid.uuid4())
 
         payload = _build_payload(batch_id, events)
@@ -523,6 +563,7 @@ class AsyncTracker:
             headers["Content-Encoding"] = "gzip"
 
         last_error: Optional[Exception] = None
+        permanent = False
         for attempt in range(self._options.retry_count + 1):
             if attempt > 0:
                 await asyncio.sleep(min(0.1 * (2 ** (attempt - 1)), 10.0))
@@ -539,18 +580,20 @@ class AsyncTracker:
 
             if response.status_code == 207:
                 _notify(self._options.on_error, PartialAcceptError.from_response(response))
-                return
+                return _DELIVERED
             if response.status_code < 400:
                 self._log(f"batch {batch_id} sent successfully")
-                return
+                return _DELIVERED
             last_error = APIError(status=response.status_code, message=response.reason_phrase)
             if _is_permanent(response.status_code):
+                permanent = True
                 break
             if response.status_code in (429, 503):
                 await asyncio.sleep(_retry_after(response.headers.get("Retry-After")))
 
         if last_error:
             _notify(self._options.on_error, last_error)
+        return _ABANDONED if permanent else _FAILED
 
     async def _flush_loop(self) -> None:
         while not self._shutdown:

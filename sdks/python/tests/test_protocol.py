@@ -99,7 +99,6 @@ async def test_async_server_failure_reaches_on_error(httpx_mock):
     errors: list = []
     tracker = AsyncTracker("dk_test", _options(errors, retry_count=1))
     await tracker.track(_event())
-    await tracker.flush()
     await tracker.shutdown()
 
     assert len(errors) == 1
@@ -182,6 +181,89 @@ async def test_async_flush_of_more_than_500_events_sends_chunks_of_at_most_500(h
     assert len(batch_ids) == 3
     assert len(set(event_ids)) == 1200
     assert errors == []
+
+
+def test_transient_failure_requeues_that_chunk_and_every_later_chunk(httpx_mock):
+    httpx_mock.add_response(status_code=202, json={"accepted": 500, "rejected": 0})
+    httpx_mock.add_response(status_code=503)
+    errors: list = []
+    tracker = Tracker("dk_test", _backlog_options(errors, disable_compression=True))
+    for _ in range(1200):
+        tracker.track(_event())
+    tracker.flush()
+    tracker._shutdown.set()
+
+    requests = httpx_mock.get_requests()
+    assert len(requests) == 2
+    assert len(errors) == 1
+    failed_chunk = [e["event_id"] for e in json.loads(requests[1].content)["events"]]
+    assert len(tracker._buffer) == 700
+    assert [e.event_id for e in tracker._buffer[:500]] == failed_chunk
+
+
+def test_a_chunk_saved_to_the_offline_store_is_not_requeued_again(httpx_mock):
+    class Store:
+        def __init__(self):
+            self.pushed: list = []
+
+        def push(self, item):
+            self.pushed.append(item)
+
+        def shift(self):
+            return None
+
+    store = Store()
+    httpx_mock.add_response(status_code=503)
+    errors: list = []
+    tracker = Tracker(
+        "dk_test",
+        _backlog_options(errors, disable_compression=True, offline_store=store),
+    )
+    for _ in range(1200):
+        tracker.track(_event())
+    tracker.flush()
+    tracker._shutdown.set()
+
+    assert len(httpx_mock.get_requests()) == 1
+    assert len(store.pushed) == 1
+    assert len(tracker._buffer) == 700
+
+
+def test_a_transient_failure_holds_count_triggered_flushes(httpx_mock):
+    import time
+
+    errors: list = []
+    options = _backlog_options(errors, disable_compression=True)
+    options.flush_at = 2
+    tracker = Tracker("dk_test", options)
+    tracker._hold_until = time.monotonic() + 100
+    tracker.track(_event())
+    tracker.track(_event())
+    time.sleep(0.1)
+    tracker._shutdown.set()
+
+    assert httpx_mock.get_requests() == []
+    assert len(tracker._buffer) == 2
+
+
+@pytest.mark.asyncio
+async def test_async_transient_failure_requeues_that_chunk_and_every_later_chunk(httpx_mock):
+    httpx_mock.add_response(status_code=202, json={"accepted": 500, "rejected": 0})
+    httpx_mock.add_response(status_code=503)
+    errors: list = []
+    tracker = AsyncTracker("dk_test", _backlog_options(errors, disable_compression=True))
+    for _ in range(1200):
+        await tracker.track(_event())
+    await tracker.flush()
+
+    requests = httpx_mock.get_requests()
+    assert len(requests) == 2
+    assert len(errors) == 1
+    failed_chunk = [e["event_id"] for e in json.loads(requests[1].content)["events"]]
+    assert len(tracker._buffer) == 700
+    assert [e.event_id for e in tracker._buffer[:500]] == failed_chunk
+    tracker._buffer.clear()
+    await tracker.shutdown()
 
 
 @pytest.mark.asyncio
