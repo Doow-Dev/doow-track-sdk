@@ -101,6 +101,62 @@ void main() {
     expect(posted, 2);
   });
 
+  Tracker backlogTracker(MockClient client, List<DoowError> errors) => Tracker(
+        'dk_test',
+        TrackerOptions(
+          flushInterval: const Duration(hours: 1),
+          flushAt: 5000,
+          maxQueueSize: 5000,
+          retryCount: 0,
+          disableCompression: true,
+          onError: errors.add,
+          httpClient: client,
+        ),
+      );
+
+  test('a flush of more than 500 events sends chunks of at most 500 with distinct batch ids', () async {
+    final bodies = <Map<String, dynamic>>[];
+    final client = MockClient((request) async {
+      bodies.add(jsonDecode(request.body) as Map<String, dynamic>);
+      return http.Response('', 202);
+    });
+    final errors = <DoowError>[];
+    final tracker = backlogTracker(client, errors);
+
+    for (var i = 0; i < 1200; i++) {
+      tracker.track(sampleEvent());
+    }
+    await tracker.flush();
+    await tracker.shutdown();
+
+    expect(bodies.map((b) => (b['events'] as List).length).toList(), [500, 500, 200]);
+    expect(bodies.map((b) => b['batch_id']).toSet().length, 3);
+    final eventIds = bodies
+        .expand((b) => (b['events'] as List).map((e) => (e as Map)['event_id']))
+        .toSet();
+    expect(eventIds.length, 1200);
+    expect(errors, isEmpty);
+  });
+
+  test('later chunks are still sent after a chunk fails permanently', () async {
+    var calls = 0;
+    final client = MockClient((request) async {
+      calls++;
+      return calls == 1 ? http.Response('bad', 400) : http.Response('', 202);
+    });
+    final errors = <DoowError>[];
+    final tracker = backlogTracker(client, errors);
+
+    for (var i = 0; i < 700; i++) {
+      tracker.track(sampleEvent());
+    }
+    await tracker.flush();
+    await tracker.shutdown();
+
+    expect(calls, 2);
+    expect(errors.length, 1);
+  });
+
   test('retries reuse the same batch id', () async {
     final ids = <String>[];
     final eventIds = <String>[];

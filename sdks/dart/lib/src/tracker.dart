@@ -7,6 +7,8 @@ import 'package:archive/archive.dart';
 import 'types.dart';
 import 'errors.dart';
 
+const _maxBatchEvents = 500;
+
 class TrackerOptions {
   final String endpoint;
   final bool enabled;
@@ -163,11 +165,14 @@ class Tracker {
 
     _log('Flushing ${batch.length} events');
 
-    try {
-      await _sendWithRetry(batch);
-    } catch (e) {
-      _notify(e is DoowError ? e : DoowError(sanitizeText(e)));
-      _log('Flush failed: $e');
+    for (var start = 0; start < batch.length; start += _maxBatchEvents) {
+      try {
+        await _sendWithRetry(
+            batch.sublist(start, min(start + _maxBatchEvents, batch.length)));
+      } catch (e) {
+        _notify(e is DoowError ? e : DoowError(sanitizeText(e)));
+        _log('Flush failed: $e');
+      }
     }
   }
 
