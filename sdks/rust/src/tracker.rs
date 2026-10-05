@@ -9,8 +9,9 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::Write;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::{mpsc, Mutex, RwLock};
 use uuid::Uuid;
 
@@ -198,6 +199,14 @@ pub struct Tracker {
     buffer: Arc<Mutex<Vec<SerializedEvent>>>,
     shutdown_tx: Option<mpsc::Sender<()>>,
     shutdown_complete: Arc<RwLock<bool>>,
+    hold_until: Arc<AtomicU64>,
+}
+
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
 }
 
 impl Tracker {
@@ -213,6 +222,7 @@ impl Tracker {
 
         let buffer = Arc::new(Mutex::new(Vec::with_capacity(options.max_queue_size)));
         let shutdown_complete = Arc::new(RwLock::new(false));
+        let hold_until = Arc::new(AtomicU64::new(0));
 
         let (shutdown_tx, shutdown_rx) = mpsc::channel(1);
 
@@ -223,6 +233,7 @@ impl Tracker {
             buffer: buffer.clone(),
             shutdown_tx: Some(shutdown_tx),
             shutdown_complete: shutdown_complete.clone(),
+            hold_until: hold_until.clone(),
         };
 
         // Start flush loop
@@ -232,6 +243,7 @@ impl Tracker {
             let flush_client = client;
             let flush_api_key = api_key;
             let flush_shutdown_complete = shutdown_complete;
+            let flush_hold_until = hold_until;
 
             tokio::spawn(async move {
                 Self::flush_loop(
@@ -241,6 +253,7 @@ impl Tracker {
                     flush_api_key,
                     shutdown_rx,
                     flush_shutdown_complete,
+                    flush_hold_until,
                 )
                 .await;
             });
@@ -305,7 +318,8 @@ impl Tracker {
         }
         buffer.push(serialized);
 
-        let should_flush = buffer.len() >= self.options.flush_at;
+        let should_flush = buffer.len() >= self.options.flush_at
+            && now_ms() >= self.hold_until.load(Ordering::Relaxed);
         drop(buffer);
 
         if should_flush {
@@ -327,11 +341,32 @@ impl Tracker {
     }
 
     async fn send_in_chunks(&self, events: Vec<SerializedEvent>) {
+        let mut sent = 0;
         for chunk in events.chunks(MAX_BATCH_EVENTS) {
             if let Err(e) = self.send_batch(chunk.to_vec()).await {
                 Self::report(&self.options, &e);
+                if e.is_retryable() {
+                    self.requeue(events[sent..].to_vec()).await;
+                    self.hold_until.store(
+                        now_ms() + self.options.flush_interval_ms,
+                        Ordering::Relaxed,
+                    );
+                    return;
+                }
             }
+            sent += chunk.len();
         }
+    }
+
+    async fn requeue(&self, events: Vec<SerializedEvent>) {
+        if events.is_empty() {
+            return;
+        }
+        let mut buffer = self.buffer.lock().await;
+        let mut restored = events;
+        restored.append(&mut buffer);
+        restored.truncate(self.options.max_queue_size);
+        *buffer = restored;
     }
 
     async fn send_batch(&self, events: Vec<SerializedEvent>) -> Result<()> {
@@ -461,6 +496,7 @@ impl Tracker {
         api_key: String,
         mut shutdown_rx: mpsc::Receiver<()>,
         shutdown_complete: Arc<RwLock<bool>>,
+        hold_until: Arc<AtomicU64>,
     ) {
         let interval = Duration::from_millis(options.flush_interval_ms);
 
@@ -482,6 +518,7 @@ impl Tracker {
                         buffer: buffer.clone(),
                         shutdown_tx: None,
                         shutdown_complete: shutdown_complete.clone(),
+                        hold_until: hold_until.clone(),
                     };
 
                     tracker.send_in_chunks(events).await;
@@ -501,6 +538,7 @@ impl Tracker {
                             buffer: buffer.clone(),
                             shutdown_tx: None,
                             shutdown_complete: shutdown_complete.clone(),
+                            hold_until: hold_until.clone(),
                         };
                         tracker.send_in_chunks(events).await;
                     }
@@ -844,6 +882,71 @@ mod tests {
 
         assert_eq!(server.received_requests().await.unwrap().len(), 2);
         assert_eq!(*reported.lock().unwrap(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_transient_failure_requeues_that_chunk_and_every_later_chunk() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/telemetry/events"))
+            .respond_with(ResponseTemplate::new(202))
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/telemetry/events"))
+            .respond_with(ResponseTemplate::new(503))
+            .mount(&server)
+            .await;
+        let tracker = Tracker::new(
+            "dk_test",
+            Some(TrackerOptions {
+                endpoint: server.uri(),
+                retry_count: 0,
+                flush_at: 5000,
+                max_queue_size: 5000,
+                disable_compression: true,
+                ..Default::default()
+            }),
+        );
+        let events: Vec<SerializedEvent> = (0..1200).map(|i| event(&format!("e{i}"))).collect();
+        tracker.buffer.lock().await.extend(events);
+        tracker.flush().await;
+
+        let requests = server.received_requests().await.unwrap();
+        assert_eq!(requests.len(), 2);
+        let failed_chunk: Vec<String> = serde_json::from_slice::<serde_json::Value>(&requests[1].body)
+            .unwrap()["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| e["event_id"].as_str().unwrap().to_string())
+            .collect();
+        let buffer = tracker.buffer.lock().await;
+        assert_eq!(buffer.len(), 700);
+        let requeued: Vec<String> = buffer.iter().take(500).map(|e| e.event_id.clone()).collect();
+        assert_eq!(requeued, failed_chunk);
+    }
+
+    #[tokio::test]
+    async fn a_transient_failure_holds_count_triggered_flushes() {
+        let server = MockServer::start().await;
+        let tracker = Tracker::new(
+            "dk_test",
+            Some(TrackerOptions {
+                endpoint: server.uri(),
+                retry_count: 0,
+                flush_at: 2,
+                disable_compression: true,
+                ..Default::default()
+            }),
+        );
+        tracker.hold_until.store(now_ms() + 100_000, Ordering::Relaxed);
+        tracker.track(TrackEvent::default()).await;
+        tracker.track(TrackEvent::default()).await;
+
+        assert_eq!(server.received_requests().await.unwrap().len(), 0);
+        assert_eq!(tracker.buffer.lock().await.len(), 2);
     }
 
     #[tokio::test]
