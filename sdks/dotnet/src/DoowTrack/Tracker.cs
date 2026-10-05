@@ -27,6 +27,7 @@ public class Tracker : IDisposable
     private readonly TrackerOptions _options;
     private readonly HttpClient _httpClient;
     private const string SdkVersion = "0.1.1";
+    private const int MaxBatchEvents = 500;
 
     private readonly List<Pending> _buffer = new();
     private readonly object _lock = new();
@@ -142,14 +143,22 @@ public class Tracker : IDisposable
 
     public async Task FlushAsync()
     {
-        List<Pending> batch;
+        List<Pending> pending;
         lock (_lock)
         {
             if (_buffer.Count == 0) return;
-            batch = new List<Pending>(_buffer);
+            pending = new List<Pending>(_buffer);
             _buffer.Clear();
         }
 
+        for (var start = 0; start < pending.Count; start += MaxBatchEvents)
+        {
+            await SendBatchAsync(pending.GetRange(start, Math.Min(MaxBatchEvents, pending.Count - start)));
+        }
+    }
+
+    private async Task SendBatchAsync(List<Pending> batch)
+    {
         var batchId = Guid.NewGuid().ToString();
         byte[] body;
         bool gzipped;

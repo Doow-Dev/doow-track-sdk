@@ -39,14 +39,14 @@ public class TrackerProtocolTests
             throw new InvalidOperationException("handler exploded");
     }
 
-    private static (Tracker Tracker, List<Exception> Errors) Create(StubHandler handler, int retryCount = 1)
+    private static (Tracker Tracker, List<Exception> Errors) Create(StubHandler handler, int retryCount = 1, int flushAt = 1000)
     {
         var errors = new List<Exception>();
         var tracker = new Tracker("dk_test", new TrackerOptions
         {
             Endpoint = "https://test.doow.co",
             FlushIntervalMs = 0,
-            FlushAt = 1000,
+            FlushAt = flushAt,
             RetryCount = retryCount,
             OnError = errors.Add,
             HttpHandler = handler,
@@ -100,6 +100,36 @@ public class TrackerProtocolTests
         var error = Assert.IsType<PartialAcceptError>(Assert.Single(errors));
         Assert.Equal("evt-x", error.Rejections[0].EventId);
         Assert.Equal("license_id is required", error.Rejections[0].Reason);
+    }
+
+    [Fact]
+    public async Task FlushOfMoreThan500EventsSendsChunksOfAtMost500WithDistinctBatchIds()
+    {
+        var handler = new StubHandler((202, "{}"));
+        var (tracker, errors) = Create(handler, retryCount: 0, flushAt: 5000);
+        for (var i = 0; i < 1200; i++) tracker.Track(Event());
+        await tracker.FlushAsync();
+
+        Assert.Equal(new[] { 500, 500, 200 }, handler.Requests.Select(r => r.Body.GetProperty("events").GetArrayLength()));
+        Assert.Equal(3, handler.Requests.Select(r => r.Body.GetProperty("batch_id").GetString()).Distinct().Count());
+        var eventIds = handler.Requests
+            .SelectMany(r => r.Body.GetProperty("events").EnumerateArray().Select(e => e.GetProperty("event_id").GetString()))
+            .Distinct()
+            .Count();
+        Assert.Equal(1200, eventIds);
+        Assert.Empty(errors);
+    }
+
+    [Fact]
+    public async Task LaterChunksAreStillSentAfterAChunkFailsPermanently()
+    {
+        var handler = new StubHandler((400, "bad"), (202, "{}"));
+        var (tracker, errors) = Create(handler, retryCount: 0, flushAt: 5000);
+        for (var i = 0; i < 700; i++) tracker.Track(Event());
+        await tracker.FlushAsync();
+
+        Assert.Equal(2, handler.Requests.Count);
+        Assert.Single(errors);
     }
 
     [Fact]
