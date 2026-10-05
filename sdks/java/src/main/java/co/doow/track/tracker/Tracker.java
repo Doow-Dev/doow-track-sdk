@@ -118,6 +118,7 @@ public class Tracker implements AutoCloseable {
 
         for (int start = 0; start < batch.size(); start += MAX_BATCH_EVENTS) {
             sendBatch(new ArrayList<>(batch.subList(start, Math.min(start + MAX_BATCH_EVENTS, batch.size()))));
+            if (Thread.currentThread().isInterrupted()) break;
         }
     }
 

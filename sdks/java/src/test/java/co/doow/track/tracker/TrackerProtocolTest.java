@@ -153,6 +153,22 @@ class TrackerProtocolTest {
     }
 
     @Test
+    void anInterruptedFlushStopsAfterTheChunkInProgress() {
+        Tracker tracker = backlogTracker();
+        for (int i = 0; i < 1200; i++) tracker.track(event());
+        Thread.currentThread().interrupt();
+        try {
+            tracker.flush();
+            assertTrue(Thread.currentThread().isInterrupted());
+        } finally {
+            Thread.interrupted();
+        }
+        tracker.shutdown();
+
+        assertEquals(1, bodies.size());
+    }
+
+    @Test
     void laterChunksAreStillSentAfterAChunkFailsPermanently() {
         statuses = new int[] {400, 202};
         Tracker tracker = backlogTracker();
