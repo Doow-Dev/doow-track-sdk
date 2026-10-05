@@ -4,6 +4,7 @@
 
 ### Batch size
 
+- After a transient failure the remaining chunks are requeued instead of each spending a full retry budget, and count-triggered flushes pause until the next flush interval.
 - `flush`, the interval flush, and the shutdown flush send more than 500 events as separate requests of at most 500 events, each with its own batch id.
 
 ### Breaking changes
