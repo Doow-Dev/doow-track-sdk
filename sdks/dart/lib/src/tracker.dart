@@ -98,6 +98,7 @@ class Tracker {
   final List<Map<String, dynamic>> _queue = [];
   Timer? _flushTimer;
   bool _shutdown = false;
+  DateTime _holdUntil = DateTime.fromMillisecondsSinceEpoch(0);
 
   Tracker(String apiKey, [TrackerOptions? options])
       : _apiKey = _resolveApiKey(apiKey),
@@ -152,7 +153,8 @@ class Tracker {
     _queue.add(toWireEvent({...data, 'event_id': _uuidV4()}));
     _log('Queued event: ${event.metric}');
 
-    if (_queue.length >= _options.flushAt) {
+    if (_queue.length >= _options.flushAt &&
+        !DateTime.now().isBefore(_holdUntil)) {
       flush();
     }
   }
@@ -172,7 +174,26 @@ class Tracker {
       } catch (e) {
         _notify(e is DoowError ? e : DoowError(sanitizeText(e)));
         _log('Flush failed: $e');
+        if (_isTransient(e)) {
+          _requeue(batch.sublist(start));
+          _holdUntil = DateTime.now().add(_options.flushInterval);
+          return;
+        }
       }
+    }
+  }
+
+  bool _isTransient(Object error) {
+    if (error is! DoowError) return true;
+    final status = error.statusCode ?? 0;
+    return status == 429 || status >= 500;
+  }
+
+  void _requeue(List<Map<String, dynamic>> events) {
+    if (_shutdown) return;
+    _queue.insertAll(0, events);
+    if (_queue.length > _options.maxQueueSize) {
+      _queue.removeRange(_options.maxQueueSize, _queue.length);
     }
   }
 

@@ -138,6 +138,67 @@ void main() {
     expect(errors, isEmpty);
   });
 
+  test('a transient failure requeues that chunk and every later chunk and sends nothing more', () async {
+    final bodies = <Map<String, dynamic>>[];
+    var healthy = false;
+    final client = MockClient((request) async {
+      bodies.add(jsonDecode(request.body) as Map<String, dynamic>);
+      if (healthy || bodies.length == 1) return http.Response('', 202);
+      return http.Response('down', 503);
+    });
+    final errors = <DoowError>[];
+    final tracker = backlogTracker(client, errors);
+
+    for (var i = 0; i < 1200; i++) {
+      tracker.track(sampleEvent());
+    }
+    await tracker.flush();
+
+    expect(bodies.length, 2);
+    expect(errors.length, 1);
+    final failedChunk = (bodies[1]['events'] as List)
+        .map((e) => (e as Map)['event_id'])
+        .toList();
+
+    healthy = true;
+    bodies.clear();
+    await tracker.flush();
+
+    final resent = bodies
+        .expand((b) => (b['events'] as List).map((e) => (e as Map)['event_id']))
+        .toList();
+    expect(resent.length, 700);
+    expect(resent.take(500).toList(), failedChunk);
+  });
+
+  test('a transient failure holds count-triggered flushes until the next interval', () async {
+    var calls = 0;
+    final client = MockClient((request) async {
+      calls++;
+      return http.Response('down', 503);
+    });
+    final tracker = Tracker(
+      'dk_test',
+      TrackerOptions(
+        flushInterval: const Duration(hours: 1),
+        flushAt: 2,
+        retryCount: 0,
+        disableCompression: true,
+        httpClient: client,
+      ),
+    );
+
+    tracker.track(sampleEvent());
+    tracker.track(sampleEvent());
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    expect(calls, 1);
+
+    tracker.track(sampleEvent());
+    tracker.track(sampleEvent());
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    expect(calls, 1);
+  });
+
   test('later chunks are still sent after a chunk fails permanently', () async {
     var calls = 0;
     final client = MockClient((request) async {
