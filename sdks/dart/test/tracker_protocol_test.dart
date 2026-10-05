@@ -399,6 +399,51 @@ void main() {
     expect(errors.single, isA<PartialAcceptError>());
   });
 
+  for (final status in [207, 400, 503]) {
+    test('reads at most 64 KiB of a $status response body', () async {
+      const chunk = 64 * 1024;
+      var read = 0;
+      final client = MockClient.streaming((request, body) async {
+        final chunks = Stream.fromIterable(
+            List.generate(20, (_) => List<int>.filled(chunk, 120))).map((c) {
+          read += c.length;
+          return c;
+        });
+        return http.StreamedResponse(chunks, status);
+      });
+      final errors = <DoowError>[];
+      final tracker = trackerFor(client, errors, retries: 0);
+
+      tracker.track(sampleEvent());
+      await tracker.flush();
+      await tracker.shutdown();
+
+      expect(read, lessThanOrEqualTo(2 * (64 * 1024 + chunk)));
+      expect(errors, isNotEmpty);
+    });
+  }
+
+  test('a small 207 body is still parsed', () async {
+    final client = MockClient((request) async => http.Response(
+        jsonEncode({
+          'accepted': 1,
+          'rejected': 1,
+          'batch_id': 'b',
+          'rejections': [
+            {'event_id': 'evt-x', 'reason': 'bad'}
+          ],
+        }),
+        207));
+    final errors = <DoowError>[];
+    final tracker = trackerFor(client, errors, retries: 0);
+
+    tracker.track(sampleEvent());
+    await tracker.flush();
+    await tracker.shutdown();
+
+    expect((errors.single as PartialAcceptError).rejections.single.eventId, 'evt-x');
+  });
+
   test('server text is sanitized and truncated', () {
     final cleaned = sanitizeText('line1\nline2\x1b[31m\x9b31m${'x' * 2000}');
     expect(cleaned.contains('\n'), isFalse);

@@ -8,6 +8,15 @@ import 'types.dart';
 import 'errors.dart';
 
 const _maxBatchEvents = 500;
+const _maxResponseBytes = 64 * 1024;
+
+class _Reply {
+  final int statusCode;
+  final Map<String, String> headers;
+  final String body;
+
+  _Reply(this.statusCode, this.headers, this.body);
+}
 
 class TrackerOptions {
   final String endpoint;
@@ -224,16 +233,13 @@ class Tracker {
       body = bytes;
     }
 
-    final client = _options.httpClient;
     final uri = Uri.parse('${_options.endpoint}/telemetry/events');
 
     for (var attempt = 0; attempt <= _options.retryCount; attempt++) {
       final isLastAttempt = attempt == _options.retryCount;
       try {
-        final response = await (client != null
-                ? client.post(uri, headers: headers, body: body)
-                : http.post(uri, headers: headers, body: body))
-            .timeout(_options.timeout);
+        final response =
+            await _post(uri, headers, body).timeout(_options.timeout);
 
         if (response.statusCode == 207) {
           _notify(PartialAcceptError.fromBody(response.body, batchId));
@@ -270,6 +276,28 @@ class Tracker {
         if (isLastAttempt) rethrow;
         await Future.delayed(Duration(milliseconds: 100 * (1 << attempt)));
       }
+    }
+  }
+
+  Future<_Reply> _post(
+      Uri uri, Map<String, String> headers, List<int> body) async {
+    final owned = _options.httpClient == null;
+    final client = _options.httpClient ?? http.Client();
+    try {
+      final request = http.Request('POST', uri)
+        ..headers.addAll(headers)
+        ..bodyBytes = body;
+      final response = await client.send(request);
+      final received = <int>[];
+      await for (final chunk in response.stream) {
+        final room = _maxResponseBytes - received.length;
+        received.addAll(chunk.length > room ? chunk.sublist(0, room) : chunk);
+        if (received.length >= _maxResponseBytes) break;
+      }
+      return _Reply(response.statusCode, response.headers,
+          utf8.decode(received, allowMalformed: true));
+    } finally {
+      if (owned) client.close();
     }
   }
 
