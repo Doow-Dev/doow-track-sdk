@@ -21,7 +21,7 @@ final class TrackerProtocolTest extends TestCase
     private array $history = [];
     private array $errors = [];
 
-    private function tracker(array $responses, int $retryCount = 2): Tracker
+    private function tracker(array $responses, int $retryCount = 2, int $flushAt = 1000): Tracker
     {
         $this->history = [];
         $this->errors = [];
@@ -29,7 +29,7 @@ final class TrackerProtocolTest extends TestCase
         $stack->push(Middleware::history($this->history));
 
         return new Tracker('dk_test', new TrackerOptions(
-            flushAt: 1000,
+            flushAt: $flushAt,
             retryCount: $retryCount,
             onError: function (\Throwable $e): void {
                 $this->errors[] = $e;
@@ -118,6 +118,49 @@ final class TrackerProtocolTest extends TestCase
 
         $this->assertSame('gzip', $this->history[0]['request']->getHeaderLine('Content-Encoding'));
         $this->assertCount(300, $this->body(0)['events']);
+    }
+
+    public function testAFlushOfMoreThan500EventsSendsChunksOfAtMost500WithDistinctBatchIds(): void
+    {
+        $tracker = $this->tracker(
+            [new Response(202), new Response(202), new Response(202)],
+            0,
+            5000,
+        );
+        for ($i = 0; $i < 1200; $i++) {
+            $tracker->track($this->event());
+        }
+        $tracker->flush();
+
+        $this->assertCount(3, $this->history);
+        $sizes = array_map(fn ($i) => count($this->body($i)['events']), [0, 1, 2]);
+        $this->assertSame([500, 500, 200], $sizes);
+        $batchIds = array_map(fn ($i) => $this->body($i)['batch_id'], [0, 1, 2]);
+        $this->assertCount(3, array_unique($batchIds));
+        $eventIds = [];
+        foreach ([0, 1, 2] as $i) {
+            foreach ($this->body($i)['events'] as $event) {
+                $eventIds[] = $event['event_id'];
+            }
+        }
+        $this->assertCount(1200, array_unique($eventIds));
+        $this->assertSame([], $this->errors);
+    }
+
+    public function testLaterChunksAreStillSentAfterAChunkFailsPermanently(): void
+    {
+        $tracker = $this->tracker(
+            [new Response(400, [], '{"message":"bad"}'), new Response(202)],
+            0,
+            5000,
+        );
+        for ($i = 0; $i < 700; $i++) {
+            $tracker->track($this->event());
+        }
+        $tracker->flush();
+
+        $this->assertCount(2, $this->history);
+        $this->assertCount(1, $this->errors);
     }
 
     public function testPermanentClientErrorIsReportedOnceAndNotRetried(): void

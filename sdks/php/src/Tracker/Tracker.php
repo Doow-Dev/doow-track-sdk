@@ -52,6 +52,7 @@ class Tracker
 {
     private const SDK_VERSION = '0.1.0';
     private const MAX_BODY_BYTES = 1048576;
+    private const MAX_BATCH_EVENTS = 500;
 
     private string $apiKey;
     private TrackerOptions $options;
@@ -122,15 +123,17 @@ class Tracker
         $events = $this->buffer;
         $this->buffer = [];
 
-        try {
-            $this->sendBatch($events);
-        } catch (\Exception $e) {
-            $this->log("flush error: {$e->getMessage()}");
-            if ($this->options->onError) {
-                try {
-                    ($this->options->onError)($e);
-                } catch (\Throwable) {
-                    $this->log('onError handler threw');
+        foreach (array_chunk($events, self::MAX_BATCH_EVENTS) as $chunk) {
+            try {
+                $this->sendBatch($chunk);
+            } catch (\Exception $e) {
+                $this->log("flush error: {$e->getMessage()}");
+                if ($this->options->onError) {
+                    try {
+                        ($this->options->onError)($e);
+                    } catch (\Throwable) {
+                        $this->log('onError handler threw');
+                    }
                 }
             }
         }
