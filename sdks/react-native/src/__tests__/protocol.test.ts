@@ -134,6 +134,37 @@ describe('React Native wire protocol', () => {
     expect(resent.slice(0, 500)).toEqual(secondChunk);
   });
 
+  it('a requeue never grows the queue past maxQueueSize', async () => {
+    stubFetch([{ status: 503 }]);
+    const tracker = new Tracker('dk_test', {
+      persistQueue: false,
+      flushAt: 5000,
+      maxQueueSize: 600,
+      flushIntervalMs: 60_000,
+      retryCount: 0,
+    });
+    for (let i = 0; i < 600; i++) tracker.track(event);
+    const flushing = tracker.flush();
+    for (let i = 0; i < 300; i++) tracker.track(event);
+    await flushing;
+
+    expect((tracker as unknown as { queue: unknown[] }).queue.length).toBeLessThanOrEqual(600);
+  });
+
+  it('an event that cannot be serialized is reported and dropped instead of being requeued forever', async () => {
+    const calls = stubFetch([{ status: 202 }]);
+    const onError = vi.fn();
+    const tracker = new Tracker('dk_test', { persistQueue: false, flushIntervalMs: 60_000, onError, retryCount: 0 });
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+    tracker.track({ ...event, attribution: circular });
+    await tracker.flush();
+
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(calls).toHaveLength(0);
+    expect((tracker as unknown as { queue: unknown[] }).queue).toHaveLength(0);
+  });
+
   it('a transient failure holds count-triggered flushes until the next interval', async () => {
     const calls = stubFetch([{ status: 503 }]);
     const tracker = new Tracker('dk_test', {

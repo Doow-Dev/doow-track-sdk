@@ -142,7 +142,7 @@ export class Tracker {
         this.log(`Flush failed: ${error}`);
         if (!(error instanceof NonRetryableError)) {
           this.holdUntil = Date.now() + this.options.flushIntervalMs;
-          this.queue = [...batch.slice(i), ...this.queue];
+          this.queue = [...batch.slice(i), ...this.queue].slice(0, this.options.maxQueueSize);
           await this.persistQueue();
           return;
         }
@@ -152,7 +152,12 @@ export class Tracker {
 
   private async sendWithRetry(batch: QueuedEvent[]): Promise<void> {
     const batchId = generateUUID();
-    const payload = JSON.stringify(toWireBatch(batchId, batch));
+    let payload: string;
+    try {
+      payload = JSON.stringify(toWireBatch(batchId, batch));
+    } catch (error) {
+      throw new NonRetryableError(`Could not serialize events: ${sanitizeText(String(error))}`);
+    }
 
     for (let attempt = 0; attempt <= this.options.retryCount; attempt++) {
       try {
