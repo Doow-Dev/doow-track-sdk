@@ -171,6 +171,26 @@ void main() {
     expect(resent.take(500).toList(), failedChunk);
   });
 
+  test('a 408 request timeout is retried with the same batch id', () async {
+    final ids = <String>[];
+    var calls = 0;
+    final client = MockClient((request) async {
+      calls++;
+      ids.add((jsonDecode(request.body) as Map)['batch_id'] as String);
+      return calls == 1 ? http.Response('', 408) : http.Response('', 202);
+    });
+    final errors = <DoowError>[];
+    final tracker = trackerFor(client, errors, retries: 1);
+
+    tracker.track(sampleEvent());
+    await tracker.flush();
+    await tracker.shutdown();
+
+    expect(calls, 2);
+    expect(ids[0], ids[1]);
+    expect(errors, isEmpty);
+  });
+
   test('an event that cannot be serialized is reported and dropped instead of being requeued forever', () async {
     var calls = 0;
     final client = MockClient((request) async {

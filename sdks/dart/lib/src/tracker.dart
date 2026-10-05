@@ -98,7 +98,8 @@ class Tracker {
   final List<Map<String, dynamic>> _queue = [];
   Timer? _flushTimer;
   bool _shutdown = false;
-  DateTime _holdUntil = DateTime.fromMillisecondsSinceEpoch(0);
+  final Stopwatch _clock = Stopwatch()..start();
+  Duration _holdUntil = Duration.zero;
 
   Tracker(String apiKey, [TrackerOptions? options])
       : _apiKey = _resolveApiKey(apiKey),
@@ -153,8 +154,7 @@ class Tracker {
     _queue.add(toWireEvent({...data, 'event_id': _uuidV4()}));
     _log('Queued event: ${event.metric}');
 
-    if (_queue.length >= _options.flushAt &&
-        !DateTime.now().isBefore(_holdUntil)) {
+    if (_queue.length >= _options.flushAt && _clock.elapsed >= _holdUntil) {
       flush();
     }
   }
@@ -176,7 +176,7 @@ class Tracker {
         _log('Flush failed: $e');
         if (_isTransient(e)) {
           _requeue(batch.sublist(start));
-          _holdUntil = DateTime.now().add(_options.flushInterval);
+          _holdUntil = _clock.elapsed + _options.flushInterval;
           return;
         }
       }
@@ -186,7 +186,7 @@ class Tracker {
   bool _isTransient(Object error) {
     if (error is! DoowError) return true;
     final status = error.statusCode ?? 0;
-    return status == 429 || status >= 500;
+    return status == 408 || status == 429 || status >= 500;
   }
 
   void _requeue(List<Map<String, dynamic>> events) {
@@ -245,7 +245,9 @@ class Tracker {
           return;
         }
 
-        if (response.statusCode == 429 || response.statusCode >= 500) {
+        if (response.statusCode == 408 ||
+            response.statusCode == 429 ||
+            response.statusCode >= 500) {
           if (isLastAttempt) {
             throw DoowError('HTTP ${response.statusCode} after ${attempt + 1} attempts',
                 statusCode: response.statusCode);
