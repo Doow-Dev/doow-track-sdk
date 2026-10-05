@@ -58,7 +58,7 @@ class APIError(DoowError):
         return self.status >= 500
 
     def is_retryable(self) -> bool:
-        return self.status in (429, 500, 502, 503, 504)
+        return self.status in (408, 429, 500, 502, 503, 504)
 
 
 class PartialAcceptError(DoowError):

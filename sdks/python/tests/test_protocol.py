@@ -230,6 +230,38 @@ def test_shutdown_stores_every_chunk_when_an_offline_store_is_set(httpx_mock):
     assert tracker._buffer == []
 
 
+def test_a_408_request_timeout_is_retried_with_the_same_batch_id(httpx_mock):
+    httpx_mock.add_response(status_code=408)
+    httpx_mock.add_response(status_code=202, json={"accepted": 1, "rejected": 0})
+    errors: list = []
+    tracker = Tracker("dk_test", _options(errors, retry_count=1))
+    tracker.track(_event())
+    tracker.flush()
+    tracker._shutdown.set()
+
+    first, second = (json.loads(r.content) for r in httpx_mock.get_requests())
+    assert first["batch_id"] == second["batch_id"]
+    assert errors == []
+
+
+def test_a_chunk_that_cannot_be_serialized_is_reported_and_the_rest_still_send(httpx_mock):
+    httpx_mock.add_response(status_code=202, json={"accepted": 1, "rejected": 0})
+    errors: list = []
+    tracker = Tracker("dk_test", _backlog_options(errors, disable_compression=True))
+    bad = TrackEvent(
+        metric="api_calls", quantity=1, license_id="lic_1", metadata={"at": object()}
+    )
+    tracker.track(bad)
+    for _ in range(600):
+        tracker.track(_event())
+    tracker.flush()
+    tracker._shutdown.set()
+
+    assert len(errors) == 1
+    assert len(httpx_mock.get_requests()) == 1
+    assert tracker._buffer == []
+
+
 def test_a_chunk_saved_to_the_offline_store_is_not_requeued_again(httpx_mock):
     class Store:
         def __init__(self):

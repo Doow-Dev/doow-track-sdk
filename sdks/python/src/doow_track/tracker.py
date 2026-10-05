@@ -70,7 +70,7 @@ def _notify(handler: Optional[Callable[[Exception], None]], error: Exception) ->
 
 
 def _is_permanent(status: int) -> bool:
-    return 400 <= status < 500 and status != 429
+    return 400 <= status < 500 and status not in (408, 429)
 
 
 def _build_payload(batch_id: str, events: list[SerializedEvent]) -> dict:
@@ -282,9 +282,12 @@ class Tracker:
     def _send_batch(self, events: list[SerializedEvent]) -> str:
         batch_id = str(uuid.uuid4())
 
-        payload = _build_payload(batch_id, events)
-
-        body = json.dumps(payload).encode()
+        try:
+            payload = _build_payload(batch_id, events)
+            body = json.dumps(payload).encode()
+        except (TypeError, ValueError) as e:
+            self._handle_error(e)
+            return _ABANDONED
         self._log(f"sending batch {batch_id} with {len(events)} events ({len(body)} bytes)")
 
         # Retry loop
@@ -550,9 +553,12 @@ class AsyncTracker:
     async def _send_batch(self, events: list[SerializedEvent]) -> str:
         batch_id = str(uuid.uuid4())
 
-        payload = _build_payload(batch_id, events)
-
-        body = json.dumps(payload).encode()
+        try:
+            payload = _build_payload(batch_id, events)
+            body = json.dumps(payload).encode()
+        except (TypeError, ValueError) as e:
+            _notify(self._options.on_error, e)
+            return _ABANDONED
         self._log(f"sending batch {batch_id} with {len(events)} events")
 
         client = await self._ensure_client()
