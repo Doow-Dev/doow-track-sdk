@@ -113,7 +113,11 @@ class Tracker(
     }
 
     private fun requeue(events: List<Pending>) {
-        if (closed || events.isEmpty()) return
+        if (events.isEmpty()) return
+        if (closed) {
+            report(DoowError("Dropped ${events.size} events at shutdown after a transient failure"))
+            return
+        }
         synchronized(buffer) {
             buffer.addAll(0, events)
             while (buffer.size > options.maxQueueSize) buffer.removeAt(buffer.size - 1)

@@ -159,6 +159,16 @@ class TrackerProtocolTest {
     }
 
     @Test
+    fun aShutdownDuringAnOutageReportsHowManyEventsItDropped() {
+        statuses = intArrayOf(503)
+        val tracker = backlogTracker()
+        repeat(700) { tracker.track(event()) }
+        tracker.shutdown()
+
+        assertTrue(errors.any { it.message?.startsWith("Dropped 700 events at shutdown") == true })
+    }
+
+    @Test
     fun anInterruptDuringTheBackoffRequeuesTheInFlightChunkToo() {
         statuses = intArrayOf(503)
         val tracker = Tracker(
