@@ -100,6 +100,48 @@ RSpec.describe DoowTrack::Tracker do
     expect(errors.size).to eq(1)
   end
 
+  it "requeues the failed chunk and every later chunk after a transient failure and sends nothing more" do
+    backlog = described_class.new(
+      "dk_test",
+      endpoint: endpoint,
+      flush_interval: 0,
+      flush_at: 5000,
+      retry_count: 0,
+      on_error: ->(e) { errors << e }
+    )
+    bodies = []
+    stub_request(:post, url).to_return do |request|
+      bodies << body_of(request)
+      { status: bodies.size == 1 ? 202 : 503 }
+    end
+    1200.times { track_one(backlog) }
+    backlog.flush
+
+    expect(bodies.size).to eq(2)
+    expect(errors.size).to eq(1)
+    failed_chunk = bodies[1]["events"].map { |e| e["event_id"] }
+    buffered = backlog.instance_variable_get(:@buffer)
+    expect(buffered.size).to eq(700)
+    expect(buffered.first(500).map(&:event_id)).to eq(failed_chunk)
+  end
+
+  it "holds count-triggered flushes after a transient failure" do
+    backlog = described_class.new(
+      "dk_test",
+      endpoint: endpoint,
+      flush_interval: 0,
+      flush_at: 2,
+      retry_count: 0,
+      on_error: ->(e) { errors << e }
+    )
+    backlog.instance_variable_set(:@hold_until, Process.clock_gettime(Process::CLOCK_MONOTONIC) + 100)
+    2.times { track_one(backlog) }
+    sleep(0.05)
+
+    expect(a_request(:post, url)).not_to have_been_made
+    expect(backlog.instance_variable_get(:@buffer).size).to eq(2)
+  end
+
   it "reports each rejection on 207 and does not retry" do
     stub = stub_request(:post, url).to_return(
       status: 207,

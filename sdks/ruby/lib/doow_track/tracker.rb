@@ -42,6 +42,7 @@ module DoowTrack
       @stopping = false
       @stop_mutex = Mutex.new
       @stop_signal = ConditionVariable.new
+      @hold_until = 0.0
       @flusher = start_flusher
     end
 
@@ -63,7 +64,7 @@ module DoowTrack
           return
         end
         @buffer << final_event
-        flush_async if @buffer.size >= @options[:flush_at]
+        flush_async if @buffer.size >= @options[:flush_at] && monotonic_now >= @hold_until
       end
     end
 
@@ -74,7 +75,15 @@ module DoowTrack
         batch = @buffer.dup
         @buffer.clear
       end
-      batch&.each_slice(MAX_BATCH_EVENTS) { |chunk| send_batch(chunk) }
+      return unless batch
+
+      batch.each_slice(MAX_BATCH_EVENTS).with_index do |chunk, index|
+        next unless send_batch(chunk) == :failed
+
+        requeue(batch.drop(index * MAX_BATCH_EVENTS))
+        @hold_until = monotonic_now + @options[:flush_interval]
+        break
+      end
     end
 
     def shutdown
@@ -107,6 +116,19 @@ module DoowTrack
       end
     end
 
+    def monotonic_now
+      Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    end
+
+    def requeue(events)
+      return if events.empty? || @stopping
+
+      @mutex.synchronize do
+        @buffer = events + @buffer
+        @buffer = @buffer.first(@options[:max_queue_size]) if @buffer.size > @options[:max_queue_size]
+      end
+    end
+
     def flush_async
       Thread.new do
         flush
@@ -132,28 +154,29 @@ module DoowTrack
             sleep(2**attempt)
             next
           end
-          return
+          return :failed
         end
 
         status = response.code.to_i
         case status
         when 207
           report(PartialAcceptError.from_body(response.body))
-          return
+          return :delivered
         when 200..299
           log("[doow-track] Flushed #{batch.size} events")
-          return
+          return :delivered
         when 429, 500..599
           if last_attempt
             report(Error.new("API error: #{DoowTrack.sanitize(response.body)}", status_code: status))
-            return
+            return :failed
           end
           sleep([2**attempt, [429, 503].include?(status) ? retry_after_seconds(response["Retry-After"]) : 0].max)
         else
           report(Error.new("API error: #{DoowTrack.sanitize(response.body)}", status_code: status))
-          return
+          return :abandoned
         end
       end
+      :failed
     end
 
     def post(url, body, encoding)
