@@ -348,7 +348,7 @@ impl Tracker {
                 if e.is_retryable() {
                     self.requeue(events[sent..].to_vec()).await;
                     self.hold_until.store(
-                        now_ms() + self.options.flush_interval_ms,
+                        now_ms().saturating_add(self.options.flush_interval_ms),
                         Ordering::Relaxed,
                     );
                     return;
@@ -922,6 +922,7 @@ mod tests {
             .iter()
             .map(|e| e["event_id"].as_str().unwrap().to_string())
             .collect();
+        assert!(tracker.hold_until.load(Ordering::Relaxed) > now_ms());
         let buffer = tracker.buffer.lock().await;
         assert_eq!(buffer.len(), 700);
         let requeued: Vec<String> = buffer.iter().take(500).map(|e| e.event_id.clone()).collect();
