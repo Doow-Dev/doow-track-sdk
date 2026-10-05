@@ -75,14 +75,16 @@ class Tracker(
             timestamp = event.timestamp ?: Instant.now().toString()
         )
 
-        if (buffer.size >= options.maxQueueSize) {
-            log("[doow-track] Queue full, dropping event")
-            return
+        val shouldFlush = synchronized(buffer) {
+            if (buffer.size >= options.maxQueueSize) {
+                log("[doow-track] Queue full, dropping event")
+                return
+            }
+            buffer.add(Pending(UUID.randomUUID().toString(), finalEvent))
+            buffer.size >= options.flushAt && System.nanoTime() - holdUntilNanos >= 0
         }
 
-        buffer.add(Pending(UUID.randomUUID().toString(), finalEvent))
-
-        if (buffer.size >= options.flushAt && System.nanoTime() - holdUntilNanos >= 0) {
+        if (shouldFlush) {
             scope.launch { flush() }
         }
     }
@@ -114,13 +116,7 @@ class Tracker(
         if (closed || events.isEmpty()) return
         synchronized(buffer) {
             buffer.addAll(0, events)
-            while (buffer.size > options.maxQueueSize) {
-                try {
-                    buffer.removeAt(buffer.size - 1)
-                } catch (e: IndexOutOfBoundsException) {
-                    break
-                }
-            }
+            while (buffer.size > options.maxQueueSize) buffer.removeAt(buffer.size - 1)
         }
     }
 
@@ -185,13 +181,18 @@ class Tracker(
                 return status == 408 || status == 429 || status >= 500
             } catch (e: InterruptedException) {
                 Thread.currentThread().interrupt()
-                return false
+                return true
             } catch (e: Exception) {
                 if (lastAttempt) {
                     report(e)
                     return true
                 }
-                Thread.sleep(2.0.pow(attempt).toLong() * 1000)
+                try {
+                    Thread.sleep(2.0.pow(attempt).toLong() * 1000)
+                } catch (ie: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    return true
+                }
             }
         }
         return false

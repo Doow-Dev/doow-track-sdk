@@ -159,6 +159,35 @@ class TrackerProtocolTest {
     }
 
     @Test
+    fun anInterruptDuringTheBackoffRequeuesTheInFlightChunkToo() {
+        statuses = intArrayOf(503)
+        val tracker = Tracker(
+            "dk_test",
+            TrackerOptions(
+                endpoint = "http://127.0.0.1:${server.address.port}",
+                flushIntervalMs = 0,
+                flushAt = 5000,
+                retryCount = 2,
+                onError = { errors.add(it) }
+            )
+        )
+        repeat(700) { tracker.track(event()) }
+
+        val flusher = Thread { tracker.flush() }
+        flusher.start()
+        Thread.sleep(400)
+        flusher.interrupt()
+        flusher.join(5000)
+
+        statuses = intArrayOf(202)
+        bodies.clear()
+        tracker.flush()
+        tracker.shutdown()
+
+        assertEquals(700, bodies.flatMap { eventIds(it) }.size)
+    }
+
+    @Test
     fun aRequestTimeoutIsRetriedWithTheSameBatchId() {
         statuses = intArrayOf(408, 202)
         val tracker = tracker()
