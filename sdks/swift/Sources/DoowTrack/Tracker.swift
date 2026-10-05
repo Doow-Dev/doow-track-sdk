@@ -217,6 +217,7 @@ public class Tracker {
     private let encoder: JSONEncoder
     private var flushTimer: Timer?
     private var isClosed = false
+    private var holdUntil = Date.distantPast
     private let responseSession: BoundedResponseSession
 
     public init(_ apiKey: String, options: TrackerOptions = TrackerOptions()) throws {
@@ -266,7 +267,7 @@ public class Tracker {
 
         buffer.append(BufferedEvent(eventId: UUID().uuidString.lowercased(), event: finalEvent))
 
-        if buffer.count >= options.flushAt {
+        if buffer.count >= options.flushAt && Date() >= holdUntil {
             DispatchQueue.global().async { [weak self] in
                 self?.flush()
             }
@@ -288,9 +289,23 @@ public class Tracker {
         var start = 0
         while start < batch.count {
             let end = min(start + Tracker.maxBatchEvents, batch.count)
-            sendBatch(Array(batch[start..<end]))
+            if sendBatch(Array(batch[start..<end])) {
+                requeue(Array(batch[start...]))
+                break
+            }
             start = end
         }
+    }
+
+    private func requeue(_ events: [BufferedEvent]) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !isClosed, !events.isEmpty else { return }
+        buffer = events + buffer
+        if buffer.count > options.maxQueueSize {
+            buffer.removeLast(buffer.count - options.maxQueueSize)
+        }
+        holdUntil = Date().addingTimeInterval(options.flushIntervalSeconds)
     }
 
     static func makeBatch(batchId: String, events: [BufferedEvent]) -> WireBatch {
@@ -315,7 +330,7 @@ public class Tracker {
         )
     }
 
-    private func sendBatch(_ batch: [BufferedEvent]) {
+    private func sendBatch(_ batch: [BufferedEvent]) -> Bool {
         let url = URL(string: "\(options.endpoint.trimmingCharacters(in: CharacterSet(charactersIn: "/")))/telemetry/events")!
         let batchId = UUID().uuidString.lowercased()
 
@@ -325,7 +340,7 @@ public class Tracker {
             body = try encoder.encode(Tracker.makeBatch(batchId: batchId, events: batch))
         } catch {
             report(error)
-            return
+            return false
         }
         if !options.disableCompression && body.count > 1024, let gzipped = Gzip.encode(body) {
             body = gzipped
@@ -349,13 +364,13 @@ public class Tracker {
             if let error = responseError {
                 if isLastAttempt {
                     report(error)
-                    return
+                    return true
                 }
                 Thread.sleep(forTimeInterval: pow(2, Double(attempt)))
                 continue
             }
 
-            guard let status = httpResponse?.statusCode else { return }
+            guard let status = httpResponse?.statusCode else { return false }
 
             let boundedData = responseData.map { Data($0.prefix(maxResponseBytes)) }
 
@@ -363,12 +378,12 @@ public class Tracker {
                 let partial = boundedData.flatMap { try? JSONDecoder().decode(PartialAcceptError.self, from: $0) }
                     ?? PartialAcceptError(accepted: 0, rejected: 0, batchId: batchId, rejections: [])
                 report(partial)
-                return
+                return false
             }
 
             if status >= 200 && status < 300 {
                 log("[doow-track] Flushed \(batch.count) events")
-                return
+                return false
             }
 
             if (status == 429 || status >= 500) && !isLastAttempt {
@@ -382,8 +397,9 @@ public class Tracker {
 
             let errorBody = boundedData.flatMap { String(data: $0, encoding: .utf8) } ?? ""
             report(DoowError("API error: \(sanitizeText(errorBody))", statusCode: status))
-            return
+            return status == 429 || status >= 500
         }
+        return false
     }
 
     private func perform(_ request: URLRequest) -> (Data?, HTTPURLResponse?, Error?) {

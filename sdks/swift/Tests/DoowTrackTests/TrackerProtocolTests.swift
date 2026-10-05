@@ -148,6 +148,55 @@ final class TrackerProtocolTests {
         #expect(errors.isEmpty)
     }
 
+    private func eventIds(_ body: Data) throws -> [String] {
+        let events = try json(body)["events"] as? [[String: Any]] ?? []
+        return events.compactMap { $0["event_id"] as? String }
+    }
+
+    @Test func transientFailureRequeuesThatChunkAndEveryLaterChunk() throws {
+        var calls = 0
+        StubURLProtocol.responder = { _ in
+            calls += 1
+            return (calls == 2 ? 503 : 202, Data("down".utf8))
+        }
+        let tracker = try makeBacklogTracker()
+        for _ in 0..<1200 { track(tracker) }
+        tracker.flush()
+
+        #expect(StubURLProtocol.requests.count == 2)
+        #expect(errors.count == 1)
+        let failedChunk = try eventIds(StubURLProtocol.requests[1].body)
+
+        tracker.flush()
+
+        let resent = try StubURLProtocol.requests.dropFirst(2).flatMap { try eventIds($0.body) }
+        #expect(resent.count == 700)
+        #expect(Array(resent.prefix(500)) == failedChunk)
+    }
+
+    @Test func transientFailureHoldsCountTriggeredFlushes() throws {
+        StubURLProtocol.responder = { _ in (503, Data("down".utf8)) }
+        let tracker = try Tracker("dk_test", options: TrackerOptions(
+            endpoint: "https://test.doow.co",
+            flushAt: 2,
+            flushIntervalSeconds: 3600,
+            retryCount: 0,
+            disableCompression: true,
+            onError: { [unowned self] in self.errors.append($0) },
+            session: session
+        ))
+        track(tracker)
+        track(tracker)
+        Thread.sleep(forTimeInterval: 0.4)
+        #expect(StubURLProtocol.requests.count == 1)
+
+        track(tracker)
+        track(tracker)
+        Thread.sleep(forTimeInterval: 0.4)
+
+        #expect(StubURLProtocol.requests.count == 1)
+    }
+
     @Test func laterChunksAreStillSentAfterAChunkFailsPermanently() throws {
         var calls = 0
         StubURLProtocol.responder = { _ in
