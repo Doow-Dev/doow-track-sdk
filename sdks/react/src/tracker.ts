@@ -172,7 +172,12 @@ export class Tracker {
 
   private async sendWithRetry(batch: QueuedEvent[]): Promise<void> {
     const batchId = generateUUID();
-    const payload = JSON.stringify(toWireBatch(batchId, batch));
+    let payload: string;
+    try {
+      payload = JSON.stringify(toWireBatch(batchId, batch));
+    } catch (error) {
+      throw new NonRetryableError(`Could not serialize events: ${sanitizeText(String(error))}`);
+    }
 
     const headers: Record<string, string> = {
       'Authorization': `Bearer ${this.apiKey}`,
