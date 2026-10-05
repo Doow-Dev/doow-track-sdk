@@ -151,6 +151,21 @@ describe('React Native wire protocol', () => {
     expect((tracker as unknown as { queue: unknown[] }).queue.length).toBeLessThanOrEqual(600);
   });
 
+  it('a 408 request timeout is retried with the same batch and event ids', async () => {
+    const calls = stubFetch([{ status: 408 }, { status: 202 }]);
+    const onError = vi.fn();
+    const tracker = new Tracker('dk_test', { persistQueue: false, onError, retryCount: 1 });
+    tracker.track(event);
+    await tracker.flush();
+
+    expect(calls).toHaveLength(2);
+    const first = JSON.parse(calls[0]!.init.body as string);
+    const second = JSON.parse(calls[1]!.init.body as string);
+    expect(second.batch_id).toBe(first.batch_id);
+    expect(second.events[0].event_id).toBe(first.events[0].event_id);
+    expect(onError).not.toHaveBeenCalled();
+  });
+
   it('an event that cannot be serialized is reported and dropped instead of being requeued forever', async () => {
     const calls = stubFetch([{ status: 202 }]);
     const onError = vi.fn();

@@ -144,6 +144,10 @@ export async function readPartialAccept(response: Response, batchId: string): Pr
 
 export const MAX_RETRY_AFTER_MS = 30_000;
 
+export function isTransientStatus(status: number): boolean {
+  return status === 408 || status === 429 || status >= 500;
+}
+
 export function parseRetryAfterMs(header: string | null | undefined): number | undefined {
   if (!header) return undefined;
   const seconds = Number(header);
