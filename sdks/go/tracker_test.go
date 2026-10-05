@@ -283,6 +283,98 @@ func TestTracker_PartialAcceptReportsRejections(t *testing.T) {
 	}
 }
 
+func TestTracker_FlushSplitsLargeBacklogIntoChunksOfAtMost500(t *testing.T) {
+	var mu sync.Mutex
+	var payloads []BatchPayload
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload BatchPayload
+		json.NewDecoder(r.Body).Decode(&payload)
+		mu.Lock()
+		payloads = append(payloads, payload)
+		mu.Unlock()
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer server.Close()
+
+	tracker := NewTracker("dk_test_key", &TrackerOptions{
+		Endpoint:           server.URL,
+		FlushAt:            5000,
+		MaxQueueSize:       5000,
+		FlushInterval:      time.Hour,
+		DisableCompression: true,
+		RetryCount:         0,
+	})
+	for i := 0; i < 1200; i++ {
+		tracker.Track(TrackEvent{Metric: "api_calls", Quantity: 1, LicenseID: "lic_1"})
+	}
+	if err := tracker.Flush(); err != nil {
+		t.Fatalf("flush failed: %v", err)
+	}
+	tracker.Shutdown()
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(payloads) != 3 {
+		t.Fatalf("expected 3 requests, got %d", len(payloads))
+	}
+	batchIDs := map[string]bool{}
+	eventIDs := map[string]bool{}
+	for i, want := range []int{500, 500, 200} {
+		if len(payloads[i].Events) != want {
+			t.Fatalf("chunk %d has %d events, want %d", i, len(payloads[i].Events), want)
+		}
+		batchIDs[payloads[i].BatchID] = true
+		for _, e := range payloads[i].Events {
+			eventIDs[e.EventID] = true
+		}
+	}
+	if len(batchIDs) != 3 {
+		t.Fatalf("expected 3 distinct batch ids, got %d", len(batchIDs))
+	}
+	if len(eventIDs) != 1200 {
+		t.Fatalf("expected 1200 distinct event ids, got %d", len(eventIDs))
+	}
+}
+
+func TestTracker_FlushKeepsSendingLaterChunksAfterAFailedChunk(t *testing.T) {
+	var mu sync.Mutex
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		calls++
+		call := calls
+		mu.Unlock()
+		if call == 1 {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer server.Close()
+
+	tracker := NewTracker("dk_test_key", &TrackerOptions{
+		Endpoint:           server.URL,
+		FlushAt:            5000,
+		MaxQueueSize:       5000,
+		FlushInterval:      time.Hour,
+		DisableCompression: true,
+		RetryCount:         0,
+	})
+	for i := 0; i < 700; i++ {
+		tracker.Track(TrackEvent{Metric: "api_calls", Quantity: 1, LicenseID: "lic_1"})
+	}
+	if err := tracker.Flush(); err == nil {
+		t.Fatalf("expected the first chunk's error to be returned")
+	}
+	tracker.Shutdown()
+
+	mu.Lock()
+	defer mu.Unlock()
+	if calls != 2 {
+		t.Fatalf("expected 2 requests, got %d", calls)
+	}
+}
+
 func TestTracker_RetryReusesBatchAndEventIDs(t *testing.T) {
 	var mu sync.Mutex
 	var payloads []BatchPayload

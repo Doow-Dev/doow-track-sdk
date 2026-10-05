@@ -28,6 +28,7 @@ const (
 	defaultRetryCount    = 3
 	defaultMaxFlushes    = 30
 	defaultShutdownTime  = 5 * time.Second
+	maxBatchEvents       = 500
 )
 
 func generateUUID() string {
@@ -306,7 +307,17 @@ func (t *Tracker) Flush() error {
 		defer func() { <-t.flushSem }()
 	}
 
-	return t.sendBatch(events)
+	var firstErr error
+	for start := 0; start < len(events); start += maxBatchEvents {
+		end := start + maxBatchEvents
+		if end > len(events) {
+			end = len(events)
+		}
+		if err := t.sendBatch(events[start:end]); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
 }
 
 func (t *Tracker) sendBatch(events []SerializedEvent) error {
