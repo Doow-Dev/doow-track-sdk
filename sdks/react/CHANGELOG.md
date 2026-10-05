@@ -4,7 +4,7 @@
 
 ### Batch size
 
-- A `408` request timeout is retried like `429` and `5xx`, and an event that cannot be serialized is dropped on its own instead of blocking the queue.
+- A `408` request timeout is retried like `429` and `5xx`, and the chunk holding an event that cannot be serialized (up to 500 events) is reported and dropped instead of blocking the queue. A shutdown during an outage stops after the first failed chunk and reports how many events were dropped.
 - After a transient failure (network error, `429`, or `5xx` after the retries) the remaining chunks are requeued instead of each spending a full retry budget, and count-triggered flushes pause until the next flush interval.
 - A flush of more than 500 events is sent as separate requests of at most 500 events, each with its own batch id, so a large backlog no longer exceeds the API's per-minute event limit and loops on `429`.
 
