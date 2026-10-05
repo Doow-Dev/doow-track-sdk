@@ -171,6 +171,28 @@ void main() {
     expect(resent.take(500).toList(), failedChunk);
   });
 
+  test('an event that cannot be serialized is reported and dropped instead of being requeued forever', () async {
+    var calls = 0;
+    final client = MockClient((request) async {
+      calls++;
+      return http.Response('', 202);
+    });
+    final errors = <DoowError>[];
+    final tracker = backlogTracker(client, errors);
+
+    tracker.track(TrackEvent(
+      metric: 'api_calls',
+      quantity: 1,
+      licenseId: 'lic_1',
+      metadata: {'at': Object()},
+    ));
+    await tracker.flush();
+    await tracker.flush();
+
+    expect(errors.length, 1);
+    expect(calls, 0);
+  });
+
   test('a transient failure holds count-triggered flushes until the next interval', () async {
     var calls = 0;
     final client = MockClient((request) async {

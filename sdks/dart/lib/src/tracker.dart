@@ -199,11 +199,16 @@ class Tracker {
 
   Future<void> _sendWithRetry(List<Map<String, dynamic>> batch) async {
     final batchId = _uuidV4();
-    final payload = jsonEncode({
-      'batch_id': batchId,
-      'sdk_version': _sdkVersion,
-      'events': batch,
-    });
+    final String payload;
+    try {
+      payload = jsonEncode({
+        'batch_id': batchId,
+        'sdk_version': _sdkVersion,
+        'events': batch,
+      });
+    } catch (e) {
+      throw ValidationError('Could not serialize events: ${sanitizeText(e)}');
+    }
     final bytes = utf8.encode(payload);
 
     List<int> body;
