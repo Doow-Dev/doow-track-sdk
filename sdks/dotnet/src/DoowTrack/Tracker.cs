@@ -34,6 +34,7 @@ public class Tracker : IDisposable
     private readonly Timer? _flushTimer;
     private readonly JsonSerializerOptions _jsonOptions;
     private bool _disposed;
+    private DateTime _holdUntil = DateTime.MinValue;
 
     public Tracker(string apiKey, TrackerOptions? options = null)
     {
@@ -86,7 +87,7 @@ public class Tracker : IDisposable
             }
             _buffer.Add(new Pending(Guid.NewGuid().ToString(), finalEvent));
 
-            if (_buffer.Count >= _options.FlushAt)
+            if (_buffer.Count >= _options.FlushAt && DateTime.UtcNow >= _holdUntil)
             {
                 _ = FlushAsync();
             }
@@ -153,11 +154,30 @@ public class Tracker : IDisposable
 
         for (var start = 0; start < pending.Count; start += MaxBatchEvents)
         {
-            await SendBatchAsync(pending.GetRange(start, Math.Min(MaxBatchEvents, pending.Count - start)));
+            var retryLater = await SendBatchAsync(pending.GetRange(start, Math.Min(MaxBatchEvents, pending.Count - start)));
+            if (retryLater)
+            {
+                Requeue(pending.GetRange(start, pending.Count - start));
+                _holdUntil = DateTime.UtcNow.AddMilliseconds(_options.FlushIntervalMs);
+                return;
+            }
         }
     }
 
-    private async Task SendBatchAsync(List<Pending> batch)
+    private void Requeue(List<Pending> events)
+    {
+        if (_disposed || events.Count == 0) return;
+        lock (_lock)
+        {
+            _buffer.InsertRange(0, events);
+            if (_buffer.Count > _options.MaxQueueSize)
+            {
+                _buffer.RemoveRange(_options.MaxQueueSize, _buffer.Count - _options.MaxQueueSize);
+            }
+        }
+    }
+
+    private async Task<bool> SendBatchAsync(List<Pending> batch)
     {
         var batchId = Guid.NewGuid().ToString();
         byte[] body;
@@ -180,7 +200,7 @@ public class Tracker : IDisposable
         catch (Exception e)
         {
             Report(e);
-            return;
+            return false;
         }
 
         var url = $"{_options.Endpoint.TrimEnd('/')}/telemetry/events";
@@ -206,7 +226,7 @@ public class Tracker : IDisposable
                 if (status == 207)
                 {
                     Report(ParsePartialAccept(responseBody, batchId));
-                    return;
+                    return false;
                 }
 
                 if (response.IsSuccessStatusCode)
@@ -215,7 +235,7 @@ public class Tracker : IDisposable
                     {
                         Console.Error.WriteLine($"[doow-track] Flushed {batch.Count} events");
                     }
-                    return;
+                    return false;
                 }
 
                 if ((status == 429 || status >= 500) && !lastAttempt)
@@ -227,19 +247,19 @@ public class Tracker : IDisposable
                 }
 
                 Report(new DoowError($"API error: {Sanitize(responseBody)}", status));
-                return;
+                return status == 429 || status >= 500;
             }
             catch (Exception e) when (e is not HttpRequestException and not TaskCanceledException)
             {
                 Report(e);
-                return;
+                return false;
             }
             catch (Exception e)
             {
                 if (lastAttempt)
                 {
                     Report(e);
-                    return;
+                    return true;
                 }
                 if (_options.Debug)
                 {
@@ -248,6 +268,8 @@ public class Tracker : IDisposable
                 await Task.Delay((int)Math.Pow(2, attempt) * 1000);
             }
         }
+
+        return false;
     }
 
     private static PartialAcceptError ParsePartialAccept(string body, string fallbackBatchId)

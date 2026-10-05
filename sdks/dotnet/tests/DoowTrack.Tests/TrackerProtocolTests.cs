@@ -121,6 +121,52 @@ public class TrackerProtocolTests
     }
 
     [Fact]
+    public async Task ATransientFailureRequeuesThatChunkAndEveryLaterChunkAndSendsNothingMore()
+    {
+        var handler = new StubHandler((202, "{}"), (503, "down"), (202, "{}"));
+        var (tracker, errors) = Create(handler, retryCount: 0, flushAt: 5000);
+        for (var i = 0; i < 1200; i++) tracker.Track(Event());
+        await tracker.FlushAsync();
+
+        Assert.Equal(2, handler.Requests.Count);
+        Assert.Single(errors);
+        var failedChunk = handler.Requests[1].Body.GetProperty("events").EnumerateArray()
+            .Select(e => e.GetProperty("event_id").GetString()).ToList();
+
+        await tracker.FlushAsync();
+
+        var resent = handler.Requests.Skip(2)
+            .SelectMany(r => r.Body.GetProperty("events").EnumerateArray())
+            .Select(e => e.GetProperty("event_id").GetString()).ToList();
+        Assert.Equal(700, resent.Count);
+        Assert.Equal(failedChunk, resent.Take(500).ToList());
+    }
+
+    [Fact]
+    public async Task ATransientFailureHoldsCountTriggeredFlushes()
+    {
+        var handler = new StubHandler((503, "down"));
+        using var tracker = new Tracker("dk_test", new TrackerOptions
+        {
+            Endpoint = "https://test.doow.co",
+            FlushIntervalMs = 60_000,
+            FlushAt = 2,
+            RetryCount = 0,
+            HttpHandler = handler,
+        });
+        tracker.Track(Event());
+        tracker.Track(Event());
+        await Task.Delay(300);
+        Assert.Single(handler.Requests);
+
+        tracker.Track(Event());
+        tracker.Track(Event());
+        await Task.Delay(300);
+
+        Assert.Single(handler.Requests);
+    }
+
+    [Fact]
     public async Task LaterChunksAreStillSentAfterAChunkFailsPermanently()
     {
         var handler = new StubHandler((400, "bad"), (202, "{}"));
