@@ -35,6 +35,7 @@ export class ClientTracker {
   private queue: QueuedEvent[] = [];
   private flushTimer: ReturnType<typeof setInterval> | null = null;
   private shutdown = false;
+  private holdUntil = 0;
   private readonly unloadHandler = (): void => this.flushSync();
   private readonly visibilityHandler = (): void => {
     if (document.visibilityState === 'hidden') this.flushSync();
@@ -93,7 +94,7 @@ export class ClientTracker {
     this.queue.push(enrichedEvent);
     this.log(`Queued event: ${event.metric}`);
 
-    if (this.queue.length >= this.options.flushAt) {
+    if (this.queue.length >= this.options.flushAt && Date.now() >= this.holdUntil) {
       this.flush();
     }
   }
@@ -112,6 +113,11 @@ export class ClientTracker {
       } catch (error) {
         notify(this.options.onError, error as Error);
         this.log(`Flush failed: ${error}`);
+        if (!(error instanceof NonRetryableError)) {
+          this.holdUntil = Date.now() + this.options.flushIntervalMs;
+          this.requeue(batch.slice(i));
+          return;
+        }
       }
     }
   }
