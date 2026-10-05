@@ -542,3 +542,99 @@ async def test_async_in_flight_unavailable_batch_waits_for_retry_after(httpx_moc
     assert elapsed >= 0.9
     assert json.loads(requests[0].content)["batch_id"] == json.loads(requests[1].content)["batch_id"]
     assert errors == []
+
+
+CHUNK = 64 * 1024
+CHUNKS_OFFERED = 20
+
+
+class _SyncFlood(httpx.SyncByteStream):
+    def __init__(self):
+        self.read = 0
+
+    def __iter__(self):
+        for _ in range(CHUNKS_OFFERED):
+            self.read += CHUNK
+            yield b"x" * CHUNK
+
+
+class _AsyncFlood(httpx.AsyncByteStream):
+    def __init__(self):
+        self.read = 0
+
+    async def __aiter__(self):
+        for _ in range(CHUNKS_OFFERED):
+            self.read += CHUNK
+            yield b"x" * CHUNK
+
+
+@pytest.mark.parametrize("status", [207, 400, 503])
+def test_response_body_read_is_bounded(status):
+    from doow_track.tracker import MAX_RESPONSE_BYTES
+
+    floods: list = []
+
+    def respond(_request):
+        floods.append(_SyncFlood())
+        return httpx.Response(status, stream=floods[-1])
+
+    errors: list = []
+    tracker = Tracker("dk_test", _options(errors, retry_count=0))
+    tracker._client = httpx.Client(transport=httpx.MockTransport(respond))
+    tracker.track(_event())
+    tracker.flush()
+    tracker._shutdown.set()
+
+    assert floods and all(f.read <= MAX_RESPONSE_BYTES + CHUNK for f in floods)
+    assert errors
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [207, 400, 503])
+async def test_async_response_body_read_is_bounded(status):
+    from doow_track.tracker import MAX_RESPONSE_BYTES
+
+    floods: list = []
+
+    def respond(_request):
+        floods.append(_AsyncFlood())
+        return httpx.Response(status, stream=floods[-1])
+
+    errors: list = []
+    tracker = AsyncTracker("dk_test", _options(errors, retry_count=0))
+    tracker._client = httpx.AsyncClient(transport=httpx.MockTransport(respond))
+    await tracker.track(_event())
+    await tracker.flush()
+    await tracker.shutdown()
+
+    assert floods and all(f.read <= MAX_RESPONSE_BYTES + CHUNK for f in floods)
+    assert errors
+
+
+def test_a_small_207_body_is_still_parsed(httpx_mock):
+    httpx_mock.add_response(status_code=207, json=PARTIAL_BODY)
+    errors: list = []
+    tracker = Tracker("dk_test", _options(errors, retry_count=0))
+    tracker.track(_event())
+    tracker.flush()
+    tracker._shutdown.set()
+
+    assert isinstance(errors[0], PartialAcceptError)
+    assert errors[0].rejections[0]["event_id"] == "evt-x"
+
+
+def test_api_error_details_are_sanitized(httpx_mock):
+    httpx_mock.add_response(
+        status_code=400,
+        json={"message": "bad", "errorClass": "E\x1b[31m", "extra": {"note": "a\x07b"}},
+    )
+    errors: list = []
+    tracker = Tracker("dk_test", _options(errors, retry_count=0))
+    tracker.track(_event())
+    tracker.flush()
+    tracker._shutdown.set()
+
+    error = errors[0]
+    assert "\x1b" not in error.error_class
+    assert error.details["errorClass"] == error.error_class
+    assert error.details["extra"]["note"] == "a b"

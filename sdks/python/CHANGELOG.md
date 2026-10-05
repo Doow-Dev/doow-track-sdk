@@ -8,6 +8,11 @@
 - After a transient failure the remaining chunks are requeued (a chunk already saved to the offline store is not requeued again) instead of each spending a full retry budget, and count-triggered flushes pause until the next flush interval.
 - `Tracker.flush` and `AsyncTracker.flush` send more than 500 events as separate requests of at most 500 events, each with its own batch id, so a large backlog no longer exceeds the API's per-minute event limit and loops on `429`.
 
+### Fixes
+
+- Both trackers read at most 64 KiB of a response body, and `APIError.details` and `error_class` are cleaned of control characters, so a hostile or broken endpoint cannot exhaust memory or inject terminal escapes through an error.
+- A `Retry-After` wait now replaces the retry backoff instead of adding to it, and the trackers no longer wait after the final attempt.
+
 ### Additions
 
 - New exports: `PartialAcceptError` and `sanitize_text`. `on_error` receives a `PartialAcceptError` for HTTP 207 partial acceptance.

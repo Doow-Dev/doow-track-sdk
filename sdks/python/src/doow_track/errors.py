@@ -1,5 +1,6 @@
 """Error types for Doow SDK."""
 
+import json
 from typing import Any, Optional
 
 
@@ -16,6 +17,25 @@ def sanitize_text(value: Any) -> str:
     """Strip control characters and cap server-supplied text before it enters a message."""
     text = "".join(" " if (ord(ch) < 32 or 127 <= ord(ch) <= 159) else ch for ch in str(value))
     return text if len(text) <= MAX_ERROR_TEXT else text[:MAX_ERROR_TEXT] + "..."
+
+
+MAX_DETAILS_DEPTH = 4
+
+
+def sanitize_details(value: Any, depth: int = 0) -> Any:
+    """Clean every server-supplied string in an error body before it is exposed on an error."""
+    if isinstance(value, str):
+        return sanitize_text(value)
+    if depth >= MAX_DETAILS_DEPTH:
+        return sanitize_text(value) if isinstance(value, (dict, list)) else value
+    if isinstance(value, dict):
+        return {
+            (sanitize_text(k) if isinstance(k, str) else k): sanitize_details(v, depth + 1)
+            for k, v in value.items()
+        }
+    if isinstance(value, list):
+        return [sanitize_details(v, depth + 1) for v in value]
+    return value
 
 
 def _to_int(value: Any) -> int:
@@ -38,8 +58,8 @@ class APIError(DoowError):
         self.status = status
         message = sanitize_text(message)
         self.message = message
-        self.error_class = error_class
-        self.details = details or {}
+        self.error_class = sanitize_text(error_class) if error_class is not None else None
+        self.details = sanitize_details(details) if details else {}
         super().__init__(f"doow: {message} (status={status})")
 
     def is_not_found(self) -> bool:
@@ -84,9 +104,19 @@ class PartialAcceptError(DoowError):
     @classmethod
     def from_response(cls, response: Any) -> "PartialAcceptError":
         try:
-            data = response.json()
+            return cls.from_data(response.json())
         except Exception:
-            data = {}
+            return cls.from_data({})
+
+    @classmethod
+    def from_body(cls, body: bytes) -> "PartialAcceptError":
+        try:
+            return cls.from_data(json.loads(body))
+        except Exception:
+            return cls.from_data({})
+
+    @classmethod
+    def from_data(cls, data: Any) -> "PartialAcceptError":
         if not isinstance(data, dict):
             data = {}
         raw = data.get("rejections")

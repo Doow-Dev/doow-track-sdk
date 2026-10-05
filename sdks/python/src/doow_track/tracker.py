@@ -37,6 +37,29 @@ _FAILED = "failed"
 
 
 MAX_RETRY_AFTER = 30.0
+MAX_RESPONSE_BYTES = 64 * 1024
+
+
+def _read_capped(response: httpx.Response) -> bytes:
+    chunks: list[bytes] = []
+    size = 0
+    for chunk in response.iter_bytes():
+        chunks.append(chunk[: MAX_RESPONSE_BYTES - size])
+        size += len(chunks[-1])
+        if size >= MAX_RESPONSE_BYTES:
+            break
+    return b"".join(chunks)
+
+
+async def _aread_capped(response: httpx.Response) -> bytes:
+    chunks: list[bytes] = []
+    size = 0
+    async for chunk in response.aiter_bytes():
+        chunks.append(chunk[: MAX_RESPONSE_BYTES - size])
+        size += len(chunks[-1])
+        if size >= MAX_RESPONSE_BYTES:
+            break
+    return b"".join(chunks)
 
 
 def _retry_after(value: Optional[str]) -> float:
@@ -292,11 +315,13 @@ class Tracker:
 
         # Retry loop
         last_error: Optional[Exception] = None
+        server_delay = 0.0
         for attempt in range(self._options.retry_count + 1):
             if attempt > 0:
-                backoff = min(0.1 * (2 ** (attempt - 1)), 10.0)
+                backoff = max(min(0.1 * (2 ** (attempt - 1)), 10.0), server_delay)
                 self._log(f"retry attempt {attempt} after {backoff}s")
                 threading.Event().wait(backoff)
+            server_delay = 0.0
 
             try:
                 error = self._do_send(body)
@@ -314,7 +339,7 @@ class Tracker:
                         self._handle_error(error)
                         return _ABANDONED
                     if error.status in (429, 503):
-                        threading.Event().wait(getattr(error, "retry_after", 0.0))
+                        server_delay = getattr(error, "retry_after", 0.0)
             except Exception as e:
                 last_error = _wrap_transport_error(e)
 
@@ -349,43 +374,45 @@ class Tracker:
             headers["Content-Encoding"] = "gzip"
 
         try:
-            response = self._client.post(
+            with self._client.stream(
+                "POST",
                 f"{self._options.endpoint}/telemetry/events",
                 content=body,
                 headers=headers,
-            )
+            ) as response:
+                content = _read_capped(response)
 
-            # Parse rate limit headers
-            if limit := response.headers.get("X-RateLimit-Limit"):
-                self._rate_limit = RateLimit(
-                    limit=int(limit),
-                    remaining=int(response.headers.get("X-RateLimit-Remaining", 0)),
-                    reset=datetime.fromtimestamp(
-                        int(response.headers.get("X-RateLimit-Reset", 0))
-                    ),
-                )
-
-            if response.status_code == 207:
-                return PartialAcceptError.from_response(response)
-
-            if response.status_code >= 400:
-                try:
-                    data = response.json()
-                    api_error = APIError(
-                        status=response.status_code,
-                        message=data.get("message", response.reason_phrase),
-                        error_class=data.get("errorClass"),
-                        details=data,
+                # Parse rate limit headers
+                if limit := response.headers.get("X-RateLimit-Limit"):
+                    self._rate_limit = RateLimit(
+                        limit=int(limit),
+                        remaining=int(response.headers.get("X-RateLimit-Remaining", 0)),
+                        reset=datetime.fromtimestamp(
+                            int(response.headers.get("X-RateLimit-Reset", 0))
+                        ),
                     )
-                except Exception:
-                    api_error = APIError(
-                        status=response.status_code,
-                        message=response.reason_phrase,
-                    )
-                api_error.retry_after = _retry_after(response.headers.get("Retry-After"))
-                return api_error
 
-            return None
+                if response.status_code == 207:
+                    return PartialAcceptError.from_body(content)
+
+                if response.status_code >= 400:
+                    try:
+                        data = json.loads(content)
+                        api_error = APIError(
+                            status=response.status_code,
+                            message=data.get("message", response.reason_phrase),
+                            error_class=data.get("errorClass"),
+                            details=data,
+                        )
+                    except Exception:
+                        api_error = APIError(
+                            status=response.status_code,
+                            message=response.reason_phrase,
+                        )
+                    api_error.retry_after = _retry_after(response.headers.get("Retry-After"))
+                    return api_error
+
+                return None
         except Exception as e:
             return _wrap_transport_error(e)
 
@@ -574,32 +601,39 @@ class AsyncTracker:
 
         last_error: Optional[Exception] = None
         permanent = False
+        server_delay = 0.0
         for attempt in range(self._options.retry_count + 1):
             if attempt > 0:
-                await asyncio.sleep(min(0.1 * (2 ** (attempt - 1)), 10.0))
+                await asyncio.sleep(max(min(0.1 * (2 ** (attempt - 1)), 10.0), server_delay))
+            server_delay = 0.0
 
             try:
-                response = await client.post(
+                async with client.stream(
+                    "POST",
                     f"{self._options.endpoint}/telemetry/events",
                     content=body,
                     headers=headers,
-                )
+                ) as response:
+                    content = await _aread_capped(response)
+                    status = response.status_code
+                    reason = response.reason_phrase
+                    retry_after = response.headers.get("Retry-After")
             except Exception as e:
                 last_error = _wrap_transport_error(e)
                 continue
 
-            if response.status_code == 207:
-                _notify(self._options.on_error, PartialAcceptError.from_response(response))
+            if status == 207:
+                _notify(self._options.on_error, PartialAcceptError.from_body(content))
                 return _DELIVERED
-            if response.status_code < 400:
+            if status < 400:
                 self._log(f"batch {batch_id} sent successfully")
                 return _DELIVERED
-            last_error = APIError(status=response.status_code, message=response.reason_phrase)
-            if _is_permanent(response.status_code):
+            last_error = APIError(status=status, message=reason)
+            if _is_permanent(status):
                 permanent = True
                 break
-            if response.status_code in (429, 503):
-                await asyncio.sleep(_retry_after(response.headers.get("Retry-After")))
+            if status in (429, 503):
+                server_delay = _retry_after(retry_after)
 
         if last_error:
             _notify(self._options.on_error, last_error)
