@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Batch size
+
+- A flush of more than 500 events is sent as separate requests of at most 500 events, each with its own batch id. A retryable failure requeues that chunk and every chunk after it, in order.
+
 ### Fixes
 
 - Requests send the `batch_id`/`sdk_version` envelope, and HTTP 207 rejections reach `onError` as `PartialAcceptError` without being requeued.

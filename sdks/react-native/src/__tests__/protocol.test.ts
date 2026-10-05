@@ -92,6 +92,48 @@ describe('React Native wire protocol', () => {
     expect(last.events[0].event_id).toBe(first.events[0].event_id);
   });
 
+  it('a flush of more than 500 events sends chunks of at most 500 with distinct batch ids and every event once', async () => {
+    const calls = stubFetch([{ status: 202 }]);
+    const tracker = new Tracker('dk_test', { persistQueue: false, flushAt: 5000, maxQueueSize: 5000 });
+    for (let i = 0; i < 1200; i++) tracker.track(event);
+    await tracker.flush();
+
+    const bodies = calls.map((call) => JSON.parse(call.init.body as string));
+    expect(bodies.map((body) => body.events.length)).toEqual([500, 500, 200]);
+    expect(new Set(bodies.map((body) => body.batch_id)).size).toBe(3);
+    const eventIds = bodies.flatMap((body) => body.events.map((e: { event_id: string }) => e.event_id));
+    expect(new Set(eventIds).size).toBe(1200);
+  });
+
+  it('a 5xx on a later chunk requeues that chunk and every chunk after it, and sends nothing more', async () => {
+    const calls = stubFetch([{ status: 202 }, { status: 503 }]);
+    const onError = vi.fn();
+    const tracker = new Tracker('dk_test', {
+      persistQueue: false,
+      flushAt: 5000,
+      maxQueueSize: 5000,
+      onError,
+      retryCount: 0,
+    });
+    for (let i = 0; i < 1200; i++) tracker.track(event);
+    await tracker.flush();
+
+    expect(calls).toHaveLength(2);
+    expect(onError).toHaveBeenCalledTimes(1);
+
+    const secondChunk = JSON.parse(calls[1]!.init.body as string).events.map(
+      (e: { event_id: string }) => e.event_id,
+    );
+    const retry = stubFetch([{ status: 202 }]);
+    await tracker.flush();
+    const resent = retry.flatMap((call) =>
+      JSON.parse(call.init.body as string).events.map((e: { event_id: string }) => e.event_id),
+    );
+
+    expect(resent).toHaveLength(700);
+    expect(resent.slice(0, 500)).toEqual(secondChunk);
+  });
+
   it('a permanent 4xx is reported and dropped instead of looping', async () => {
     const calls = stubFetch([{ status: 400, body: { message: 'bad' } }]);
     const onError = vi.fn();

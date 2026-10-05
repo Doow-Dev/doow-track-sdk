@@ -14,6 +14,7 @@ import {
 } from './wire';
 
 const STORAGE_KEY = '@doow/track/queue';
+const MAX_BATCH_EVENTS = 500;
 
 const DEFAULT_OPTIONS: Required<Omit<TrackerOptions, 'attribution' | 'onError'>> = {
   endpoint: 'https://api.doow.co',
@@ -132,15 +133,18 @@ export class Tracker {
 
     this.log(`Flushing ${batch.length} events`);
 
-    try {
-      await this.sendWithRetry(batch);
-    } catch (error) {
-      if (!(error instanceof NonRetryableError)) {
-        this.queue = [...batch, ...this.queue];
-        await this.persistQueue();
+    for (let i = 0; i < batch.length; i += MAX_BATCH_EVENTS) {
+      try {
+        await this.sendWithRetry(batch.slice(i, i + MAX_BATCH_EVENTS));
+      } catch (error) {
+        notify(this.options.onError, error as Error);
+        this.log(`Flush failed: ${error}`);
+        if (!(error instanceof NonRetryableError)) {
+          this.queue = [...batch.slice(i), ...this.queue];
+          await this.persistQueue();
+          return;
+        }
       }
-      notify(this.options.onError, error as Error);
-      this.log(`Flush failed: ${error}`);
     }
   }
 
