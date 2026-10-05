@@ -25,6 +25,7 @@ public class Tracker implements AutoCloseable {
     private static final long MAX_RETRY_AFTER_MS = 30_000;
     private static final int MAX_ERROR_TEXT = 512;
     private static final int MAX_BODY_CHARS = 1 << 20;
+    private static final int MAX_BATCH_EVENTS = 500;
 
     private final List<Pending> buffer = new ArrayList<>();
     private final Object lock = new Object();
@@ -115,7 +116,9 @@ public class Tracker implements AutoCloseable {
             buffer.clear();
         }
 
-        sendBatch(batch);
+        for (int start = 0; start < batch.size(); start += MAX_BATCH_EVENTS) {
+            sendBatch(new ArrayList<>(batch.subList(start, Math.min(start + MAX_BATCH_EVENTS, batch.size()))));
+        }
     }
 
     static final class Pending {

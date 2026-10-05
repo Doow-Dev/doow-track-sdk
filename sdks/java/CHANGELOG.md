@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Batch size
+
+- `flush` sends more than 500 events as separate requests of at most 500 events, each with its own batch id, so a large backlog no longer exceeds the API's per-minute event limit and loops on `429`.
+
 ### Breaking changes
 
 - `TrackEvent.metricTupleHint` is now a `MetricTupleHint` object instead of a `String`. The server only accepts the `{app_name, license_name, metric_name}` object, so the old string form never matched.

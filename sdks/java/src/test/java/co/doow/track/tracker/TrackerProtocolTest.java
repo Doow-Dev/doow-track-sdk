@@ -119,6 +119,51 @@ class TrackerProtocolTest {
         assertEquals("license_id is required", error.getRejections().get(0).getReason());
     }
 
+    private Tracker backlogTracker() {
+        TrackerOptions options = new TrackerOptions()
+            .setEndpoint("http://127.0.0.1:" + server.getAddress().getPort())
+            .setFlushIntervalMs(0)
+            .setFlushAt(5000)
+            .setMaxQueueSize(5000)
+            .setRetryCount(0)
+            .setOnError(errors::add);
+        return new Tracker("dk_test", options);
+    }
+
+    @Test
+    void flushOfMoreThan500EventsSendsChunksOfAtMost500WithDistinctBatchIds() {
+        Tracker tracker = backlogTracker();
+        for (int i = 0; i < 1200; i++) tracker.track(event());
+        tracker.flush();
+        tracker.shutdown();
+
+        assertEquals(3, bodies.size());
+        assertEquals(List.of(500, 500, 200), bodies.stream().map(b -> b.path("events").size()).toList());
+        assertEquals(3, bodies.stream().map(b -> b.path("batch_id").asText()).distinct().count());
+        long distinctEvents = bodies.stream()
+            .flatMap(b -> {
+                List<String> ids = new ArrayList<>();
+                b.path("events").forEach(e -> ids.add(e.path("event_id").asText()));
+                return ids.stream();
+            })
+            .distinct()
+            .count();
+        assertEquals(1200, distinctEvents);
+        assertTrue(errors.isEmpty());
+    }
+
+    @Test
+    void laterChunksAreStillSentAfterAChunkFailsPermanently() {
+        statuses = new int[] {400, 202};
+        Tracker tracker = backlogTracker();
+        for (int i = 0; i < 700; i++) tracker.track(event());
+        tracker.flush();
+        tracker.shutdown();
+
+        assertEquals(2, bodies.size());
+        assertEquals(1, errors.size());
+    }
+
     @Test
     void clientErrorIsReportedAndDoesNotStopLaterFlushes() {
         statuses = new int[] {400, 202};
