@@ -97,6 +97,58 @@ describe('React tracker wire protocol', () => {
     expect(onError).toHaveBeenCalledTimes(1);
   });
 
+  it('a transient failure requeues that chunk and every later chunk and sends nothing more', async () => {
+    const calls = stubFetch([{ status: 202 }, { status: 503 }]);
+    const onError = vi.fn();
+    const tracker = new Tracker('dk_test', {
+      flushAt: 5000,
+      maxQueueSize: 5000,
+      flushIntervalMs: 60_000,
+      disableCompression: true,
+      retryCount: 0,
+      onError,
+    });
+    for (let i = 0; i < 1200; i++) tracker.track(event);
+    await tracker.flush();
+
+    expect(calls).toHaveLength(2);
+    expect(onError).toHaveBeenCalledTimes(1);
+    const failedChunk = JSON.parse(calls[1]!.init.body as string).events.map((e: { event_id: string }) => e.event_id);
+
+    const retry = stubFetch([{ status: 202 }]);
+    await tracker.flush();
+    tracker.destroy();
+
+    const resent = retry.flatMap((call) =>
+      JSON.parse(call.init.body as string).events.map((e: { event_id: string }) => e.event_id),
+    );
+    expect(resent).toHaveLength(700);
+    expect(resent.slice(0, 500)).toEqual(failedChunk);
+  });
+
+  it('a transient failure holds count-triggered flushes until the next interval', async () => {
+    const calls = stubFetch([{ status: 503 }]);
+    const tracker = new Tracker('dk_test', {
+      flushAt: 2,
+      flushIntervalMs: 60_000,
+      disableCompression: true,
+      retryCount: 0,
+    });
+    tracker.track(event);
+    tracker.track(event);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(calls).toHaveLength(1);
+
+    tracker.track(event);
+    tracker.track(event);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const sentBeforeDestroy = calls.length;
+    (tracker as unknown as { queue: unknown[] }).queue = [];
+    tracker.destroy();
+
+    expect(sentBeforeDestroy).toBe(1);
+  });
+
   it('207 reports every rejection and does not retry', async () => {
     const calls = stubFetch([
       {
@@ -168,6 +220,7 @@ describe('React tracker wire protocol', () => {
     const tracker = new Tracker('dk_test', { flushIntervalMs: 60_000, onError, retryCount: 1 });
     tracker.track(event);
     await tracker.flush();
+    (tracker as unknown as { queue: unknown[] }).queue = [];
     tracker.destroy();
 
     expect(onError).toHaveBeenCalledTimes(1);
@@ -195,6 +248,7 @@ describe('React tracker wire protocol', () => {
     const tracker = new Tracker('dk_test', { flushIntervalMs: 60_000, onError, retryCount: 1 });
     tracker.track(event);
     await tracker.flush();
+    (tracker as unknown as { queue: unknown[] }).queue = [];
     tracker.destroy();
 
     expect(onError).toHaveBeenCalledTimes(1);
