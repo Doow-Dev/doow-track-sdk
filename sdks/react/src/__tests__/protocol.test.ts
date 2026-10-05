@@ -143,7 +143,7 @@ describe('React tracker wire protocol', () => {
 
     expect(calls).toHaveLength(1);
     const messages = onError.mock.calls.map(([e]) => (e as Error).message);
-    expect(messages.some((m) => m.includes('Dropped 700 queued events'))).toBe(true);
+    expect(messages.some((m) => m.includes('Dropped 1200 events'))).toBe(true);
   });
 
   it('a 408 request timeout is retried with the same batch and event ids', async () => {
