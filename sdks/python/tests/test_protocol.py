@@ -1,6 +1,7 @@
 """Wire protocol tests: batch envelope, tuple hints, and 207 partial acceptance."""
 
 import json
+import time
 
 import httpx
 import pytest
@@ -199,6 +200,34 @@ def test_transient_failure_requeues_that_chunk_and_every_later_chunk(httpx_mock)
     failed_chunk = [e["event_id"] for e in json.loads(requests[1].content)["events"]]
     assert len(tracker._buffer) == 700
     assert [e.event_id for e in tracker._buffer[:500]] == failed_chunk
+    assert tracker._hold_until > time.monotonic()
+
+
+def test_shutdown_stores_every_chunk_when_an_offline_store_is_set(httpx_mock):
+    class Store:
+        def __init__(self):
+            self.pushed: list = []
+
+        def push(self, item):
+            self.pushed.append(item)
+
+        def shift(self):
+            return None
+
+    store = Store()
+    httpx_mock.add_response(status_code=503, is_reusable=True)
+    errors: list = []
+    tracker = Tracker(
+        "dk_test",
+        _backlog_options(errors, disable_compression=True, offline_store=store),
+    )
+    for _ in range(1200):
+        tracker.track(_event())
+    tracker._shutdown.set()
+    tracker.flush()
+
+    assert len(store.pushed) == 3
+    assert tracker._buffer == []
 
 
 def test_a_chunk_saved_to_the_offline_store_is_not_requeued_again(httpx_mock):

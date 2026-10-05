@@ -263,6 +263,10 @@ class Tracker:
         for start in range(0, len(events), MAX_BATCH_EVENTS):
             outcome = self._send_batch(events[start : start + MAX_BATCH_EVENTS])
             if outcome in (_STORED, _FAILED):
+                if self._shutdown.is_set():
+                    if outcome == _STORED:
+                        continue
+                    return
                 resume = start + (MAX_BATCH_EVENTS if outcome == _STORED else 0)
                 self._requeue(events[resume:])
                 self._hold_until = time.monotonic() + self._options.flush_interval
