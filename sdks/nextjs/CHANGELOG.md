@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Batch size
+
+- A flush of more than 500 events is sent as separate requests of at most 500 events, each with its own batch id, so a large backlog no longer exceeds the API's per-minute event limit and loops on `429`.
+
 ### Behavior changes
 
 - `ServerTracker` accepts an `onError` option. HTTP 207 partial acceptance is reported there as `PartialAcceptError` and does not throw. Previously a 207 was treated as success and rejections were lost.

@@ -57,6 +57,46 @@ describe('Next.js client wire protocol', () => {
     expect(onError).not.toHaveBeenCalled();
   });
 
+  it('a flush of more than 500 events sends chunks of at most 500 with distinct batch ids and every event once', async () => {
+    const calls = stubFetch([{ status: 202, body: { accepted: 500, rejected: 0 } }]);
+    const tracker = new Tracker('dk_test', {
+      flushAt: 5000,
+      maxQueueSize: 5000,
+      flushIntervalMs: 60_000,
+      disableCompression: true,
+    });
+    for (let i = 0; i < 1200; i++) tracker.track(event);
+    await tracker.flush();
+    tracker.destroy();
+
+    const bodies = calls.map((call) => JSON.parse(call.init.body as string));
+    expect(bodies.map((body) => body.events.length)).toEqual([500, 500, 200]);
+    expect(new Set(bodies.map((body) => body.batch_id)).size).toBe(3);
+    const eventIds = bodies.flatMap((body) => body.events.map((e: { event_id: string }) => e.event_id));
+    expect(new Set(eventIds).size).toBe(1200);
+  });
+
+  it('a failed chunk is reported and the remaining chunks are still sent', async () => {
+    const calls = stubFetch([
+      { status: 400, body: { error: 'bad' } },
+      { status: 202, body: { accepted: 200, rejected: 0 } },
+    ]);
+    const onError = vi.fn();
+    const tracker = new Tracker('dk_test', {
+      flushAt: 5000,
+      maxQueueSize: 5000,
+      flushIntervalMs: 60_000,
+      disableCompression: true,
+      onError,
+    });
+    for (let i = 0; i < 700; i++) tracker.track(event);
+    await tracker.flush();
+    tracker.destroy();
+
+    expect(calls).toHaveLength(2);
+    expect(onError).toHaveBeenCalledTimes(1);
+  });
+
   it('207 reports every rejection and does not retry', async () => {
     const calls = stubFetch([
       {
