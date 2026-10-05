@@ -166,13 +166,44 @@ final class TrackerProtocolTest extends TestCase
         $buffer = (new \ReflectionProperty($tracker, 'buffer'))->getValue($tracker);
         $this->assertCount(700, $buffer);
         $this->assertSame($failedChunk, array_map(fn ($e) => $e['event_id'], array_slice($buffer, 0, 500)));
-        $this->assertGreaterThan(microtime(true), (new \ReflectionProperty($tracker, 'holdUntil'))->getValue($tracker));
+        $this->assertGreaterThan(hrtime(true), (new \ReflectionProperty($tracker, 'holdUntil'))->getValue($tracker));
+    }
+
+    public function testARequestTimeoutIsRetriedWithTheSameBatchId(): void
+    {
+        $tracker = $this->tracker([new Response(408), new Response(202)], 1);
+        $tracker->track($this->event());
+        $tracker->flush();
+
+        $this->assertCount(2, $this->history);
+        $this->assertSame($this->body(0)['batch_id'], $this->body(1)['batch_id']);
+        $this->assertSame([], $this->errors);
+    }
+
+    public function testAChunkThatCannotBeSerializedIsReportedAndTheRestStillSend(): void
+    {
+        $tracker = $this->tracker([new Response(202)], 0, 5000);
+        $tracker->track(new TrackEvent(
+            metric: 'api_calls',
+            quantity: 1.0,
+            licenseId: 'lic_1',
+            metadata: ['bad' => NAN],
+        ));
+        for ($i = 0; $i < 600; $i++) {
+            $tracker->track($this->event());
+        }
+        $tracker->flush();
+
+        $this->assertCount(1, $this->history);
+        $this->assertCount(1, $this->errors);
+        $buffer = (new \ReflectionProperty($tracker, 'buffer'))->getValue($tracker);
+        $this->assertSame([], $buffer);
     }
 
     public function testATransientFailureHoldsCountTriggeredFlushes(): void
     {
         $tracker = $this->tracker([new Response(202)], 0, 2);
-        (new \ReflectionProperty($tracker, 'holdUntil'))->setValue($tracker, microtime(true) + 100);
+        (new \ReflectionProperty($tracker, 'holdUntil'))->setValue($tracker, hrtime(true) + 100_000_000_000);
         $tracker->track($this->event());
         $tracker->track($this->event());
 

@@ -58,7 +58,7 @@ class Tracker
     private TrackerOptions $options;
     private ClientInterface $client;
     private array $buffer = [];
-    private float $holdUntil = 0.0;
+    private int $holdUntil = 0;
 
     public function __construct(string $apiKey, ?TrackerOptions $options = null)
     {
@@ -110,7 +110,7 @@ class Tracker
             $this->log('queue full, dropped oldest event');
         }
 
-        if (count($this->buffer) >= $this->options->flushAt && microtime(true) >= $this->holdUntil) {
+        if (count($this->buffer) >= $this->options->flushAt && hrtime(true) >= $this->holdUntil) {
             $this->flush();
         }
     }
@@ -138,7 +138,7 @@ class Tracker
                 }
                 if ($e instanceof DoowError && $e->isRetryable()) {
                     $this->requeue(array_slice($events, $index * self::MAX_BATCH_EVENTS));
-                    $this->holdUntil = microtime(true) + $this->options->flushIntervalMs / 1000;
+                    $this->holdUntil = hrtime(true) + $this->options->flushIntervalMs * 1_000_000;
 
                     return;
                 }
