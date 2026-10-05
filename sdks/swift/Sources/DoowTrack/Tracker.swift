@@ -217,7 +217,7 @@ public class Tracker {
     private let encoder: JSONEncoder
     private var flushTimer: Timer?
     private var isClosed = false
-    private var holdUntil = Date.distantPast
+    private var holdUntil: TimeInterval = 0
     private let responseSession: BoundedResponseSession
 
     public init(_ apiKey: String, options: TrackerOptions = TrackerOptions()) throws {
@@ -267,7 +267,7 @@ public class Tracker {
 
         buffer.append(BufferedEvent(eventId: UUID().uuidString.lowercased(), event: finalEvent))
 
-        if buffer.count >= options.flushAt && Date() >= holdUntil {
+        if buffer.count >= options.flushAt && ProcessInfo.processInfo.systemUptime >= holdUntil {
             DispatchQueue.global().async { [weak self] in
                 self?.flush()
             }
@@ -305,7 +305,7 @@ public class Tracker {
         if buffer.count > options.maxQueueSize {
             buffer.removeLast(buffer.count - options.maxQueueSize)
         }
-        holdUntil = Date().addingTimeInterval(options.flushIntervalSeconds)
+        holdUntil = ProcessInfo.processInfo.systemUptime + options.flushIntervalSeconds
     }
 
     static func makeBatch(batchId: String, events: [BufferedEvent]) -> WireBatch {
@@ -386,7 +386,7 @@ public class Tracker {
                 return false
             }
 
-            if (status == 429 || status >= 500) && !isLastAttempt {
+            if (status == 408 || status == 429 || status >= 500) && !isLastAttempt {
                 var delay = pow(2, Double(attempt))
                 if status == 429 || status == 503 {
                     delay = max(delay, parseRetryAfter(httpResponse?.value(forHTTPHeaderField: "Retry-After")))
@@ -397,7 +397,7 @@ public class Tracker {
 
             let errorBody = boundedData.flatMap { String(data: $0, encoding: .utf8) } ?? ""
             report(DoowError("API error: \(sanitizeText(errorBody))", statusCode: status))
-            return status == 429 || status >= 500
+            return status == 408 || status == 429 || status >= 500
         }
         return false
     }

@@ -174,6 +174,22 @@ final class TrackerProtocolTests {
         #expect(Array(resent.prefix(500)) == failedChunk)
     }
 
+    @Test func requestTimeoutIsRetriedWithTheSameBatchId() throws {
+        var calls = 0
+        StubURLProtocol.responder = { _ in
+            calls += 1
+            return (calls == 1 ? 408 : 202, Data("slow".utf8))
+        }
+        let tracker = try makeTracker()
+        track(tracker)
+        tracker.flush()
+
+        #expect(StubURLProtocol.requests.count == 2)
+        let ids = try StubURLProtocol.requests.map { try json($0.body)["batch_id"] as? String }
+        #expect(Set(ids).count == 1)
+        #expect(errors.isEmpty)
+    }
+
     @Test func transientFailureHoldsCountTriggeredFlushes() throws {
         StubURLProtocol.responder = { _ in (503, Data("down".utf8)) }
         let tracker = try Tracker("dk_test", options: TrackerOptions(
