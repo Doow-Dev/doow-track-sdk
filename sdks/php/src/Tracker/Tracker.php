@@ -58,6 +58,7 @@ class Tracker
     private TrackerOptions $options;
     private ClientInterface $client;
     private array $buffer = [];
+    private float $holdUntil = 0.0;
 
     public function __construct(string $apiKey, ?TrackerOptions $options = null)
     {
@@ -109,7 +110,7 @@ class Tracker
             $this->log('queue full, dropped oldest event');
         }
 
-        if (count($this->buffer) >= $this->options->flushAt) {
+        if (count($this->buffer) >= $this->options->flushAt && microtime(true) >= $this->holdUntil) {
             $this->flush();
         }
     }
@@ -123,7 +124,7 @@ class Tracker
         $events = $this->buffer;
         $this->buffer = [];
 
-        foreach (array_chunk($events, self::MAX_BATCH_EVENTS) as $chunk) {
+        foreach (array_chunk($events, self::MAX_BATCH_EVENTS) as $index => $chunk) {
             try {
                 $this->sendBatch($chunk);
             } catch (\Exception $e) {
@@ -135,7 +136,21 @@ class Tracker
                         $this->log('onError handler threw');
                     }
                 }
+                if ($e instanceof DoowError && $e->isRetryable()) {
+                    $this->requeue(array_slice($events, $index * self::MAX_BATCH_EVENTS));
+                    $this->holdUntil = microtime(true) + $this->options->flushIntervalMs / 1000;
+
+                    return;
+                }
             }
+        }
+    }
+
+    private function requeue(array $events): void
+    {
+        $this->buffer = array_merge($events, $this->buffer);
+        if (count($this->buffer) > $this->options->maxQueueSize) {
+            $this->buffer = array_slice($this->buffer, 0, $this->options->maxQueueSize);
         }
     }
 

@@ -147,6 +147,40 @@ final class TrackerProtocolTest extends TestCase
         $this->assertSame([], $this->errors);
     }
 
+    public function testATransientFailureRequeuesThatChunkAndEveryLaterChunk(): void
+    {
+        $tracker = $this->tracker(
+            [new Response(202), new Response(503)],
+            0,
+            5000,
+        );
+        for ($i = 0; $i < 1200; $i++) {
+            $tracker->track($this->event());
+        }
+        $tracker->flush();
+
+        $this->assertCount(2, $this->history);
+        $this->assertCount(1, $this->errors);
+        $failedChunk = array_map(fn ($e) => $e['event_id'], $this->body(1)['events']);
+
+        $buffer = (new \ReflectionProperty($tracker, 'buffer'))->getValue($tracker);
+        $this->assertCount(700, $buffer);
+        $this->assertSame($failedChunk, array_map(fn ($e) => $e['event_id'], array_slice($buffer, 0, 500)));
+    }
+
+    public function testATransientFailureHoldsCountTriggeredFlushes(): void
+    {
+        $tracker = $this->tracker([new Response(202)], 0, 2);
+        (new \ReflectionProperty($tracker, 'holdUntil'))->setValue($tracker, microtime(true) + 100);
+        $tracker->track($this->event());
+        $tracker->track($this->event());
+
+        $this->assertCount(0, $this->history);
+        $buffer = (new \ReflectionProperty($tracker, 'buffer'))->getValue($tracker);
+        $this->assertCount(2, $buffer);
+        (new \ReflectionProperty($tracker, 'buffer'))->setValue($tracker, []);
+    }
+
     public function testLaterChunksAreStillSentAfterAChunkFailsPermanently(): void
     {
         $tracker = $this->tracker(
