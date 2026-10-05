@@ -11,6 +11,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixes
 
+- Replaying the offline store ends at the first batch the server cannot take, so an outage no longer cycles the same batches forever, and a 401 or a rate-limited replay puts the batch back in the store instead of discarding it.
 - HTTP 207 rejections are read from the API's numeric `rejected` plus `rejections[]` shape, sanitized, and reported through `onError` without a resend.
 - Only 429, 5xx, and network errors are retried. A permanent 4xx is reported once, and a single event that exceeds the 413 payload limit is reported instead of being retried forever.
 - `Retry-After` is clamped to 30 seconds, and a throwing `onError` handler never escapes `flush`.

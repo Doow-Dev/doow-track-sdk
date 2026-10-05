@@ -194,6 +194,105 @@ describe('S80: Offline persistent store', () => {
     });
   });
 
+  describe('offline replay while the server is unavailable', () => {
+    class CountingStore extends MemoryOfflineStore {
+      shifts = 0;
+
+      async shift(): Promise<SerializedBatch | undefined> {
+        this.shifts += 1;
+        if (this.shifts > 50) return undefined;
+        return super.shift();
+      }
+    }
+
+    async function seed(store: OfflineStore, count: number): Promise<void> {
+      for (let i = 1; i <= count; i++) {
+        await store.push({
+          batch_id: `pre-batch-${i}`,
+          payload: JSON.stringify({
+            batch_id: `pre-batch-${i}`,
+            sdk_version: '0.1.0',
+            events: [makeEvent(i)],
+          }),
+          timestamp: new Date().toISOString(),
+        });
+      }
+    }
+
+    function countingTransport(status: number): { transport: CustomTransport; calls: () => number } {
+      let calls = 0;
+      return {
+        transport: {
+          send: async () => {
+            calls += 1;
+            return { status, headers: {}, body: '' };
+          },
+        },
+        calls: () => calls,
+      };
+    }
+
+    it('stops after the first failed replay instead of cycling the same batches forever', async () => {
+      const store = new CountingStore();
+      await seed(store, 2);
+      const { transport, calls } = countingTransport(503);
+
+      await makeExporter(transport, store).flush([]);
+
+      expect(store.shifts).toBeLessThanOrEqual(2);
+      expect(calls()).toBe(1);
+      expect(await store.length()).toBe(2);
+    });
+
+    it('keeps every stored batch, including the one in flight, after a 401', async () => {
+      const store = new CountingStore();
+      await seed(store, 3);
+      const { transport, calls } = countingTransport(401);
+      const exporter = makeExporter(transport, store);
+
+      await exporter.flush([makeEvent(9)]);
+
+      expect(exporter.stopped).toBe(true);
+      expect(calls()).toBe(1);
+      expect(store.queue.map((b) => b.batch_id).sort()).toEqual([
+        'pre-batch-1',
+        'pre-batch-2',
+        'pre-batch-3',
+      ]);
+    });
+
+    it('keeps the batch when the replay is rate limited', async () => {
+      const store = new CountingStore();
+      await seed(store, 2);
+      const { transport, calls } = countingTransport(429);
+
+      await makeExporter(transport, store).flush([]);
+
+      expect(calls()).toBe(1);
+      expect(store.queue.map((b) => b.batch_id).sort()).toEqual(['pre-batch-1', 'pre-batch-2']);
+    });
+
+    it('drops a stored batch the server rejects permanently and keeps replaying the rest', async () => {
+      const store = new CountingStore();
+      await seed(store, 2);
+      const sent: string[] = [];
+      const transport: CustomTransport = {
+        send: async (payload) => {
+          const body = JSON.parse(payload.body.toString()) as { batch_id: string };
+          sent.push(body.batch_id);
+          return body.batch_id === 'pre-batch-1'
+            ? { status: 400, headers: {}, body: '' }
+            : { status: 202, headers: {}, body: '{}' };
+        },
+      };
+
+      await makeExporter(transport, store).flush([]);
+
+      expect(sent).toEqual(['pre-batch-1', 'pre-batch-2']);
+      expect(await store.length()).toBe(0);
+    });
+  });
+
   describe('FileOfflineStore', () => {
     let testDir: string;
 

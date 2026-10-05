@@ -228,22 +228,30 @@ export class Exporter {
     const store = this.config.offlineStore;
     if (!store) return;
 
+    let pending: number;
     try {
-      const len = await store.length();
-      if (len === 0) return;
-      this.config.debug.log(`Draining ${len} batches from offline store`);
+      pending = await store.length();
+      if (pending === 0) return;
+      this.config.debug.log(`Draining ${pending} batches from offline store`);
     } catch {
       return;
     }
 
-    // Drain FIFO — shift one batch at a time
-    let batch: SerializedBatch | undefined;
-    while ((batch = await store.shift()) !== undefined) {
+    // A batch that fails again is pushed back to the store, so the replay is bounded by the
+    // starting length and ends at the first batch the server cannot take.
+    for (let replayed = 0; replayed < pending && !this._stopped; replayed++) {
+      const batch = await store.shift();
+      if (batch === undefined) return;
       try {
         const payload = JSON.parse(batch.payload) as BatchPayload;
-        if (payload.events && payload.events.length > 0) {
-          await this._sendWithRetry(payload.events, this.config.retryCount, payload.batch_id);
-        }
+        if (!payload.events || payload.events.length === 0) continue;
+        const outcome = await this._sendWithRetry(
+          payload.events,
+          this.config.retryCount,
+          payload.batch_id,
+          true,
+        );
+        if (outcome === 'deferred' || outcome === 'stopped') return;
       } catch {
         this.config.debug.warn(`Failed to replay offline batch ${batch.batch_id}`);
       }
@@ -266,17 +274,21 @@ export class Exporter {
     }
   }
 
+  // A replayed batch comes out of the offline store, so any outcome other than delivered or
+  // permanently rejected has to put it back.
   private async _sendWithRetry(
     events: SerializedEvent[],
     retriesLeft: number,
     batchId?: string,
-  ): Promise<void> {
-    if (this._stopped) return;
-
+    replaying = false,
+  ): Promise<SendOutcome> {
     const resolvedBatchId = batchId ?? generateUUID();
+
+    if (this._stopped) return this._keepIfReplaying(replaying, resolvedBatchId, events);
 
     try {
       await this._withConcurrencyLimit(() => this._sendOnce(events, resolvedBatchId));
+      return 'delivered';
     } catch (err) {
       const sdkErr = err as SdkHttpError;
 
@@ -288,7 +300,7 @@ export class Exporter {
           message: 'API key rejected (401). Stopping SDK.',
           statusCode: 401,
         });
-        return;
+        return this._keepIfReplaying(replaying, resolvedBatchId, events);
       }
 
       if (sdkErr.statusCode === 413) {
@@ -299,7 +311,7 @@ export class Exporter {
             statusCode: 413,
             rejectedEventIds: events.map((e) => e.event_id),
           });
-          return;
+          return 'dropped';
         }
 
         // Adaptive recovery — halve batch
@@ -311,11 +323,19 @@ export class Exporter {
         const second = events.slice(half);
 
         // Retry each half with full retry budget
-        await this._sendWithRetry(first, this.config.retryCount, resolvedBatchId);
-        if (second.length > 0) {
-          await this._sendWithRetry(second, this.config.retryCount);
-        }
-        return;
+        const firstOutcome = await this._sendWithRetry(
+          first,
+          this.config.retryCount,
+          resolvedBatchId,
+          replaying,
+        );
+        const secondOutcome = await this._sendWithRetry(
+          second,
+          this.config.retryCount,
+          undefined,
+          replaying,
+        );
+        return worstOutcome(firstOutcome, secondOutcome);
       }
 
       if (sdkErr.statusCode === 429) {
@@ -332,9 +352,12 @@ export class Exporter {
           statusCode: 429,
           retryAfterMs,
         });
-        if (retriesLeft <= 0) return;
+        if (retriesLeft <= 0) {
+          if (replaying) await this._persistToOfflineStore(resolvedBatchId, events);
+          return 'deferred';
+        }
         await this._sleep(retryAfterMs);
-        return await this._sendWithRetry(events, retriesLeft - 1, resolvedBatchId);
+        return await this._sendWithRetry(events, retriesLeft - 1, resolvedBatchId, replaying);
       }
 
       if (
@@ -349,7 +372,7 @@ export class Exporter {
           statusCode: sdkErr.statusCode,
           rejectedEventIds: events.map((e) => e.event_id),
         });
-        return;
+        return 'dropped';
       }
 
       if (retriesLeft <= 0) {
@@ -363,7 +386,7 @@ export class Exporter {
         this._report(errPayload);
         // S80: Persist to offline store if configured
         await this._persistToOfflineStore(resolvedBatchId, events);
-        return;
+        return 'deferred';
       }
 
       // Exponential backoff for non-429 retryable errors; a 503 may also carry Retry-After
@@ -373,8 +396,17 @@ export class Exporter {
       );
       this.config.debug.log(`Retry in ${delay}ms, ${retriesLeft - 1} retries left`);
       await this._sleep(delay);
-      await this._sendWithRetry(events, retriesLeft - 1, resolvedBatchId);
+      return await this._sendWithRetry(events, retriesLeft - 1, resolvedBatchId, replaying);
     }
+  }
+
+  private async _keepIfReplaying(
+    replaying: boolean,
+    batchId: string,
+    events: SerializedEvent[],
+  ): Promise<SendOutcome> {
+    if (replaying) await this._persistToOfflineStore(batchId, events);
+    return 'stopped';
   }
 
   /** S80: Persist a failed batch to the offline store */
@@ -518,7 +550,9 @@ export class Exporter {
     if (response.status >= 500) {
       const retryAfterMs =
         response.status === 503
-          ? this._parseRetryAfter(response.headers['retry-after'] ?? response.headers['Retry-After'])
+          ? this._parseRetryAfter(
+              response.headers['retry-after'] ?? response.headers['Retry-After'],
+            )
           : undefined;
       throw new SdkHttpError(
         'TRANSPORT_ERROR',
@@ -635,6 +669,15 @@ export class Exporter {
   private _sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
+}
+
+type SendOutcome = 'delivered' | 'dropped' | 'deferred' | 'stopped';
+
+function worstOutcome(a: SendOutcome, b: SendOutcome): SendOutcome {
+  for (const outcome of ['stopped', 'deferred', 'delivered'] as const) {
+    if (a === outcome || b === outcome) return outcome;
+  }
+  return 'dropped';
 }
 
 class SdkHttpError extends Error {
