@@ -75,6 +75,12 @@ type Tracker struct {
 	holdUntil  atomic.Int64
 }
 
+var processStart = time.Now()
+
+func monotonicNow() int64 {
+	return int64(time.Since(processStart))
+}
+
 type sendOutcome int
 
 const (
@@ -274,7 +280,7 @@ func (t *Tracker) Track(event TrackEvent) {
 		t.log("queue full, dropped oldest event")
 	}
 	t.buffer = append(t.buffer, serialized)
-	shouldFlush := len(t.buffer) >= t.flushAt && time.Now().UnixNano() >= t.holdUntil.Load()
+	shouldFlush := len(t.buffer) >= t.flushAt && monotonicNow() >= t.holdUntil.Load()
 	t.mu.Unlock()
 
 	if shouldFlush {
@@ -338,7 +344,7 @@ func (t *Tracker) Flush() error {
 				resume = end
 			}
 			t.requeue(events[resume:])
-			t.holdUntil.Store(time.Now().Add(t.flushInterval).UnixNano())
+			t.holdUntil.Store(monotonicNow() + int64(t.flushInterval))
 			break
 		}
 	}

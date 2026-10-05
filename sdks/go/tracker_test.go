@@ -405,7 +405,7 @@ func TestTracker_TransientFailureRequeuesThatChunkAndEveryLaterChunk(t *testing.
 	failedChunk := payloads[1].Events
 	mu.Unlock()
 
-	if tracker.holdUntil.Load() <= time.Now().UnixNano() {
+	if tracker.holdUntil.Load() <= monotonicNow() {
 		t.Fatalf("expected the failure to hold count-triggered flushes")
 	}
 
@@ -447,6 +447,38 @@ func TestTracker_ChunkSavedToTheOfflineStoreIsNotRequeuedAgain(t *testing.T) {
 	}
 }
 
+func TestTracker_A408RequestTimeoutIsRetriedWithTheSameBatchID(t *testing.T) {
+	var mu sync.Mutex
+	var payloads []BatchPayload
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload BatchPayload
+		json.NewDecoder(r.Body).Decode(&payload)
+		mu.Lock()
+		payloads = append(payloads, payload)
+		call := len(payloads)
+		mu.Unlock()
+		if call == 1 {
+			w.WriteHeader(http.StatusRequestTimeout)
+			return
+		}
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer server.Close()
+
+	tracker := newBacklogTracker(server.URL, nil)
+	tracker.Track(TrackEvent{Metric: "api_calls", Quantity: 1, LicenseID: "lic_1"})
+	if err := tracker.Flush(); err != nil {
+		t.Fatalf("flush failed: %v", err)
+	}
+	tracker.Shutdown()
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(payloads) != 2 || payloads[0].BatchID != payloads[1].BatchID {
+		t.Fatalf("expected one retry of the same batch, got %d requests", len(payloads))
+	}
+}
+
 func TestTracker_ShutdownStoresEveryChunkWhenAnOfflineStoreIsSet(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)
@@ -482,7 +514,7 @@ func TestTracker_TransientFailureHoldsCountTriggeredFlushes(t *testing.T) {
 		FlushInterval: time.Hour,
 		RetryCount:    0,
 	})
-	tracker.holdUntil.Store(time.Now().Add(time.Hour).UnixNano())
+	tracker.holdUntil.Store(monotonicNow() + int64(time.Hour))
 	tracker.Track(TrackEvent{Metric: "api_calls", Quantity: 1, LicenseID: "lic_1"})
 	tracker.Track(TrackEvent{Metric: "api_calls", Quantity: 1, LicenseID: "lic_1"})
 	time.Sleep(100 * time.Millisecond)

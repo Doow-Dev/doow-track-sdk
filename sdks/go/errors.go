@@ -66,9 +66,9 @@ func (e *PartialAcceptError) Error() string {
 	return fmt.Sprintf("doow: batch %s partially accepted: %d rejected", e.BatchID, e.Rejected)
 }
 
-// IsPermanent reports a 4xx other than 429, which no retry can fix.
+// IsPermanent reports a 4xx other than 408 and 429, which no retry can fix.
 func (e *APIError) IsPermanent() bool {
-	return e.Status >= 400 && e.Status < 500 && e.Status != 429
+	return e.Status >= 400 && e.Status < 500 && e.Status != 408 && e.Status != 429
 }
 
 const maxErrorText = 512
