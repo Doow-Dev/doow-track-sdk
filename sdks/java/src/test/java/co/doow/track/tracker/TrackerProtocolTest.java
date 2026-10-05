@@ -181,6 +181,34 @@ class TrackerProtocolTest {
     }
 
     @Test
+    void anInterruptDuringTheBackoffRequeuesTheInFlightChunkToo() throws Exception {
+        statuses = new int[] {503};
+        TrackerOptions options = new TrackerOptions()
+            .setEndpoint("http://127.0.0.1:" + server.getAddress().getPort())
+            .setFlushIntervalMs(0)
+            .setFlushAt(5000)
+            .setRetryCount(2)
+            .setOnError(errors::add);
+        Tracker tracker = new Tracker("dk_test", options);
+        for (int i = 0; i < 700; i++) tracker.track(event());
+
+        Thread flusher = new Thread(tracker::flush);
+        flusher.start();
+        Thread.sleep(400);
+        flusher.interrupt();
+        flusher.join(5000);
+
+        statuses = new int[] {202};
+        bodies.clear();
+        tracker.flush();
+        tracker.shutdown();
+
+        List<String> resent = new ArrayList<>();
+        bodies.forEach(b -> resent.addAll(eventIds(b)));
+        assertEquals(700, resent.size());
+    }
+
+    @Test
     void aRequestTimeoutIsRetriedWithTheSameBatchId() {
         statuses = new int[] {408, 202};
         Tracker tracker = tracker();

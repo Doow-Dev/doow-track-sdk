@@ -260,11 +260,11 @@ public class Tracker implements AutoCloseable {
                     Thread.sleep((long) Math.pow(2, attempt) * 1000);
                 } catch (InterruptedException ie) {
                     Thread.currentThread().interrupt();
-                    return false;
+                    return true;
                 }
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
-                return false;
+                return true;
             }
         }
         return false;
