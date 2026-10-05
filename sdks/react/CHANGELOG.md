@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Batch size
+
+- A flush of more than 500 events is sent as separate requests of at most 500 events, each with its own batch id, so a large backlog no longer exceeds the API's per-minute event limit and loops on `429`.
+
 ### Behavior changes
 
 - Page-unload delivery uses `fetch` with `keepalive` and the Bearer header instead of `navigator.sendBeacon`, which cannot send the Authorization header. A hidden-tab flush that fails transiently is requeued.

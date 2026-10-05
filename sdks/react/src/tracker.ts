@@ -106,11 +106,13 @@ export class Tracker {
 
     this.log(`Flushing ${batch.length} events`);
 
-    try {
-      await this.sendWithRetry(batch);
-    } catch (error) {
-      notify(this.options.onError, error as Error);
-      this.log(`Flush failed: ${error}`);
+    for (let i = 0; i < batch.length; i += MAX_BATCH_EVENTS) {
+      try {
+        await this.sendWithRetry(batch.slice(i, i + MAX_BATCH_EVENTS));
+      } catch (error) {
+        notify(this.options.onError, error as Error);
+        this.log(`Flush failed: ${error}`);
+      }
     }
   }
 
