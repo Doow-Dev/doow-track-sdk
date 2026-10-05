@@ -125,7 +125,10 @@ public class Tracker implements AutoCloseable {
                 holdUntilNanos = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(options.getFlushIntervalMs());
                 break;
             }
-            if (Thread.currentThread().isInterrupted()) break;
+            if (Thread.currentThread().isInterrupted()) {
+                requeue(batch.subList(Math.min(start + MAX_BATCH_EVENTS, batch.size()), batch.size()));
+                break;
+            }
         }
     }
 
@@ -240,7 +243,13 @@ public class Tracker implements AutoCloseable {
                     continue;
                 }
 
-                report(new DoowError("API error: " + sanitize(readStream(conn.getErrorStream())), status));
+                String errorBody;
+                try {
+                    errorBody = readStream(conn.getErrorStream());
+                } catch (IOException readFailure) {
+                    errorBody = "";
+                }
+                report(new DoowError("API error: " + sanitize(errorBody), status));
                 return status == 429 || status >= 500;
             } catch (IOException e) {
                 if (lastAttempt) {

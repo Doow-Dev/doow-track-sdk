@@ -213,9 +213,15 @@ class TrackerProtocolTest {
         } finally {
             Thread.interrupted();
         }
+        assertEquals(1, bodies.size());
+
+        bodies.clear();
+        tracker.flush();
         tracker.shutdown();
 
-        assertEquals(1, bodies.size());
+        List<String> resent = new ArrayList<>();
+        bodies.forEach(b -> resent.addAll(eventIds(b)));
+        assertEquals(700, resent.size());
     }
 
     @Test
