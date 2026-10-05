@@ -21,6 +21,7 @@ const DEFAULT_FLUSH_INTERVAL_MS: u64 = 10_000;
 const DEFAULT_MAX_QUEUE_SIZE: usize = 10_000;
 const DEFAULT_TIMEOUT_MS: u64 = 10_000;
 const DEFAULT_RETRY_COUNT: u32 = 3;
+const MAX_BATCH_EVENTS: usize = 500;
 
 /// Callback invoked for every delivery failure, including partial rejections
 #[derive(Clone)]
@@ -322,8 +323,14 @@ impl Tracker {
             std::mem::take(&mut *buffer)
         };
 
-        if let Err(e) = self.send_batch(events).await {
-            Self::report(&self.options, &e);
+        self.send_in_chunks(events).await;
+    }
+
+    async fn send_in_chunks(&self, events: Vec<SerializedEvent>) {
+        for chunk in events.chunks(MAX_BATCH_EVENTS) {
+            if let Err(e) = self.send_batch(chunk.to_vec()).await {
+                Self::report(&self.options, &e);
+            }
         }
     }
 
@@ -477,9 +484,7 @@ impl Tracker {
                         shutdown_complete: shutdown_complete.clone(),
                     };
 
-                    if let Err(e) = tracker.send_batch(events).await {
-                        Self::report(&options, &e);
-                    }
+                    tracker.send_in_chunks(events).await;
                 }
                 _ = shutdown_rx.recv() => {
                     // Final flush
@@ -497,9 +502,7 @@ impl Tracker {
                             shutdown_tx: None,
                             shutdown_complete: shutdown_complete.clone(),
                         };
-                        if let Err(e) = tracker.send_batch(events).await {
-                            Self::report(&options, &e);
-                        }
+                        tracker.send_in_chunks(events).await;
                     }
 
                     *shutdown_complete.write().await = true;
@@ -762,6 +765,85 @@ mod tests {
         let cleaned = sanitize_text(&format!("line1\nline2\u{1b}[31m{}", "x".repeat(2000)));
         assert!(!cleaned.contains('\n') && !cleaned.contains('\u{1b}'));
         assert!(cleaned.chars().count() <= 520);
+    }
+
+    #[tokio::test]
+    async fn flush_of_more_than_500_events_sends_chunks_of_at_most_500_with_distinct_batch_ids() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/telemetry/events"))
+            .respond_with(ResponseTemplate::new(202))
+            .mount(&server)
+            .await;
+        let tracker = Tracker::new(
+            "dk_test",
+            Some(TrackerOptions {
+                endpoint: server.uri(),
+                retry_count: 0,
+                flush_at: 5000,
+                max_queue_size: 5000,
+                disable_compression: true,
+                ..Default::default()
+            }),
+        );
+        let events: Vec<SerializedEvent> = (0..1200).map(|i| event(&format!("e{i}"))).collect();
+        tracker.buffer.lock().await.extend(events);
+        tracker.flush().await;
+
+        let requests = server.received_requests().await.unwrap();
+        let bodies: Vec<serde_json::Value> = requests
+            .iter()
+            .map(|r| serde_json::from_slice(&r.body).unwrap())
+            .collect();
+        let sizes: Vec<usize> = bodies.iter().map(|b| b["events"].as_array().unwrap().len()).collect();
+        assert_eq!(sizes, vec![500, 500, 200]);
+        let batch_ids: std::collections::HashSet<_> =
+            bodies.iter().map(|b| b["batch_id"].as_str().unwrap().to_string()).collect();
+        assert_eq!(batch_ids.len(), 3);
+        let event_ids: std::collections::HashSet<_> = bodies
+            .iter()
+            .flat_map(|b| b["events"].as_array().unwrap().iter())
+            .map(|e| e["event_id"].as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(event_ids.len(), 1200);
+    }
+
+    #[tokio::test]
+    async fn later_chunks_are_still_sent_after_a_chunk_fails_permanently() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/telemetry/events"))
+            .respond_with(ResponseTemplate::new(400).set_body_json(serde_json::json!({"message": "bad"})))
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/telemetry/events"))
+            .respond_with(ResponseTemplate::new(202))
+            .mount(&server)
+            .await;
+        let reported = Arc::new(StdMutex::new(0usize));
+        let counter = reported.clone();
+        let tracker = Tracker::new(
+            "dk_test",
+            Some(TrackerOptions {
+                endpoint: server.uri(),
+                retry_count: 0,
+                flush_at: 5000,
+                max_queue_size: 5000,
+                disable_compression: true,
+                on_error: Some(ErrorHandler(Arc::new(move |_| {
+                    *counter.lock().unwrap() += 1;
+                }))),
+                ..Default::default()
+            }),
+        );
+        let events: Vec<SerializedEvent> = (0..700).map(|i| event(&format!("e{i}"))).collect();
+        tracker.buffer.lock().await.extend(events);
+        tracker.flush().await;
+
+        assert_eq!(server.received_requests().await.unwrap().len(), 2);
+        assert_eq!(*reported.lock().unwrap(), 1);
     }
 
     #[tokio::test]

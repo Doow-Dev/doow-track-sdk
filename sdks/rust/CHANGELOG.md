@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Batch size
+
+- `flush`, the interval flush, and the shutdown flush send more than 500 events as separate requests of at most 500 events, each with its own batch id.
+
 ### Breaking changes
 
 - `TrackerOptions` has a new `on_error: Option<ErrorHandler>` field. Code that builds the struct without `..Default::default()` must set it.
