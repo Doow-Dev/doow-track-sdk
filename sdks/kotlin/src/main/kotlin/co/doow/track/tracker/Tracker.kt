@@ -103,7 +103,10 @@ class Tracker(
                 holdUntilNanos = System.nanoTime() + options.flushIntervalMs * 1_000_000L
                 break
             }
-            if (Thread.currentThread().isInterrupted) break
+            if (Thread.currentThread().isInterrupted) {
+                requeue(batch.drop((index + 1) * MAX_BATCH_EVENTS))
+                break
+            }
         }
     }
 
@@ -111,7 +114,13 @@ class Tracker(
         if (closed || events.isEmpty()) return
         synchronized(buffer) {
             buffer.addAll(0, events)
-            while (buffer.size > options.maxQueueSize) buffer.removeAt(buffer.size - 1)
+            while (buffer.size > options.maxQueueSize) {
+                try {
+                    buffer.removeAt(buffer.size - 1)
+                } catch (e: IndexOutOfBoundsException) {
+                    break
+                }
+            }
         }
     }
 
@@ -162,7 +171,11 @@ class Tracker(
                     continue
                 }
 
-                val errorBody = conn.errorStream?.bufferedReader()?.let { readBounded(it) } ?: ""
+                val errorBody = try {
+                    conn.errorStream?.bufferedReader()?.let { readBounded(it) } ?: ""
+                } catch (e: java.io.IOException) {
+                    ""
+                }
                 report(DoowError("API error: ${sanitize(errorBody)}", status))
                 return status == 429 || status >= 500
             } catch (e: InterruptedException) {

@@ -194,9 +194,13 @@ class TrackerProtocolTest {
         } finally {
             Thread.interrupted()
         }
+        assertEquals(1, bodies.size)
+
+        bodies.clear()
+        tracker.flush()
         tracker.shutdown()
 
-        assertEquals(1, bodies.size)
+        assertEquals(700, bodies.flatMap { eventIds(it) }.size)
     }
 
     @Test
