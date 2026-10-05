@@ -2,6 +2,7 @@ import type { TrackEvent, TrackerOptions } from './types';
 import {
   NonRetryableError,
   generateUUID,
+  isTransientStatus,
   notify,
   parseRetryAfterMs,
   readBoundedText,
@@ -94,7 +95,7 @@ export class ClientTracker {
     this.queue.push(enrichedEvent);
     this.log(`Queued event: ${event.metric}`);
 
-    if (this.queue.length >= this.options.flushAt && Date.now() >= this.holdUntil) {
+    if (this.queue.length >= this.options.flushAt && performance.now() >= this.holdUntil) {
       this.flush();
     }
   }
@@ -114,7 +115,7 @@ export class ClientTracker {
         notify(this.options.onError, error as Error);
         this.log(`Flush failed: ${error}`);
         if (!(error instanceof NonRetryableError)) {
-          this.holdUntil = Date.now() + this.options.flushIntervalMs;
+          this.holdUntil = performance.now() + this.options.flushIntervalMs;
           this.requeue(batch.slice(i));
           return;
         }
@@ -142,7 +143,7 @@ export class ClientTracker {
         if (response.status === 207) {
           notify(this.options.onError, await readPartialAccept(response, batchId));
         } else if (!response.ok) {
-          if (response.status === 429 || response.status >= 500) this.requeue(chunk);
+          if (isTransientStatus(response.status)) this.requeue(chunk);
           notify(this.options.onError, new Error(`Unload flush failed: HTTP ${response.status}`));
         }
       })
@@ -216,7 +217,7 @@ export class ClientTracker {
           return;
         }
 
-        if (response.status === 429 || response.status >= 500) {
+        if (isTransientStatus(response.status)) {
           if (attempt === this.options.retryCount) {
             throw new Error(`HTTP ${response.status} after ${attempt + 1} attempts`);
           }
@@ -256,6 +257,7 @@ export class ClientTracker {
       } catch (error) {
         notify(this.options.onError, error as Error);
         this.log(`Drain failed: ${error}`);
+        if (!(error instanceof NonRetryableError)) return;
       }
     }
   }

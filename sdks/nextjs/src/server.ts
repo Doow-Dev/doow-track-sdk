@@ -2,6 +2,7 @@ import type { TrackEvent, ServerTrackerOptions } from './types';
 import {
   NonRetryableError,
   generateUUID,
+  isTransientStatus,
   notify,
   parseRetryAfterMs,
   readBoundedText,
@@ -81,7 +82,7 @@ export class ServerTracker {
           return;
         }
 
-        if (response.status === 429 || response.status >= 500) {
+        if (isTransientStatus(response.status)) {
           retryAfterMs =
             response.status === 429 || response.status === 503
               ? parseRetryAfterMs(response.headers.get('Retry-After'))
