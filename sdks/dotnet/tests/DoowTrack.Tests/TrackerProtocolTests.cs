@@ -143,6 +143,21 @@ public class TrackerProtocolTests
     }
 
     [Fact]
+    public async Task ARequestTimeoutIsRetriedWithTheSameBatchId()
+    {
+        var handler = new StubHandler((408, "slow"), (202, "{}"));
+        var (tracker, errors) = Create(handler);
+        tracker.Track(Event());
+        await tracker.FlushAsync();
+
+        Assert.Equal(2, handler.Requests.Count);
+        Assert.Equal(
+            handler.Requests[0].Body.GetProperty("batch_id").GetString(),
+            handler.Requests[1].Body.GetProperty("batch_id").GetString());
+        Assert.Empty(errors);
+    }
+
+    [Fact]
     public async Task ATransientFailureHoldsCountTriggeredFlushes()
     {
         var handler = new StubHandler((503, "down"));

@@ -34,7 +34,7 @@ public class Tracker : IDisposable
     private readonly Timer? _flushTimer;
     private readonly JsonSerializerOptions _jsonOptions;
     private bool _disposed;
-    private DateTime _holdUntil = DateTime.MinValue;
+    private long _holdUntilTicks;
 
     public Tracker(string apiKey, TrackerOptions? options = null)
     {
@@ -87,7 +87,7 @@ public class Tracker : IDisposable
             }
             _buffer.Add(new Pending(Guid.NewGuid().ToString(), finalEvent));
 
-            if (_buffer.Count >= _options.FlushAt && DateTime.UtcNow >= _holdUntil)
+            if (_buffer.Count >= _options.FlushAt && Environment.TickCount64 >= _holdUntilTicks)
             {
                 _ = FlushAsync();
             }
@@ -158,7 +158,7 @@ public class Tracker : IDisposable
             if (retryLater)
             {
                 Requeue(pending.GetRange(start, pending.Count - start));
-                _holdUntil = DateTime.UtcNow.AddMilliseconds(_options.FlushIntervalMs);
+                _holdUntilTicks = Environment.TickCount64 + _options.FlushIntervalMs;
                 return;
             }
         }
@@ -246,7 +246,7 @@ public class Tracker : IDisposable
                     return false;
                 }
 
-                if ((status == 429 || status >= 500) && !lastAttempt)
+                if ((status == 408 || status == 429 || status >= 500) && !lastAttempt)
                 {
                     var backoff = TimeSpan.FromSeconds(Math.Pow(2, attempt));
                     if (status is 429 or 503) backoff = TimeSpan.FromTicks(Math.Max(backoff.Ticks, ParseRetryAfter(response).Ticks));
@@ -255,7 +255,7 @@ public class Tracker : IDisposable
                 }
 
                 Report(new DoowError($"API error: {Sanitize(responseBody)}", status));
-                return status == 429 || status >= 500;
+                return status == 408 || status == 429 || status >= 500;
             }
             catch (Exception e) when (e is not HttpRequestException and not TaskCanceledException)
             {

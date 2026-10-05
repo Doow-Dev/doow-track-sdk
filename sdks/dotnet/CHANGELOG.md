@@ -4,6 +4,7 @@
 
 ### Batch size
 
+- A `408` request timeout is retried like `429` and `5xx`, and an unreadable response body no longer changes how a status is classified.
 - After a transient failure the remaining chunks are requeued instead of each spending a full retry budget, and count-triggered flushes pause until the next flush interval.
 - `FlushAsync` sends more than 500 events as separate requests of at most 500 events, each with its own batch id, so a large backlog no longer exceeds the API's per-minute event limit and loops on `429`.
 
