@@ -133,7 +133,11 @@ public class Tracker implements AutoCloseable {
     }
 
     private void requeue(List<Pending> events) {
-        if (closed || events.isEmpty()) return;
+        if (events.isEmpty()) return;
+        if (closed) {
+            report(new DoowError("Dropped " + events.size() + " events at shutdown after a transient failure"));
+            return;
+        }
         synchronized (lock) {
             buffer.addAll(0, events);
             while (buffer.size() > options.getMaxQueueSize()) {

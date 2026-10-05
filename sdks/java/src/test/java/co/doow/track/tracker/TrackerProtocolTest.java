@@ -181,6 +181,16 @@ class TrackerProtocolTest {
     }
 
     @Test
+    void aShutdownDuringAnOutageReportsHowManyEventsItDropped() {
+        statuses = new int[] {503};
+        Tracker tracker = backlogTracker();
+        for (int i = 0; i < 700; i++) tracker.track(event());
+        tracker.shutdown();
+
+        assertTrue(errors.stream().anyMatch(e -> e.getMessage().startsWith("Dropped 700 events at shutdown")));
+    }
+
+    @Test
     void anInterruptDuringTheBackoffRequeuesTheInFlightChunkToo() throws Exception {
         statuses = new int[] {503};
         TrackerOptions options = new TrackerOptions()
