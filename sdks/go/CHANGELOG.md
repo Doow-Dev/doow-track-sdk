@@ -4,7 +4,8 @@
 
 ### Batch size
 
-- `Flush` sends more than 500 events as separate requests of at most 500 events, each with its own batch id. It still tries every chunk and returns the first error.
+- After a transient failure the remaining chunks are requeued (a chunk already saved to the offline store is not requeued again) instead of each spending a full retry budget, and count-triggered flushes pause until the next flush interval.
+- `Flush` sends more than 500 events as separate requests of at most 500 events, each with its own batch id, and returns the first error.
 
 ### Fixes
 
