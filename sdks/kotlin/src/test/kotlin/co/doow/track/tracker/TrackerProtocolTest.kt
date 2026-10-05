@@ -134,6 +134,55 @@ class TrackerProtocolTest {
         assertTrue(errors.isEmpty())
     }
 
+    private fun eventIds(body: JsonObject) =
+        body["events"]!!.jsonArray.map { it.jsonObject["event_id"]!!.jsonPrimitive.content }
+
+    @Test
+    fun aTransientFailureRequeuesThatChunkAndEveryLaterChunkAndSendsNothingMore() {
+        statuses = intArrayOf(202, 503)
+        val tracker = backlogTracker()
+        repeat(1200) { tracker.track(event()) }
+        tracker.flush()
+
+        assertEquals(2, bodies.size)
+        assertEquals(1, errors.size)
+        val failedChunk = eventIds(bodies[1])
+
+        statuses = intArrayOf(202)
+        bodies.clear()
+        tracker.flush()
+        tracker.shutdown()
+
+        val resent = bodies.flatMap { eventIds(it) }
+        assertEquals(700, resent.size)
+        assertEquals(failedChunk, resent.take(500))
+    }
+
+    @Test
+    fun aTransientFailureHoldsCountTriggeredFlushes() {
+        statuses = intArrayOf(503)
+        val tracker = Tracker(
+            "dk_test",
+            TrackerOptions(
+                endpoint = "http://127.0.0.1:${server.address.port}",
+                flushIntervalMs = 60_000,
+                flushAt = 2,
+                retryCount = 0,
+                onError = { errors.add(it) }
+            )
+        )
+        tracker.track(event())
+        tracker.track(event())
+        Thread.sleep(300)
+        assertEquals(1, bodies.size)
+
+        tracker.track(event())
+        tracker.track(event())
+        Thread.sleep(300)
+        assertEquals(1, bodies.size)
+        tracker.shutdown()
+    }
+
     @Test
     fun anInterruptedFlushStopsAfterTheChunkInProgress() {
         val tracker = backlogTracker()

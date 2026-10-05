@@ -49,6 +49,7 @@ class Tracker(
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var flushJob: Job? = null
     @Volatile private var closed = false
+    @Volatile private var holdUntilNanos = System.nanoTime()
 
     init {
         require(this.apiKey.startsWith("dk_")) { "Invalid API key format. Must start with 'dk_'." }
@@ -81,7 +82,7 @@ class Tracker(
 
         buffer.add(Pending(UUID.randomUUID().toString(), finalEvent))
 
-        if (buffer.size >= options.flushAt) {
+        if (buffer.size >= options.flushAt && System.nanoTime() - holdUntilNanos >= 0) {
             scope.launch { flush() }
         }
     }
@@ -96,15 +97,27 @@ class Tracker(
         }
         if (batch.isEmpty()) return
 
-        for (chunk in batch.chunked(MAX_BATCH_EVENTS)) {
-            sendBatch(chunk)
+        for ((index, chunk) in batch.chunked(MAX_BATCH_EVENTS).withIndex()) {
+            if (sendBatch(chunk)) {
+                requeue(batch.drop(index * MAX_BATCH_EVENTS))
+                holdUntilNanos = System.nanoTime() + options.flushIntervalMs * 1_000_000L
+                break
+            }
             if (Thread.currentThread().isInterrupted) break
+        }
+    }
+
+    private fun requeue(events: List<Pending>) {
+        if (closed || events.isEmpty()) return
+        synchronized(buffer) {
+            buffer.addAll(0, events)
+            while (buffer.size > options.maxQueueSize) buffer.removeAt(buffer.size - 1)
         }
     }
 
     internal data class Pending(val eventId: String, val event: TrackEvent)
 
-    private fun sendBatch(batch: List<Pending>) {
+    private fun sendBatch(batch: List<Pending>): Boolean {
         val url = "${options.endpoint.trimEnd('/')}/telemetry/events"
         val batchId = UUID.randomUUID().toString()
 
@@ -134,12 +147,12 @@ class Tracker(
 
                 if (status == 207) {
                     report(parsePartialAccept(readBounded(conn.inputStream.bufferedReader()), batchId))
-                    return
+                    return false
                 }
 
                 if (status in 200..299) {
                     log("[doow-track] Flushed ${batch.size} events")
-                    return
+                    return false
                 }
 
                 if ((status == 429 || status >= 500) && !lastAttempt) {
@@ -151,18 +164,19 @@ class Tracker(
 
                 val errorBody = conn.errorStream?.bufferedReader()?.let { readBounded(it) } ?: ""
                 report(DoowError("API error: ${sanitize(errorBody)}", status))
-                return
+                return status == 429 || status >= 500
             } catch (e: InterruptedException) {
                 Thread.currentThread().interrupt()
-                return
+                return false
             } catch (e: Exception) {
                 if (lastAttempt) {
                     report(e)
-                    return
+                    return true
                 }
                 Thread.sleep(2.0.pow(attempt).toLong() * 1000)
             }
         }
+        return false
     }
 
     private fun parsePartialAccept(body: String, fallbackBatchId: String): PartialAcceptError {
