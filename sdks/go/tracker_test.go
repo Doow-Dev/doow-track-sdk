@@ -405,6 +405,10 @@ func TestTracker_TransientFailureRequeuesThatChunkAndEveryLaterChunk(t *testing.
 	failedChunk := payloads[1].Events
 	mu.Unlock()
 
+	if tracker.holdUntil.Load() <= time.Now().UnixNano() {
+		t.Fatalf("expected the failure to hold count-triggered flushes")
+	}
+
 	tracker.mu.Lock()
 	buffered := append([]SerializedEvent{}, tracker.buffer...)
 	tracker.mu.Unlock()
@@ -440,6 +444,24 @@ func TestTracker_ChunkSavedToTheOfflineStoreIsNotRequeuedAgain(t *testing.T) {
 	tracker.mu.Unlock()
 	if buffered != 700 {
 		t.Fatalf("expected 700 requeued events, got %d", buffered)
+	}
+}
+
+func TestTracker_ShutdownStoresEveryChunkWhenAnOfflineStoreIsSet(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+
+	store := &memoryOfflineStore{}
+	tracker := newBacklogTracker(server.URL, store)
+	for i := 0; i < 1200; i++ {
+		tracker.Track(TrackEvent{Metric: "api_calls", Quantity: 1, LicenseID: "lic_1"})
+	}
+	tracker.Shutdown()
+
+	if n, _ := store.Length(); n != 3 {
+		t.Fatalf("expected all 3 chunks stored at shutdown, got %d", n)
 	}
 }
 

@@ -327,6 +327,12 @@ func (t *Tracker) Flush() error {
 			firstErr = err
 		}
 		if outcome != sendDone {
+			if t.closed.Load() {
+				if outcome == sendStored {
+					continue
+				}
+				break
+			}
 			resume := start
 			if outcome == sendStored {
 				resume = end
