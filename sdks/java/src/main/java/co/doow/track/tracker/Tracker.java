@@ -31,6 +31,7 @@ public class Tracker implements AutoCloseable {
     private final Object lock = new Object();
     private final ScheduledExecutorService scheduler;
     private volatile boolean closed = false;
+    private volatile long holdUntilNanos = System.nanoTime();
 
     public Tracker(String apiKey) {
         this(apiKey, new TrackerOptions());
@@ -92,7 +93,7 @@ public class Tracker implements AutoCloseable {
             }
             buffer.add(pending);
 
-            if (buffer.size() >= options.getFlushAt()) {
+            if (buffer.size() >= options.getFlushAt() && System.nanoTime() - holdUntilNanos >= 0) {
                 scheduler.execute(this::flushQuietly);
             }
         }
@@ -117,8 +118,24 @@ public class Tracker implements AutoCloseable {
         }
 
         for (int start = 0; start < batch.size(); start += MAX_BATCH_EVENTS) {
-            sendBatch(new ArrayList<>(batch.subList(start, Math.min(start + MAX_BATCH_EVENTS, batch.size()))));
+            boolean retryLater = sendBatch(
+                new ArrayList<>(batch.subList(start, Math.min(start + MAX_BATCH_EVENTS, batch.size()))));
+            if (retryLater) {
+                requeue(batch.subList(start, batch.size()));
+                holdUntilNanos = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(options.getFlushIntervalMs());
+                break;
+            }
             if (Thread.currentThread().isInterrupted()) break;
+        }
+    }
+
+    private void requeue(List<Pending> events) {
+        if (closed || events.isEmpty()) return;
+        synchronized (lock) {
+            buffer.addAll(0, events);
+            while (buffer.size() > options.getMaxQueueSize()) {
+                buffer.remove(buffer.size() - 1);
+            }
         }
     }
 
@@ -162,7 +179,7 @@ public class Tracker implements AutoCloseable {
         return payload;
     }
 
-    private void sendBatch(List<Pending> batch) {
+    private boolean sendBatch(List<Pending> batch) {
         String url = options.getEndpoint().replaceAll("/$", "") + "/telemetry/events";
         String batchId = UUID.randomUUID().toString();
 
@@ -171,7 +188,7 @@ public class Tracker implements AutoCloseable {
             jsonBytes = mapper.writeValueAsBytes(buildPayload(batchId, batch));
         } catch (IOException e) {
             report(e);
-            return;
+            return false;
         }
 
         byte[] body = jsonBytes;
@@ -206,14 +223,14 @@ public class Tracker implements AutoCloseable {
 
                 if (status == 207) {
                     report(parsePartialAccept(readStream(conn.getInputStream()), batchId));
-                    return;
+                    return false;
                 }
 
                 if (status >= 200 && status < 300) {
                     if (options.isDebug()) {
                         System.err.println("[doow-track] Flushed " + batch.size() + " events");
                     }
-                    return;
+                    return false;
                 }
 
                 if ((status == 429 || status >= 500) && !lastAttempt) {
@@ -224,23 +241,24 @@ public class Tracker implements AutoCloseable {
                 }
 
                 report(new DoowError("API error: " + sanitize(readStream(conn.getErrorStream())), status));
-                return;
+                return status == 429 || status >= 500;
             } catch (IOException e) {
                 if (lastAttempt) {
                     report(e);
-                    return;
+                    return true;
                 }
                 try {
                     Thread.sleep((long) Math.pow(2, attempt) * 1000);
                 } catch (InterruptedException ie) {
                     Thread.currentThread().interrupt();
-                    return;
+                    return false;
                 }
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
-                return;
+                return false;
             }
         }
+        return false;
     }
 
     private PartialAcceptError parsePartialAccept(String body, String fallbackBatchId) {

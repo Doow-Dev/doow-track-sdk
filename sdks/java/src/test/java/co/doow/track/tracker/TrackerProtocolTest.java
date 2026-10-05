@@ -152,6 +152,56 @@ class TrackerProtocolTest {
         assertTrue(errors.isEmpty());
     }
 
+    private List<String> eventIds(JsonNode body) {
+        List<String> ids = new ArrayList<>();
+        body.path("events").forEach(e -> ids.add(e.path("event_id").asText()));
+        return ids;
+    }
+
+    @Test
+    void aTransientFailureRequeuesThatChunkAndEveryLaterChunkAndSendsNothingMore() {
+        statuses = new int[] {202, 503};
+        Tracker tracker = backlogTracker();
+        for (int i = 0; i < 1200; i++) tracker.track(event());
+        tracker.flush();
+
+        assertEquals(2, bodies.size());
+        assertEquals(1, errors.size());
+        List<String> failedChunk = eventIds(bodies.get(1));
+
+        statuses = new int[] {202};
+        bodies.clear();
+        tracker.flush();
+        tracker.shutdown();
+
+        List<String> resent = new ArrayList<>();
+        bodies.forEach(b -> resent.addAll(eventIds(b)));
+        assertEquals(700, resent.size());
+        assertEquals(failedChunk, resent.subList(0, 500));
+    }
+
+    @Test
+    void aTransientFailureHoldsCountTriggeredFlushes() throws Exception {
+        statuses = new int[] {503};
+        TrackerOptions options = new TrackerOptions()
+            .setEndpoint("http://127.0.0.1:" + server.getAddress().getPort())
+            .setFlushIntervalMs(60_000)
+            .setFlushAt(2)
+            .setRetryCount(0)
+            .setOnError(errors::add);
+        Tracker tracker = new Tracker("dk_test", options);
+        tracker.track(event());
+        tracker.track(event());
+        Thread.sleep(300);
+        assertEquals(1, bodies.size());
+
+        tracker.track(event());
+        tracker.track(event());
+        Thread.sleep(300);
+        assertEquals(1, bodies.size());
+        tracker.shutdown();
+    }
+
     @Test
     void anInterruptedFlushStopsAfterTheChunkInProgress() {
         Tracker tracker = backlogTracker();
