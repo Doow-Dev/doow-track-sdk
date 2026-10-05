@@ -11,8 +11,12 @@ require "uri"
 module DoowTrack
   class Tracker
     MAX_RETRY_AFTER_SECONDS = 30
+    MAX_BACKOFF_SECONDS = 10
+    MAX_RESPONSE_BYTES = 64 * 1024
     SHUTDOWN_JOIN_SECONDS = 30
     MAX_BATCH_EVENTS = 500
+
+    ApiResponse = Struct.new(:code, :body, :retry_after)
 
     DEFAULT_OPTIONS = {
       endpoint: "https://api.doow.co",
@@ -156,7 +160,7 @@ module DoowTrack
           if last_attempt
             report(e)
           else
-            sleep(2**attempt)
+            sleep(backoff_seconds(attempt))
             next
           end
           return :failed
@@ -175,7 +179,7 @@ module DoowTrack
             report(Error.new("API error: #{DoowTrack.sanitize(response.body)}", status_code: status))
             return :failed
           end
-          sleep([2**attempt, [429, 503].include?(status) ? retry_after_seconds(response["Retry-After"]) : 0].max)
+          sleep([backoff_seconds(attempt), [429, 503].include?(status) ? retry_after_seconds(response.retry_after) : 0].max)
         else
           report(Error.new("API error: #{DoowTrack.sanitize(response.body)}", status_code: status))
           return :abandoned
@@ -195,7 +199,22 @@ module DoowTrack
       request["Content-Type"] = "application/json"
       request["Content-Encoding"] = encoding if encoding
       request.body = body
-      http.request(request)
+      http.request(request) do |response|
+        return ApiResponse.new(response.code, read_capped(response), response["Retry-After"])
+      end
+    end
+
+    def read_capped(response)
+      body = String.new(encoding: Encoding::BINARY)
+      response.read_body do |chunk|
+        body << chunk.byteslice(0, MAX_RESPONSE_BYTES - body.bytesize)
+        break if body.bytesize >= MAX_RESPONSE_BYTES
+      end
+      body
+    end
+
+    def backoff_seconds(attempt)
+      [2**attempt, MAX_BACKOFF_SECONDS].min
     end
 
     def build_payload(batch_id, batch)

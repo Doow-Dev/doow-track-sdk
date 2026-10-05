@@ -333,4 +333,46 @@ RSpec.describe DoowTrack::Tracker do
     expect(cleaned).not_to match(/[\n\e]/)
     expect(cleaned.length).to be <= 520
   end
+
+  it "reads at most 64 KiB of a response body" do
+    padded = { accepted: 1, rejected: 1, batch_id: "b-1", pad: "x" * 100_000,
+               rejections: [{ event_id: "evt-x", reason: "bad" }] }
+    stub_request(:post, url).to_return(status: 207, body: padded.to_json)
+
+    track_one(tracker)
+    tracker.flush
+
+    expect(errors.first).to be_a(DoowTrack::PartialAcceptError)
+    expect(errors.first.rejections).to eq([])
+  end
+
+  it "still parses a small 207 body" do
+    body = { accepted: 1, rejected: 1, batch_id: "b-1", rejections: [{ event_id: "evt-x", reason: "bad" }] }
+    stub_request(:post, url).to_return(status: 207, body: body.to_json)
+
+    track_one(tracker)
+    tracker.flush
+
+    expect(errors.first.rejections.first["event_id"]).to eq("evt-x")
+  end
+
+  it "caps the retry backoff at ten seconds" do
+    waits = []
+    allow_any_instance_of(Object).to receive(:sleep) { |_obj, seconds| waits << seconds }
+    stub_request(:post, url).to_raise(Errno::ECONNREFUSED)
+    patient = described_class.new(
+      "dk_test",
+      endpoint: endpoint,
+      flush_interval: 0,
+      flush_at: 1000,
+      retry_count: 6,
+      on_error: ->(e) { errors << e }
+    )
+
+    track_one(patient)
+    patient.flush
+
+    expect(waits.size).to eq(6)
+    expect(waits.max).to eq(10)
+  end
 end
