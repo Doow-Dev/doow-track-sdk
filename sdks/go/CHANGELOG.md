@@ -4,6 +4,7 @@
 
 ### Batch size
 
+- A `408` request timeout is retried like `429` and `5xx`. Shutdown stores every remaining chunk when an offline store is set.
 - After a transient failure the remaining chunks are requeued (a chunk already saved to the offline store is not requeued again) instead of each spending a full retry budget, and count-triggered flushes pause until the next flush interval.
 - `Flush` sends more than 500 events as separate requests of at most 500 events, each with its own batch id, and returns the first error.
 
