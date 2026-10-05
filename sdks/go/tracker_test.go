@@ -336,6 +336,142 @@ func TestTracker_FlushSplitsLargeBacklogIntoChunksOfAtMost500(t *testing.T) {
 	}
 }
 
+type memoryOfflineStore struct {
+	mu      sync.Mutex
+	batches []SerializedBatch
+}
+
+func (s *memoryOfflineStore) Push(batch SerializedBatch) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.batches = append(s.batches, batch)
+	return nil
+}
+
+func (s *memoryOfflineStore) Shift() (*SerializedBatch, error) { return nil, nil }
+
+func (s *memoryOfflineStore) Length() (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.batches), nil
+}
+
+func newBacklogTracker(endpoint string, store OfflineStore) *Tracker {
+	return NewTracker("dk_test_key", &TrackerOptions{
+		Endpoint:           endpoint,
+		FlushAt:            5000,
+		MaxQueueSize:       5000,
+		FlushInterval:      time.Hour,
+		DisableCompression: true,
+		RetryCount:         0,
+		OfflineStore:       store,
+	})
+}
+
+func TestTracker_TransientFailureRequeuesThatChunkAndEveryLaterChunk(t *testing.T) {
+	var mu sync.Mutex
+	var payloads []BatchPayload
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload BatchPayload
+		json.NewDecoder(r.Body).Decode(&payload)
+		mu.Lock()
+		payloads = append(payloads, payload)
+		call := len(payloads)
+		mu.Unlock()
+		if call >= 2 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer server.Close()
+
+	tracker := newBacklogTracker(server.URL, nil)
+	for i := 0; i < 1200; i++ {
+		tracker.Track(TrackEvent{Metric: "api_calls", Quantity: 1, LicenseID: "lic_1"})
+	}
+	if err := tracker.Flush(); err == nil {
+		t.Fatalf("expected the transient failure to be returned")
+	}
+
+	mu.Lock()
+	batchIDs := map[string]bool{}
+	for _, p := range payloads {
+		batchIDs[p.BatchID] = true
+	}
+	if len(batchIDs) != 2 {
+		t.Fatalf("expected requests for 2 chunks only, got %d", len(batchIDs))
+	}
+	failedChunk := payloads[1].Events
+	mu.Unlock()
+
+	tracker.mu.Lock()
+	buffered := append([]SerializedEvent{}, tracker.buffer...)
+	tracker.mu.Unlock()
+	if len(buffered) != 700 {
+		t.Fatalf("expected 700 requeued events, got %d", len(buffered))
+	}
+	for i := 0; i < 500; i++ {
+		if buffered[i].EventID != failedChunk[i].EventID {
+			t.Fatalf("requeued event %d is not the failed chunk's event", i)
+		}
+	}
+	tracker.Shutdown()
+}
+
+func TestTracker_ChunkSavedToTheOfflineStoreIsNotRequeuedAgain(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+
+	store := &memoryOfflineStore{}
+	tracker := newBacklogTracker(server.URL, store)
+	for i := 0; i < 1200; i++ {
+		tracker.Track(TrackEvent{Metric: "api_calls", Quantity: 1, LicenseID: "lic_1"})
+	}
+	tracker.Flush()
+
+	if n, _ := store.Length(); n != 1 {
+		t.Fatalf("expected 1 stored batch, got %d", n)
+	}
+	tracker.mu.Lock()
+	buffered := len(tracker.buffer)
+	tracker.mu.Unlock()
+	if buffered != 700 {
+		t.Fatalf("expected 700 requeued events, got %d", buffered)
+	}
+}
+
+func TestTracker_TransientFailureHoldsCountTriggeredFlushes(t *testing.T) {
+	var mu sync.Mutex
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		calls++
+		mu.Unlock()
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer server.Close()
+
+	tracker := NewTracker("dk_test_key", &TrackerOptions{
+		Endpoint:      server.URL,
+		FlushAt:       2,
+		FlushInterval: time.Hour,
+		RetryCount:    0,
+	})
+	tracker.holdUntil.Store(time.Now().Add(time.Hour).UnixNano())
+	tracker.Track(TrackEvent{Metric: "api_calls", Quantity: 1, LicenseID: "lic_1"})
+	tracker.Track(TrackEvent{Metric: "api_calls", Quantity: 1, LicenseID: "lic_1"})
+	time.Sleep(100 * time.Millisecond)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if calls != 0 {
+		t.Fatalf("expected the hold to block the count-triggered flush, got %d requests", calls)
+	}
+}
+
 func TestTracker_FlushKeepsSendingLaterChunksAfterAFailedChunk(t *testing.T) {
 	var mu sync.Mutex
 	calls := 0

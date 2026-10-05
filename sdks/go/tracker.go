@@ -72,7 +72,16 @@ type Tracker struct {
 	inflight   sync.WaitGroup
 	closed     atomic.Bool
 	closeOnce  sync.Once
+	holdUntil  atomic.Int64
 }
+
+type sendOutcome int
+
+const (
+	sendDone sendOutcome = iota
+	sendStored
+	sendFailed
+)
 
 // NewTracker creates a new telemetry tracker
 func NewTracker(apiKey string, opts *TrackerOptions) *Tracker {
@@ -265,7 +274,7 @@ func (t *Tracker) Track(event TrackEvent) {
 		t.log("queue full, dropped oldest event")
 	}
 	t.buffer = append(t.buffer, serialized)
-	shouldFlush := len(t.buffer) >= t.flushAt
+	shouldFlush := len(t.buffer) >= t.flushAt && time.Now().UnixNano() >= t.holdUntil.Load()
 	t.mu.Unlock()
 
 	if shouldFlush {
@@ -313,14 +322,36 @@ func (t *Tracker) Flush() error {
 		if end > len(events) {
 			end = len(events)
 		}
-		if err := t.sendBatch(events[start:end]); err != nil && firstErr == nil {
+		outcome, err := t.sendBatch(events[start:end])
+		if err != nil && firstErr == nil {
 			firstErr = err
+		}
+		if outcome != sendDone {
+			resume := start
+			if outcome == sendStored {
+				resume = end
+			}
+			t.requeue(events[resume:])
+			t.holdUntil.Store(time.Now().Add(t.flushInterval).UnixNano())
+			break
 		}
 	}
 	return firstErr
 }
 
-func (t *Tracker) sendBatch(events []SerializedEvent) error {
+func (t *Tracker) requeue(events []SerializedEvent) {
+	if len(events) == 0 || t.closed.Load() {
+		return
+	}
+	t.mu.Lock()
+	t.buffer = append(append([]SerializedEvent{}, events...), t.buffer...)
+	if len(t.buffer) > t.maxQueueSize {
+		t.buffer = t.buffer[:t.maxQueueSize]
+	}
+	t.mu.Unlock()
+}
+
+func (t *Tracker) sendBatch(events []SerializedEvent) (sendOutcome, error) {
 	batchID := generateUUID()
 
 	// Convert to wire format
@@ -351,7 +382,7 @@ func (t *Tracker) sendBatch(events []SerializedEvent) error {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		t.onError(fmt.Errorf("marshal batch: %w", err))
-		return err
+		return sendDone, err
 	}
 
 	t.log("sending batch %s with %d events (%d bytes)", batchID, len(events), len(body))
@@ -376,26 +407,27 @@ func (t *Tracker) sendBatch(events []SerializedEvent) error {
 		err := t.doSend(body)
 		if err == nil {
 			t.log("batch %s sent successfully", batchID)
-			return nil
+			return sendDone, nil
 		}
 
 		lastErr = err
 
 		if partial, ok := err.(*PartialAcceptError); ok {
 			t.onError(partial)
-			return partial
+			return sendDone, partial
 		}
 
 		if apiErr, ok := err.(*APIError); ok {
 			if apiErr.IsPermanent() {
 				t.onError(err)
-				return err
+				return sendDone, err
 			}
 			serverDelay = apiErr.RetryAfter
 		}
 	}
 
 	// All retries failed - try offline store
+	outcome := sendFailed
 	if t.offlineStore != nil {
 		payloadStr := string(body)
 		batch := SerializedBatch{
@@ -407,11 +439,12 @@ func (t *Tracker) sendBatch(events []SerializedEvent) error {
 			t.onError(fmt.Errorf("offline store push: %w", err))
 		} else {
 			t.log("batch %s saved to offline store", batchID)
+			outcome = sendStored
 		}
 	}
 
 	t.onError(lastErr)
-	return lastErr
+	return outcome, lastErr
 }
 
 func (t *Tracker) doSend(body []byte) error {
