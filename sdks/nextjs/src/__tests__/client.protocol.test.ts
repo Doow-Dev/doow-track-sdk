@@ -126,6 +126,21 @@ describe('Next.js client wire protocol', () => {
     expect(resent.slice(0, 500)).toEqual(failedChunk);
   });
 
+  it('an event that cannot be serialized is reported and dropped instead of being requeued forever', async () => {
+    const calls = stubFetch([{ status: 202 }]);
+    const onError = vi.fn();
+    const tracker = new Tracker('dk_test', { flushIntervalMs: 60_000, onError, retryCount: 0 });
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+    tracker.track({ ...event, attribution: circular });
+    await tracker.flush();
+
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(calls).toHaveLength(0);
+    expect((tracker as unknown as { queue: unknown[] }).queue).toHaveLength(0);
+    tracker.destroy();
+  });
+
   it('a transient failure holds count-triggered flushes until the next interval', async () => {
     const calls = stubFetch([{ status: 503 }]);
     const tracker = new Tracker('dk_test', {
