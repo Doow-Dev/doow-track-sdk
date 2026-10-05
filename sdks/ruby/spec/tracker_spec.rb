@@ -60,6 +60,46 @@ RSpec.describe DoowTrack::Tracker do
     }).to have_been_made
   end
 
+  it "splits a flush of more than 500 events into chunks of at most 500 with distinct batch ids" do
+    backlog = described_class.new(
+      "dk_test",
+      endpoint: endpoint,
+      flush_interval: 0,
+      flush_at: 5000,
+      retry_count: 0,
+      on_error: ->(e) { errors << e }
+    )
+    bodies = []
+    stub_request(:post, url).to_return do |request|
+      bodies << body_of(request)
+      { status: 202 }
+    end
+    1200.times { track_one(backlog) }
+    backlog.flush
+
+    expect(bodies.map { |b| b["events"].size }).to eq([500, 500, 200])
+    expect(bodies.map { |b| b["batch_id"] }.uniq.size).to eq(3)
+    expect(bodies.flat_map { |b| b["events"].map { |e| e["event_id"] } }.uniq.size).to eq(1200)
+    expect(errors).to be_empty
+  end
+
+  it "keeps sending later chunks after a chunk fails permanently" do
+    backlog = described_class.new(
+      "dk_test",
+      endpoint: endpoint,
+      flush_interval: 0,
+      flush_at: 5000,
+      retry_count: 0,
+      on_error: ->(e) { errors << e }
+    )
+    stub_request(:post, url).to_return({ status: 400, body: "bad" }, { status: 202 })
+    700.times { track_one(backlog) }
+    backlog.flush
+
+    expect(a_request(:post, url)).to have_been_made.twice
+    expect(errors.size).to eq(1)
+  end
+
   it "reports each rejection on 207 and does not retry" do
     stub = stub_request(:post, url).to_return(
       status: 207,

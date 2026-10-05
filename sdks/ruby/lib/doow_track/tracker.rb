@@ -12,6 +12,7 @@ module DoowTrack
   class Tracker
     MAX_RETRY_AFTER_SECONDS = 30
     SHUTDOWN_JOIN_SECONDS = 30
+    MAX_BATCH_EVENTS = 500
 
     DEFAULT_OPTIONS = {
       endpoint: "https://api.doow.co",
@@ -73,7 +74,7 @@ module DoowTrack
         batch = @buffer.dup
         @buffer.clear
       end
-      send_batch(batch) if batch
+      batch&.each_slice(MAX_BATCH_EVENTS) { |chunk| send_batch(chunk) }
     end
 
     def shutdown
