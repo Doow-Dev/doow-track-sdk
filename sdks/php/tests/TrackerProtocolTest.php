@@ -166,6 +166,7 @@ final class TrackerProtocolTest extends TestCase
         $buffer = (new \ReflectionProperty($tracker, 'buffer'))->getValue($tracker);
         $this->assertCount(700, $buffer);
         $this->assertSame($failedChunk, array_map(fn ($e) => $e['event_id'], array_slice($buffer, 0, 500)));
+        $this->assertGreaterThan(microtime(true), (new \ReflectionProperty($tracker, 'holdUntil'))->getValue($tracker));
     }
 
     public function testATransientFailureHoldsCountTriggeredFlushes(): void

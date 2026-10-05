@@ -271,12 +271,16 @@ class Tracker
     {
         $body = $response->getBody();
         $content = '';
-        while (!$body->eof() && strlen($content) < self::MAX_BODY_BYTES) {
-            $chunk = $body->read(min(8192, self::MAX_BODY_BYTES - strlen($content)));
-            if ($chunk === '') {
-                break;
+        try {
+            while (!$body->eof() && strlen($content) < self::MAX_BODY_BYTES) {
+                $chunk = $body->read(min(8192, self::MAX_BODY_BYTES - strlen($content)));
+                if ($chunk === '') {
+                    break;
+                }
+                $content .= $chunk;
             }
-            $content .= $chunk;
+        } catch (\RuntimeException) {
+            return $content;
         }
 
         return $content;
