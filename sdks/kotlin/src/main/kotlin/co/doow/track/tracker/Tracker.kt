@@ -130,7 +130,12 @@ class Tracker(
         val url = "${options.endpoint.trimEnd('/')}/telemetry/events"
         val batchId = UUID.randomUUID().toString()
 
-        var body = json.encodeToString(buildPayload(batchId, batch)).toByteArray()
+        var body = try {
+            json.encodeToString(buildPayload(batchId, batch)).toByteArray()
+        } catch (e: kotlinx.serialization.SerializationException) {
+            report(e)
+            return false
+        }
         var gzipped = false
         if (!options.disableCompression && body.size > 1024) {
             val baos = ByteArrayOutputStream()
@@ -164,7 +169,7 @@ class Tracker(
                     return false
                 }
 
-                if ((status == 429 || status >= 500) && !lastAttempt) {
+                if ((status == 408 || status == 429 || status >= 500) && !lastAttempt) {
                     val backoff = 2.0.pow(attempt).toLong() * 1000
                     val serverDelay = if (status == 429 || status == 503) parseRetryAfterMs(conn.getHeaderField("Retry-After")) else 0L
                     Thread.sleep(maxOf(backoff, serverDelay))
@@ -177,7 +182,7 @@ class Tracker(
                     ""
                 }
                 report(DoowError("API error: ${sanitize(errorBody)}", status))
-                return status == 429 || status >= 500
+                return status == 408 || status == 429 || status >= 500
             } catch (e: InterruptedException) {
                 Thread.currentThread().interrupt()
                 return false

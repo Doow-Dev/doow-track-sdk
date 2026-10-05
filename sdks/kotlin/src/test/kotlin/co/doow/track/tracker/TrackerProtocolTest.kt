@@ -159,6 +159,31 @@ class TrackerProtocolTest {
     }
 
     @Test
+    fun aRequestTimeoutIsRetriedWithTheSameBatchId() {
+        statuses = intArrayOf(408, 202)
+        val tracker = tracker()
+        tracker.track(event())
+        tracker.flush()
+        tracker.shutdown()
+
+        assertEquals(2, bodies.size)
+        assertEquals(bodies[0]["batch_id"], bodies[1]["batch_id"])
+        assertTrue(errors.isEmpty())
+    }
+
+    @Test
+    fun aChunkThatCannotBeSerializedIsReportedAndTheRestStillSend() {
+        val tracker = backlogTracker()
+        tracker.track(event().copy(quantity = Double.NaN))
+        repeat(600) { tracker.track(event()) }
+        tracker.flush()
+        tracker.shutdown()
+
+        assertEquals(1, errors.size)
+        assertEquals(1, bodies.size)
+    }
+
+    @Test
     fun aTransientFailureHoldsCountTriggeredFlushes() {
         statuses = intArrayOf(503)
         val tracker = Tracker(
