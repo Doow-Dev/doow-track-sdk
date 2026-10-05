@@ -135,6 +135,22 @@ class TrackerProtocolTest {
     }
 
     @Test
+    fun anInterruptedFlushStopsAfterTheChunkInProgress() {
+        val tracker = backlogTracker()
+        repeat(1200) { tracker.track(event()) }
+        Thread.currentThread().interrupt()
+        try {
+            tracker.flush()
+            assertTrue(Thread.currentThread().isInterrupted)
+        } finally {
+            Thread.interrupted()
+        }
+        tracker.shutdown()
+
+        assertEquals(1, bodies.size)
+    }
+
+    @Test
     fun laterChunksAreStillSentAfterAChunkFailsPermanently() {
         statuses = intArrayOf(400, 202)
         val tracker = backlogTracker()

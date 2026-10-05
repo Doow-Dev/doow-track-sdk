@@ -96,7 +96,10 @@ class Tracker(
         }
         if (batch.isEmpty()) return
 
-        batch.chunked(MAX_BATCH_EVENTS).forEach { sendBatch(it) }
+        for (chunk in batch.chunked(MAX_BATCH_EVENTS)) {
+            sendBatch(chunk)
+            if (Thread.currentThread().isInterrupted) break
+        }
     }
 
     internal data class Pending(val eventId: String, val event: TrackEvent)
