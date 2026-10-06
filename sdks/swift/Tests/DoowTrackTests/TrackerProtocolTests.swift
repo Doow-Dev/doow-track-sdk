@@ -354,6 +354,11 @@ final class TrackerProtocolTests {
         #expect(cleaned.count <= 520)
     }
 
+    @Test func bidirectionalControlsAndLineSeparatorsAreStripped() {
+        let cleaned = sanitizeText("a\u{202e}b\u{2066}c\u{2069}d\u{200f}e\u{61c}f\u{2028}g\u{2029}h")
+        #expect(cleaned == "a b c d e f g h")
+    }
+
     #if canImport(Compression)
     @Test func gzipBodyIsAValidGzipStream() throws {
         let tracker = try makeTracker()

@@ -1,8 +1,18 @@
 import Foundation
 
+private func isUnsafeScalar(_ scalar: Unicode.Scalar) -> Bool {
+    if CharacterSet.controlCharacters.contains(scalar) { return true }
+    switch scalar.value {
+    case 0x061C, 0x200E, 0x200F, 0x2028, 0x2029, 0x202A...0x202E, 0x2066...0x2069:
+        return true
+    default:
+        return false
+    }
+}
+
 func sanitizeText(_ text: String) -> String {
     let cleaned = String(text.unicodeScalars.map { scalar in
-        CharacterSet.controlCharacters.contains(scalar) ? " " : Character(scalar)
+        isUnsafeScalar(scalar) ? " " : Character(scalar)
     })
     return cleaned.count > 512 ? String(cleaned.prefix(512)) + "..." : cleaned
 }
