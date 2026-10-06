@@ -855,6 +855,24 @@ func TestSanitizeText(t *testing.T) {
 	}
 }
 
+func TestSanitizeTextStripsBidiControlsAndLineSeparators(t *testing.T) {
+	unsafe := []rune{0x202e, 0x2066, 0x2069, 0x200f, 0x061c, 0x2028, 0x2029}
+	var input strings.Builder
+	input.WriteString("a")
+	for i, r := range unsafe {
+		if i > 0 {
+			input.WriteString("b")
+		}
+		input.WriteRune(r)
+	}
+	input.WriteString("c")
+
+	want := "a" + strings.Repeat(" b", len(unsafe)-1) + " c"
+	if got := sanitizeText(input.String()); got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
 func TestTracker_RateLimitedBatchWaitsForRetryAfterAndRetriesTheSameBatch(t *testing.T) {
 	var mu sync.Mutex
 	var payloads []BatchPayload

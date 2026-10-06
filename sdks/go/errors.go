@@ -73,9 +73,15 @@ func (e *APIError) IsPermanent() bool {
 
 const maxErrorText = 512
 
+func isUnsafeRune(r rune) bool {
+	return unicode.IsControl(r) ||
+		r == 0x061c || r == 0x200e || r == 0x200f || r == 0x2028 || r == 0x2029 ||
+		(r >= 0x202a && r <= 0x202e) || (r >= 0x2066 && r <= 0x2069)
+}
+
 func sanitizeText(text string) string {
 	cleaned := strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) {
+		if isUnsafeRune(r) {
 			return ' '
 		}
 		return r
