@@ -31,34 +31,58 @@ export interface InputReader {
 // ─── Line splitter ─────────────────────────────────────────────────────────
 
 /** Split a stream into lines, calling onLine for each complete line. */
-const MAX_LINE_BYTES = 1_048_576;
+export const MAX_LINE_BYTES = 1_048_576;
 
-function pipeLines(
+export function pipeLines(
   readable: Readable,
   onLine: (line: string) => void,
   onError?: InputErrorCallback,
 ): void {
   let buf = '';
-  readable.on('data', (chunk: Buffer | string) => {
-    buf += typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+  // After an oversized line starts, everything up to its newline is dropped, so the tail of the
+  // line is not parsed as if it were a line of its own.
+  let discarding = false;
+  const reportTooLong = (): void => {
+    onError?.(new Error(`Line exceeds ${MAX_LINE_BYTES} bytes`), '');
+  };
 
-    if (!buf.includes('\n') && buf.length > MAX_LINE_BYTES) {
-      onError?.(new Error(`Line exceeds ${MAX_LINE_BYTES} bytes`), '');
-      buf = '';
-      return;
+  readable.on('data', (chunk: Buffer | string) => {
+    let text = typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+
+    if (discarding) {
+      const newline = text.indexOf('\n');
+      if (newline === -1) return;
+      discarding = false;
+      text = text.slice(newline + 1);
     }
 
-    const parts = buf.split('\n');
-    // All but last are complete lines
-    for (let i = 0; i < parts.length - 1; i++) {
-      const line = parts[i]!.trim();
+    const parts = (buf + text).split('\n');
+    buf = parts.pop() ?? '';
+    // Every part left in the array is a complete line.
+    for (const raw of parts) {
+      if (raw.length > MAX_LINE_BYTES) {
+        reportTooLong();
+        continue;
+      }
+      const line = raw.trim();
       if (line.length > 0) onLine(line);
     }
-    buf = parts[parts.length - 1] ?? '';
+
+    if (buf.length > MAX_LINE_BYTES) {
+      reportTooLong();
+      buf = '';
+      discarding = true;
+    }
   });
   readable.on('end', () => {
-    const remaining = buf.trim();
-    if (remaining.length > 0) onLine(remaining);
+    if (!discarding) {
+      if (buf.length > MAX_LINE_BYTES) {
+        reportTooLong();
+      } else {
+        const remaining = buf.trim();
+        if (remaining.length > 0) onLine(remaining);
+      }
+    }
     buf = '';
   });
 }
@@ -88,7 +112,7 @@ function createStdinReader(onEvent: InputEventCallback, onError: InputErrorCallb
       started = true;
       process.stdin.resume();
       process.stdin.setEncoding('utf8');
-      pipeLines(process.stdin, (line) => dispatchLine(line, onEvent, onError));
+      pipeLines(process.stdin, (line) => dispatchLine(line, onEvent, onError), onError);
       return Promise.resolve();
     },
     stop(): Promise<void> {

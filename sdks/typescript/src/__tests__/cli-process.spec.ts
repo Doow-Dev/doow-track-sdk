@@ -147,4 +147,35 @@ describe.skipIf(!hasBuild)('doow-track CLI process', () => {
     ]);
     expect(result).toBe(0);
   }, 30_000);
+
+  it('reports a piped line over 1 MiB and still sends the next line', async () => {
+    const api = await startApi();
+    cleanups.push(() => new Promise<void>((resolve) => api.api.close(() => resolve())));
+
+    const child = spawn(process.execPath, [CLI], {
+      stdio: ['pipe', 'ignore', 'pipe'],
+      env: {
+        ...process.env,
+        DOOW_TRACK_API_KEY: 'dk_cli_process_test',
+        DOOW_TRACK_ENDPOINT: api.endpoint,
+        DOOW_TRACK_FLUSH_AT: '1',
+      },
+    });
+    cleanups.push(() => {
+      child.kill('SIGKILL');
+    });
+    let stderr = '';
+    child.stderr!.on('data', (chunk: Buffer) => {
+      stderr += chunk.toString('utf8');
+    });
+    const exited = new Promise<number | null>((resolve) => child.once('exit', (code) => resolve(code)));
+
+    child.stdin!.write(`${'a'.repeat(1_100_000)}\n`);
+    child.stdin!.write(line('after'));
+    child.stdin!.end();
+
+    expect(await exited).toBe(0);
+    expect(stderr).toContain('Input error: Line exceeds 1048576 bytes');
+    expect(api.events()).toBe(1);
+  }, 30_000);
 });

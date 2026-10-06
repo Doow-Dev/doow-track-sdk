@@ -118,6 +118,58 @@ describe('S82: parseInputMode', () => {
   });
 });
 
+// ─── input-reader: line splitting and the line size limit ─────────────────
+
+describe('S82: pipeLines — line size limit', () => {
+  async function run(chunks: string[], end = true) {
+    const { pipeLines, MAX_LINE_BYTES } = await import('../sidecar/input-reader.js');
+    const { PassThrough } = await import('stream');
+    const stream = new PassThrough();
+    const lines: string[] = [];
+    const errors: string[] = [];
+    pipeLines(
+      stream,
+      (line) => lines.push(line),
+      (err) => errors.push(err.message),
+    );
+    for (const chunk of chunks) stream.write(chunk);
+    if (end) stream.end();
+    await new Promise((r) => setTimeout(r, 30));
+    return { lines, errors, max: MAX_LINE_BYTES };
+  }
+
+  it('rejects a line over the limit that arrives complete in one chunk', async () => {
+    const { max } = await run([]);
+    const { lines, errors } = await run([`${'a'.repeat(max + 10)}\n{"ok":1}\n`]);
+
+    expect(lines).toEqual(['{"ok":1}']);
+    expect(errors).toEqual([`Line exceeds ${max} bytes`]);
+  });
+
+  it('rejects an oversized last line at end of input instead of dispatching it', async () => {
+    const { max } = await run([]);
+    const { lines, errors } = await run([`{"ok":1}\n${'a'.repeat(max + 10)}`]);
+
+    expect(lines).toEqual(['{"ok":1}']);
+    expect(errors).toEqual([`Line exceeds ${max} bytes`]);
+  });
+
+  it('drops the rest of an oversized line that spans chunks instead of parsing the tail', async () => {
+    const { max } = await run([]);
+    const { lines, errors } = await run([`${'a'.repeat(max + 10)}`, 'tail\n{"ok":2}\n']);
+
+    expect(lines).toEqual(['{"ok":2}']);
+    expect(errors).toEqual([`Line exceeds ${max} bytes`]);
+  });
+
+  it('still splits normal lines and sends a final line without a newline', async () => {
+    const { lines, errors } = await run(['{"a":1}\n{"b"', ':2}\n{"c":3}']);
+
+    expect(lines).toEqual(['{"a":1}', '{"b":2}', '{"c":3}']);
+    expect(errors).toEqual([]);
+  });
+});
+
 // ─── input-reader: file mode ──────────────────────────────────────────────
 
 describe('S82: InputReader — file mode', () => {
