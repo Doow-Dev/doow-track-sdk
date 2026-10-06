@@ -6,7 +6,7 @@ The image is currently private on GitHub Container Registry at `ghcr.io/doow-dev
 
 ## Image tags and platforms
 
-A release of the TypeScript SDK publishes three tags: the full version (`1.2.3`), the major version (`1`), and `latest`. Earlier images used other spellings, for example `0.1.10` and `typescript-v0.1.11`, and the major tag `0` was only ever applied to `0.1.4`. Look up the tags that exist on the package page in the Doow-Dev organization on GitHub, and pin a full version tag in production so an upgrade is a deliberate change. Replace `1.2.3` in the examples below with that tag. The image is published for `linux/amd64` and `linux/arm64`.
+A release of the TypeScript SDK publishes three tags: the full version (`1.2.3`), the major version (`1`), and `latest`. Earlier images used other spellings, for example `0.1.10` and `typescript-v0.1.11`, and the major tag `0` was only ever applied to `0.1.4`. Do not use `typescript-v0.1.11`: that image does not contain the sidecar entry point and exits at startup, and `latest` pointed at it until the next release replaced it. Look up the tags that exist on the package page in the Doow-Dev organization on GitHub, and pin a full version tag in production so an upgrade is a deliberate change. Replace `1.2.3` in the examples below with that tag. The image is published for `linux/amd64` and `linux/arm64`.
 
 ## Configuration
 

@@ -55,19 +55,17 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for commit conventions and release proc
 
 ## Releasing
 
-Releases are triggered by git tags:
+A release is a git tag named `<sdk>/vX.Y.Z`, where `<sdk>` is the folder name under `sdks/` and `X.Y.Z` is the version in that SDK's package file. The release workflow rejects a tag whose version differs from the package version, so bump the version and merge it before you tag.
 
 ```bash
-# Release TypeScript SDK v1.0.0
+# Release TypeScript SDK 1.0.0
 git tag typescript/v1.0.0
 git push origin typescript/v1.0.0
-
-# Release Python SDK v0.2.0
-git tag python/v0.2.0
-git push origin python/v0.2.0
 ```
 
-CI automatically publishes to the appropriate registry when a tag is pushed.
+Today only the TypeScript workflow acts on a tag. It publishes the npm package, the sidecar image `ghcr.io/doow-dev/doow-track-sidecar` with the tags `X.Y.Z`, `X`, and `latest`, and a GitHub release that carries the five CLI executables and their checksums. Tags for the other SDKs use the same naming but do not publish anything yet.
+
+Older tags (`sdk/v0.1.0` to `sdk/v0.1.10`, `typescript-v0.1.11`, `rust-v0.1.0`, and `swift-v0.1.0`) predate this convention and stay as they are. Do not create new tags in those forms, because the workflow ignores them.
 
 ## License
 
