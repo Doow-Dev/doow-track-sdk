@@ -120,6 +120,10 @@ let tracker = try Tracker("dk_your_api_key", options: TrackerOptions(
 
 ---
 
+## Short-lived processes
+
+A command-line tool or app extension that exits right after it finishes its work can lose events that are still queued. Call `flush()` and then `shutdown()` before the process ends, and set `flushAt` to 1 if every event must be sent immediately.
+
 ## Batching and outages
 
 A flush sends at most 500 events per request, and a larger backlog is split into several requests that each carry their own `batch_id`, so a large flush does not exceed the API's per-minute event limit. After a transient failure (a network error, `408`, `429`, or `5xx` once the retries are used up) the tracker stops sending, puts the unsent events back at the front of the queue, and does not flush on the event-count trigger again until one flush interval has passed. A permanent `4xx` response drops only the request it rejected. When the queue reaches `maxQueueSize` during a long outage, new events are dropped until the queue has room again, so the oldest events are the ones kept.

@@ -8,6 +8,10 @@
 - After a transient failure the remaining chunks are requeued instead of each spending a full retry budget, and count-triggered flushes pause until the next flush interval.
 - `flush` sends more than 500 events as separate requests of at most 500 events, each with its own batch id, so a large backlog no longer exceeds the API's per-minute event limit and loops on `429`.
 
+### Behavior changes
+
+- The tracker sends through `httpClient.send` instead of `httpClient.post`, so it can stop reading a response at 64 KiB. Every `http.Client` implements `send`, but a custom client that overrides only `post` is no longer called and must override `send` instead.
+
 ### Fixes
 
 - The tracker reads at most 64 KiB of a response body, so an oversized or endless response can no longer exhaust memory.

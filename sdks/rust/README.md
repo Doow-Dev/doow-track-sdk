@@ -172,6 +172,10 @@ async fn example() {
 
 ---
 
+## Short-lived processes
+
+A function or command-line program that exits right after it handles a request can lose events that are still queued. Await `flush()` and then `shutdown()` before the process ends, and set `flush_at` to 1 if every event must be sent immediately.
+
 ## Batching and outages
 
 A flush sends at most 500 events per request, and a larger backlog is split into several requests that each carry their own `batch_id`, so a large flush does not exceed the API's per-minute event limit. After a transient failure (a network error, `408`, `429`, or `5xx` once the retries are used up) the tracker stops sending, puts the unsent events back at the front of the queue, and does not flush on the event-count trigger again until one flush interval has passed. A permanent `4xx` response drops only the request it rejected. When the queue reaches `max_queue_size`, the oldest event is dropped to make room for each new one, so the newest events are the ones kept.
