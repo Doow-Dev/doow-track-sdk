@@ -367,6 +367,17 @@ final class TrackerProtocolTest extends TestCase
         $this->assertLessThanOrEqual(520, mb_strlen($cleaned));
     }
 
+    public function testBidirectionalControlsAndLineSeparatorsAreStripped(): void
+    {
+        $unsafe = [0x202E, 0x2066, 0x2069, 0x200F, 0x061C, 0x2028, 0x2029];
+        $input = 'a' . implode('b', array_map(fn (int $code): string => mb_chr($code, 'UTF-8'), $unsafe)) . 'c';
+
+        $this->assertSame(
+            'a' . str_repeat(' b', count($unsafe) - 1) . ' c',
+            \Doow\Track\DoowError::sanitize($input),
+        );
+    }
+
     public function testAnyServerErrorStatusIsRetryable(): void
     {
         foreach ([408, 429, 500, 502, 503, 504, 520, 522] as $status) {

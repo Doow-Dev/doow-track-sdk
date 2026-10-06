@@ -21,7 +21,11 @@ class DoowError extends Exception
     public static function sanitize(mixed $value): string
     {
         $raw = (string) (is_scalar($value) ? $value : json_encode($value));
-        $text = (string) preg_replace('/\p{Cc}/u', ' ', mb_scrub($raw, 'UTF-8'));
+        $text = (string) preg_replace(
+            '/[\p{Cc}\x{061C}\x{200E}\x{200F}\x{2028}\x{2029}\x{202A}-\x{202E}\x{2066}-\x{2069}]/u',
+            ' ',
+            mb_scrub($raw, 'UTF-8'),
+        );
 
         return mb_strlen($text) > 512 ? mb_substr($text, 0, 512) . '...' : $text;
     }
