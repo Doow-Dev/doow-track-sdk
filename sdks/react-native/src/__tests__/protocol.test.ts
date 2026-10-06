@@ -277,6 +277,11 @@ describe('sanitizeText', () => {
     expect(cleaned).not.toMatch(/[\u0000-\u001f\u007f-\u009f]/);
     expect(cleaned.length).toBeLessThanOrEqual(520);
   });
+
+  it('strips bidirectional overrides and line separators', () => {
+    const cleaned = sanitizeText('a\u{202e}b\u{2066}c\u{2069}d\u{200f}e\u{61c}f\u{2028}g\u{2029}h');
+    expect(cleaned).toBe('a b c d e f g h');
+  });
 });
 
 describe('readBoundedText', () => {
