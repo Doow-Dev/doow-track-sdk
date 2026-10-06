@@ -9,6 +9,8 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## [0.1.12] — 2026-10-06
+
 ### Behavior changes
 
 - The sidecar image now runs as the non-root `node` user (user ID 1000) on Node 22 instead of root on Node 20. A file mounted for `file:` input must be readable by user ID 1000, and the image works with a read-only root filesystem, all capabilities dropped, and `no-new-privileges`.
