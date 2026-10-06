@@ -55,17 +55,20 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for commit conventions and release proc
 
 ## Releasing
 
-A release is a git tag named `<sdk>/vX.Y.Z`, where `<sdk>` is the folder name under `sdks/` and `X.Y.Z` is the version in that SDK's package file. The release workflow rejects a tag whose version differs from the package version, so bump the version and merge it before you tag.
+A release is a git tag named `<sdk>-vX.Y.Z`, where `<sdk>` is the folder name under `sdks/` and `X.Y.Z` is the version in that SDK's package file. Bump the version and merge it before you tag.
 
 ```bash
 # Release TypeScript SDK 1.0.0
-git tag typescript/v1.0.0
-git push origin typescript/v1.0.0
+git tag typescript-v1.0.0
+git push origin typescript-v1.0.0
 ```
 
-Today only the TypeScript workflow acts on a tag. It publishes the npm package, the sidecar image `ghcr.io/doow-dev/doow-track-sidecar` with the tags `X.Y.Z`, `X`, and `latest`, and a GitHub release that carries the five CLI executables and their checksums. Tags for the other SDKs use the same naming but do not publish anything yet.
+Two pipelines act on a tag, and each SDK has exactly one publisher:
 
-Older tags predate this convention and stay as they are: `sdk/v0.1.0` to `sdk/v0.1.10`, and the per-SDK tags that use a hyphen, such as `typescript-v0.1.11`, `python-v0.1.0`, `go-v0.1.0`, `dotnet-v0.1.1`, `rust-v0.1.0`, and `swift-v0.1.0`. List the full set with `git ls-remote --tags origin`. Do not create new tags in those forms, because the workflow ignores them.
+- The Woodpecker pipeline in `.woodpecker.yml` publishes every SDK except TypeScript to its registry.
+- The GitHub Actions workflow `.github/workflows/doow-track-sdk-publish.yml` publishes TypeScript. It rejects a tag that is not plain `X.Y.Z` or that differs from the version in `sdks/typescript/package.json`. It then builds and tests everything, publishes the sidecar image `ghcr.io/doow-dev/doow-track-sidecar` with the tags `X.Y.Z`, `X`, and `latest`, creates a GitHub release that carries the five CLI executables and their checksums, and publishes the npm package last, because an npm version can never be reused.
+
+The older tags `sdk/v0.1.0` to `sdk/v0.1.10` predate this convention and stay as they are. Do not create new tags in that form, because no pipeline acts on them. List the full set of tags with `git ls-remote --tags origin`.
 
 ## License
 

@@ -93,6 +93,12 @@ spec:
           name: events
         - containerPort: 9090
           name: health
+      readinessProbe:
+        httpGet:
+          path: /healthz
+          port: health
+        initialDelaySeconds: 2
+        periodSeconds: 5
       livenessProbe:
         httpGet:
           path: /healthz

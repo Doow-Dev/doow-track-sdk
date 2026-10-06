@@ -6,7 +6,7 @@ The `doow-track` CLI reads newline-delimited JSON from applications written in a
 
 ### Download
 
-Each release of the TypeScript SDK (tags of the form `typescript/vX.Y.Z`) attaches one executable per platform, plus a `.sha256` checksum file for each, to the [doow-track-sdk releases](https://github.com/Doow-Dev/doow-track-sdk/releases).
+Each release of the TypeScript SDK (tags of the form `typescript-vX.Y.Z`) attaches one executable per platform, plus a `.sha256` checksum file for each, to the [doow-track-sdk releases](https://github.com/Doow-Dev/doow-track-sdk/releases).
 
 | Server platform | Release asset | Checksum asset |
 |-----------------|---------------|----------------|
