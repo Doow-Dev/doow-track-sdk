@@ -246,7 +246,15 @@ async function main(): Promise<void> {
         tracker = buildTracker(newConfig);
         config = newConfig;
 
-        await oldTracker.shutdown();
+        try {
+          await oldTracker.shutdown();
+        } catch (e) {
+          const err = e instanceof Error ? e : new Error(String(e));
+          process.stderr.write(
+            `[doow-track] Config reloaded, but flushing the previous tracker failed: ${err.message}\n`,
+          );
+          return;
+        }
 
         process.stderr.write('[doow-track] Config reloaded.\n');
       } catch (e) {

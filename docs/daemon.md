@@ -134,7 +134,7 @@ Values are resolved in this order, and the first match wins:
 |------|----------|
 | `stdin` | Reads newline-delimited JSON until stdin closes. This is pipe mode: the CLI flushes and exits at end of input |
 | `file` | Reads the whole file from the beginning when the daemon starts, then polls it every 200 milliseconds for appended lines. The read position is kept in memory only, so a restart reads the file again and sends every line again as new events. A line is read only after its newline is written, so the last line of a file is not sent until a newline follows it. A file that is truncated or rotated is not detected, so restart the daemon after rotating the file |
-| `tcp` | Listens on the port on all network interfaces. It accepts up to 10 connections at once, closes a connection that is idle for 60 seconds, and drops a line longer than 1 MiB |
+| `tcp` | Listens on the port on all network interfaces. It accepts up to 10 connections at once, closes a connection that is idle for 60 seconds, and drops a line longer than 1 MiB. There is no acknowledgement, so delivery is at most once: bytes that a client has sent but the daemon has not read yet, and a final line without a newline, are lost when the daemon stops |
 
 Each line must be one JSON object. A malformed line is written to stderr and skipped. The TCP listener has no authentication, so bind it to a private network or restrict it with a firewall rule.
 

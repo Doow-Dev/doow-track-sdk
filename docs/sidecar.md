@@ -114,7 +114,7 @@ spec:
 |------|--------------------|----------|
 | stdin | `stdin` (default) | Reads newline-delimited JSON from stdin. A container has no stdin unless you start it with `docker run -i` or set `stdin_open: true` in Compose, so use `file` or `tcp` for a long-running sidecar |
 | File | `file:/var/log/events.jsonl` | Reads the whole file from the beginning when the sidecar starts, then polls it every 200 milliseconds for appended lines. The read position is kept in memory only, so a restart sends every line again as new events. A line is read only after its newline is written, so the last line of a file is not sent until a newline follows it. A file that is truncated or rotated is not detected, so restart the sidecar after rotating it. Mount the file into the container as a volume |
-| TCP | `tcp:9091` | Listens on the port on all network interfaces. It accepts up to 10 connections at once, closes a connection that is idle for 60 seconds, and drops a line longer than 1 MiB. Open a new connection if yours was closed |
+| TCP | `tcp:9091` | Listens on the port on all network interfaces. It accepts up to 10 connections at once, closes a connection that is idle for 60 seconds, and drops a line longer than 1 MiB. Open a new connection if yours was closed. There is no acknowledgement, so delivery is at most once: bytes that a client has sent but the sidecar has not read yet, and a final line without a newline, are lost when the sidecar stops |
 
 Each line must be one JSON object. A malformed line is written to the container log and skipped.
 
