@@ -311,6 +311,26 @@ describe('Exporter — S78', () => {
       expect(reason.length).toBeLessThanOrEqual(520);
     });
 
+    it('strips bidirectional overrides and line separators from rejection reasons', async () => {
+      const onError = vi.fn();
+      const transport: CustomTransport = {
+        send: async () => ({
+          status: 207,
+          headers: {},
+          body: JSON.stringify({
+            rejected: 1,
+            rejections: [{ event_id: 'e', reason: 'a\u{202e}b\u{2066}c\u{2069}d\u{200f}e\u{61c}f\u{2028}g\u{2029}h' }],
+          }),
+        }),
+      };
+      const exporter = makeExporter(transport, { onError, retryCount: 0 });
+
+      await exporter.flush(makeEvents(1));
+
+      const reason = (onError.mock.calls[0]![0] as { rejections: Array<{ reason: string }> }).rejections[0]!.reason;
+      expect(reason).toBe('a b c d e f g h');
+    });
+
     it('a single event that exceeds the payload limit is reported once, not retried forever', async () => {
       const onError = vi.fn();
       const { transport, calls } = makeTransport(413);
