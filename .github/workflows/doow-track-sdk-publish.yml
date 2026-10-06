@@ -239,7 +239,7 @@ jobs:
       - name: Package CLI binary
         run: |
           BINARY_NAME="doow-track-${{ matrix.target }}"
-          npx pkg@5.8.1 sdks/typescript/dist/cli.cjs --target "${{ matrix.pkg_target }}" --output "${BINARY_NAME}"
+          npx --no-install pkg sdks/typescript/dist/cli.cjs --target "${{ matrix.pkg_target }}" --output "${BINARY_NAME}"
           if [[ "${BINARY_NAME}" != *.exe ]]; then chmod +x "${BINARY_NAME}"; fi
           if command -v sha256sum >/dev/null; then
             sha256sum "${BINARY_NAME}" > "${BINARY_NAME}.sha256"
