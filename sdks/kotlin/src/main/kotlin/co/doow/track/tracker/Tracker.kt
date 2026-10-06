@@ -295,8 +295,11 @@ class Tracker(
             return ms.coerceIn(0, MAX_RETRY_AFTER_MS)
         }
 
+        private val UNSAFE_TEXT =
+            Regex("[\\p{Cc}\\x{61C}\\x{200E}\\x{200F}\\x{2028}\\x{2029}\\x{202A}-\\x{202E}\\x{2066}-\\x{2069}]")
+
         fun sanitize(text: String): String {
-            val cleaned = text.replace(Regex("\\p{Cc}"), " ")
+            val cleaned = text.replace(UNSAFE_TEXT, " ")
             return if (cleaned.length > MAX_ERROR_TEXT) cleaned.take(MAX_ERROR_TEXT) + "..." else cleaned
         }
 

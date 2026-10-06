@@ -410,4 +410,19 @@ class TrackerProtocolTest {
         assertTrue(!cleaned.contains("\n") && !cleaned.contains("\u001b") && !cleaned.contains("\u009b"))
         assertTrue(cleaned.length <= 520)
     }
+
+    @Test
+    fun bidirectionalControlsAndLineSeparatorsAreStripped() {
+        val unsafe = listOf(0x202E, 0x2066, 0x2069, 0x200F, 0x061C, 0x2028, 0x2029)
+        val input = buildString {
+            append('a')
+            unsafe.forEachIndexed { index, code ->
+                if (index > 0) append('b')
+                appendCodePoint(code)
+            }
+            append('c')
+        }
+
+        assertEquals("a" + " b".repeat(unsafe.size - 1) + " c", Tracker.sanitize(input))
+    }
 }
