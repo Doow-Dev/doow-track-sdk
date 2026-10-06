@@ -108,6 +108,7 @@ function createFileReader(
   let stopped = false;
   let pollTimer: ReturnType<typeof setTimeout> | null = null;
   let cursor = 0; // byte offset into file
+  let lastReadError = '';
 
   async function readChunk(): Promise<void> {
     if (stopped) return;
@@ -140,6 +141,7 @@ function createFileReader(
         buf += typeof chunk === 'string' ? chunk : chunk.toString('utf8');
       });
       stream.on('end', () => {
+        lastReadError = '';
         cursor = stat.size;
         // Process lines
         const lines = buf.split('\n');
@@ -155,7 +157,16 @@ function createFileReader(
         }
         resolve();
       });
-      stream.on('error', () => resolve());
+      stream.on('error', (err: Error) => {
+        // A file the process cannot read (for example the wrong permissions for a non-root user)
+        // would otherwise read zero events without any sign of why. The poll runs every 200 ms,
+        // so report each distinct failure once.
+        if (err.message !== lastReadError) {
+          lastReadError = err.message;
+          onError(new Error(`Cannot read ${filePath}: ${err.message}`), '');
+        }
+        resolve();
+      });
     });
 
     scheduleNext();

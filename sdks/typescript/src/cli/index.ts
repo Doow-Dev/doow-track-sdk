@@ -194,7 +194,9 @@ async function main(): Promise<void> {
     },
     onError: (err: Error, line: string) => {
       process.stderr.write(
-        `[doow-track] Malformed line — skipping: ${err.message} | line: ${line.slice(0, 100)}\n`,
+        line === ''
+          ? `[doow-track] Input error: ${err.message}\n`
+          : `[doow-track] Malformed line — skipping: ${err.message} | line: ${line.slice(0, 100)}\n`,
       );
     },
   });

@@ -156,6 +156,31 @@ describe('S82: InputReader — file mode', () => {
     expect(metrics).toContain('builds');
     expect(metrics).toContain('deploys');
   });
+
+  it('reports a file it cannot read once instead of failing silently', async () => {
+    const { createInputReader } = await import('../sidecar/input-reader.js');
+    const os = await import('os');
+    const path = await import('path');
+    const fsP = await import('fs/promises');
+
+    // A directory cannot be read as a file for any user, root included, so it fails the same way a
+    // file with the wrong permissions does.
+    const dir = await fsP.mkdtemp(path.join(os.tmpdir(), 'doow-unreadable-'));
+    const errors: Error[] = [];
+    const reader = createInputReader({
+      mode: { type: 'file', path: dir },
+      onEvent: () => undefined,
+      onError: (err) => errors.push(err),
+    });
+
+    await reader.start();
+    await new Promise((r) => setTimeout(r, 900));
+    await reader.stop();
+    await fsP.rm(dir, { recursive: true, force: true });
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0]!.message).toContain(dir);
+  });
 });
 
 // ─── input-reader: TCP mode ───────────────────────────────────────────────
