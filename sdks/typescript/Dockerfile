@@ -1,4 +1,4 @@
-FROM node:20-alpine
+FROM node:22-alpine
 
 WORKDIR /app
 
@@ -6,6 +6,9 @@ ARG SDK_VERSION
 LABEL org.opencontainers.image.version=$SDK_VERSION
 
 COPY sdks/typescript/dist/sidecar.cjs ./dist/sidecar.cjs
+
+# The sidecar only reads input and makes outbound requests, so it needs no root access.
+USER node
 
 # Health check
 HEALTHCHECK --interval=10s --timeout=5s --start-period=5s --retries=3 \

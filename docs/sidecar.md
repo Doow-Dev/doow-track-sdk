@@ -6,7 +6,7 @@ The image is currently private on GitHub Container Registry at `ghcr.io/doow-dev
 
 ## Image tags and platforms
 
-A release of the TypeScript SDK publishes three tags: the full version (`1.2.3`), the major version (`1`), and `latest`. Earlier images used other spellings, for example `0.1.10` and `typescript-v0.1.11`, and the major tag `0` was only ever applied to `0.1.4`. Do not use `typescript-v0.1.11`: that image does not contain the sidecar entry point and exits at startup, and `latest` pointed at it until the next release replaced it. Look up the tags that exist on the package page in the Doow-Dev organization on GitHub, and pin a full version tag in production so an upgrade is a deliberate change. Replace `1.2.3` in the examples below with that tag. The image is published for `linux/amd64` and `linux/arm64`.
+A release of the TypeScript SDK publishes three tags: the full version (`1.2.3`), the major version (`1`), and `latest`. Earlier images used other spellings, for example `0.1.10` and `typescript-v0.1.11`, and the major tag `0` was only ever applied to `0.1.4`. Do not use `typescript-v0.1.11`: that image does not contain the sidecar entry point and exits at startup, and `latest` pointed at it until the next release replaced it. Look up the tags that exist on the package page in the Doow-Dev organization on GitHub, and pin a full version tag in production so an upgrade is a deliberate change. Replace `1.2.3` in the examples below with that tag. The image is published for `linux/amd64` and `linux/arm64`, is based on Node 22 on Alpine, and runs as the non-root `node` user (user ID 1000).
 
 ## Configuration
 
@@ -105,6 +105,13 @@ spec:
           port: health
         initialDelaySeconds: 5
         periodSeconds: 10
+      securityContext:
+        runAsUser: 1000
+        runAsNonRoot: true
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: ['ALL']
       resources:
         requests:
           cpu: 50m
@@ -119,7 +126,7 @@ spec:
 | Mode | `DOOW_TRACK_INPUT` | Behavior |
 |------|--------------------|----------|
 | stdin | `stdin` (default) | Reads newline-delimited JSON from stdin. A container has no stdin unless you start it with `docker run -i` or set `stdin_open: true` in Compose, so use `file` or `tcp` for a long-running sidecar |
-| File | `file:/var/log/events.jsonl` | Reads the whole file from the beginning when the sidecar starts, then polls it every 200 milliseconds for appended lines. The read position is kept in memory only, so a restart sends every line again as new events. A line is read only after its newline is written, so the last line of a file is not sent until a newline follows it. A file that is truncated or rotated is not detected, so restart the sidecar after rotating it. Mount the file into the container as a volume |
+| File | `file:/var/log/events.jsonl` | Reads the whole file from the beginning when the sidecar starts, then polls it every 200 milliseconds for appended lines. The read position is kept in memory only, so a restart sends every line again as new events. A line is read only after its newline is written, so the last line of a file is not sent until a newline follows it. A file that is truncated or rotated is not detected, so restart the sidecar after rotating it. Mount the file into the container as a volume that user ID 1000 can read. A file the sidecar cannot read is reported once in the container log as `Input error: Cannot read <path>`, and reading starts by itself when the permissions are fixed |
 | TCP | `tcp:9091` | Listens on the port on all network interfaces. It accepts up to 10 connections at once, closes a connection that is idle for 60 seconds, and drops a line longer than 1 MiB. Open a new connection if yours was closed. There is no acknowledgement, so delivery is at most once: bytes that a client has sent but the sidecar has not read yet, and a final line without a newline, are lost when the sidecar stops |
 
 Each line must be one JSON object. A malformed line is written to the container log and skipped.
