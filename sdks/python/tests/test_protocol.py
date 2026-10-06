@@ -638,3 +638,12 @@ def test_api_error_details_are_sanitized(httpx_mock):
     assert "\x1b" not in error.error_class
     assert error.details["errorClass"] == error.error_class
     assert error.details["extra"]["note"] == "a b"
+
+
+def test_bidirectional_controls_and_line_separators_are_stripped():
+    from doow_track.errors import sanitize_text
+
+    unsafe = [0x202E, 0x2066, 0x2069, 0x200F, 0x061C, 0x2028, 0x2029]
+    text = "a" + "b".join(chr(code) for code in unsafe) + "c"
+
+    assert sanitize_text(text) == "a" + " b" * (len(unsafe) - 1) + " c"

@@ -12,10 +12,19 @@ class DoowError(Exception):
 
 MAX_ERROR_TEXT = 512
 
+_UNSAFE_FORMAT_CODES = frozenset(
+    [0x061C, 0x200E, 0x200F, 0x2028, 0x2029, *range(0x202A, 0x202F), *range(0x2066, 0x206A)]
+)
+
+
+def _is_unsafe(char: str) -> bool:
+    code = ord(char)
+    return code < 32 or 127 <= code <= 159 or code in _UNSAFE_FORMAT_CODES
+
 
 def sanitize_text(value: Any) -> str:
-    """Strip control characters and cap server-supplied text before it enters a message."""
-    text = "".join(" " if (ord(ch) < 32 or 127 <= ord(ch) <= 159) else ch for ch in str(value))
+    """Strip control, bidirectional, and line-separator characters and cap server-supplied text."""
+    text = "".join(" " if _is_unsafe(ch) else ch for ch in str(value))
     return text if len(text) <= MAX_ERROR_TEXT else text[:MAX_ERROR_TEXT] + "..."
 
 

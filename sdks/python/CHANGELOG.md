@@ -11,6 +11,7 @@
 ### Fixes
 
 - Both trackers read at most 64 KiB of a response body, and `APIError.details` and `error_class` are cleaned of control characters, so a hostile or broken endpoint cannot exhaust memory or inject terminal escapes through an error.
+- `sanitize_text` also replaces Unicode bidirectional controls and line or paragraph separators with spaces.
 - A `Retry-After` wait now replaces the retry backoff instead of adding to it, and the trackers no longer wait after the final attempt.
 
 ### Additions
