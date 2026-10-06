@@ -192,6 +192,34 @@ describe('S82: InputReader — TCP mode', () => {
     expect(received).toHaveLength(1);
     expect((JSON.parse(received[0]!) as { metric: string }).metric).toBe('api_calls');
   });
+
+  it('stop() closes a client that is still connected instead of waiting for it', async () => {
+    const { createInputReader } = await import('../sidecar/input-reader.js');
+    const received: string[] = [];
+    const port = nextPort();
+    const reader = createInputReader({
+      mode: { type: 'tcp', port },
+      onEvent: (raw) => received.push(raw),
+      onError: () => undefined,
+    });
+    await reader.start();
+
+    const client = net.createConnection(port, '127.0.0.1');
+    const closed = new Promise<void>((resolve) => client.once('close', () => resolve()));
+    await new Promise<void>((resolve) => client.once('connect', () => resolve()));
+    client.write('{"metric":"api_calls","quantity":1,"license_id":"lic_1"}\n');
+    await new Promise((r) => setTimeout(r, 50));
+
+    const outcome = await Promise.race([
+      reader.stop().then(() => 'stopped'),
+      new Promise<string>((resolve) => setTimeout(() => resolve('hung'), 2000)),
+    ]);
+    client.destroy();
+
+    expect(outcome).toBe('stopped');
+    await closed;
+    expect(received).toHaveLength(1);
+  });
 });
 
 // ─── health server ────────────────────────────────────────────────────────

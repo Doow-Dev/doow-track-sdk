@@ -11,6 +11,8 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixes
 
+- The sidecar and the CLI daemon no longer hang on `SIGTERM` or `SIGINT` while a TCP client stays connected. Stopping the TCP input now closes connected clients, so the final flush runs instead of waiting for the idle timeout or a SIGKILL.
+- A CLI config reload on `SIGHUP` now swaps only the tracker. It no longer restarts the input reader, which re-sent every line of a file input from its first byte and refused TCP connections during the restart.
 - Replaying the offline store ends at the first batch the server cannot take, so an outage no longer cycles the same batches forever, and a 401 or a rate-limited replay puts the batch back in the store instead of discarding it.
 - Server-supplied rejection text has Unicode bidirectional controls and line or paragraph separators replaced with spaces, in addition to control characters.
 - HTTP 207 rejections are read from the API's numeric `rejected` plus `rejections[]` shape, sanitized, and reported through `onError` without a resend.

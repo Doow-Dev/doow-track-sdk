@@ -276,7 +276,7 @@ export class DoowTracker {
 
   /**
    * Wrap an AWS Lambda handler.
-   * Sets flushAt=1 internally, calls shutdown() in a finally block.
+   * Sets flushAt=1 internally, calls flush() in a finally block.
    *
    * @example
    * export const handler = meter.withLambda(async (event, context) => {

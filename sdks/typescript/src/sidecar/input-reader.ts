@@ -194,10 +194,13 @@ function createTcpReader(
   onError: InputErrorCallback,
 ): InputReader {
   let server: net.Server | null = null;
+  const sockets = new Set<net.Socket>();
 
   return {
     async start(): Promise<void> {
       server = net.createServer((socket) => {
+        sockets.add(socket);
+        socket.on('close', () => sockets.delete(socket));
         socket.setEncoding('utf8');
         socket.setTimeout(60_000, () => socket.destroy());
         pipeLines(socket, (line) => dispatchLine(line, onEvent, onError), onError);
@@ -214,8 +217,11 @@ function createTcpReader(
     },
     async stop(): Promise<void> {
       if (server) {
+        // net.Server.close() waits for every open connection to end, so a client that stays
+        // connected would block shutdown until the idle timeout. Destroy them once the server stops.
         await new Promise<void>((resolve) => {
           server!.close(() => resolve());
+          for (const socket of sockets) socket.destroy();
         });
         server = null;
       }
