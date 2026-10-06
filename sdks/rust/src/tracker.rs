@@ -550,6 +550,9 @@ impl Tracker {
 
     /// Shutdown the tracker, flushing remaining events
     pub async fn shutdown(&self) {
+        if !self.options.enabled {
+            return;
+        }
         if let Some(tx) = &self.shutdown_tx {
             let _ = tx.send(()).await;
 
@@ -1060,5 +1063,33 @@ mod tests {
             })
             .await;
         tracker.flush().await;
+    }
+
+    #[tokio::test]
+    async fn shutdown_returns_when_the_tracker_is_disabled() {
+        let tracker = Tracker::new(
+            "dk_test",
+            Some(TrackerOptions {
+                enabled: false,
+                ..Default::default()
+            }),
+        );
+
+        let finished = tokio::time::timeout(Duration::from_secs(2), tracker.shutdown()).await;
+
+        assert!(
+            finished.is_ok(),
+            "shutdown must not wait for a flush loop that was never started"
+        );
+    }
+
+    #[tokio::test]
+    async fn shutdown_is_repeatable_on_an_enabled_tracker() {
+        let tracker = Tracker::new("dk_test", Some(TrackerOptions::default()));
+
+        tracker.shutdown().await;
+        let again = tokio::time::timeout(Duration::from_secs(2), tracker.shutdown()).await;
+
+        assert!(again.is_ok());
     }
 }

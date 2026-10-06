@@ -15,6 +15,7 @@
 
 ### Fixes
 
+- `shutdown()` returns immediately on a disabled tracker instead of waiting forever for a flush loop that was never started.
 - `metric_tuple_hint` is serialized as the `{app_name, license_name, metric_name}` object instead of a JSON string.
 - HTTP 207 partial acceptance is reported through `on_error` and is not retried.
 - `Retry-After` is honored and clamped to 30 seconds. A panicking `on_error` handler no longer unwinds into the caller.
