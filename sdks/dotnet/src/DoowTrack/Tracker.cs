@@ -330,12 +330,18 @@ public class Tracker : IDisposable
         return text.ToString();
     }
 
+    private static bool IsUnsafeChar(char c) =>
+        char.IsControl(c) ||
+        c is (char)0x61C or (char)0x200E or (char)0x200F or (char)0x2028 or (char)0x2029 ||
+        c is >= (char)0x202A and <= (char)0x202E ||
+        c is >= (char)0x2066 and <= (char)0x2069;
+
     internal static string Sanitize(string? text)
     {
         if (string.IsNullOrEmpty(text)) return string.Empty;
         var cleaned = string.Create(text.Length, text, (span, source) =>
         {
-            for (var i = 0; i < source.Length; i++) span[i] = char.IsControl(source[i]) ? ' ' : source[i];
+            for (var i = 0; i < source.Length; i++) span[i] = IsUnsafeChar(source[i]) ? ' ' : source[i];
         });
         return cleaned.Length > MaxErrorText ? cleaned[..MaxErrorText] + "..." : cleaned;
     }

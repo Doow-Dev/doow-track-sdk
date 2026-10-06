@@ -306,6 +306,16 @@ public class TrackerProtocolTests
         Assert.True(cleaned.Length <= 520);
     }
 
+    [Fact]
+    public void SanitizeStripsBidirectionalControlsAndLineSeparators()
+    {
+        var codes = new[] { 0x202E, 0x2066, 0x2069, 0x200F, 0x061C, 0x2028, 0x2029 };
+        var input = "a" + string.Join("b", codes.Select(code => ((char)code).ToString())) + "c";
+        var expected = "a" + string.Concat(Enumerable.Repeat(" b", codes.Length - 1)) + " c";
+
+        Assert.Equal(expected, Tracker.Sanitize(input));
+    }
+
     private sealed class RateLimitedThenOkHandler : HttpMessageHandler
     {
         private readonly HttpStatusCode _firstStatus;
