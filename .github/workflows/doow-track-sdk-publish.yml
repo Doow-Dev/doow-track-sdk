@@ -117,6 +117,8 @@ jobs:
 
       - name: Smoke test the sidecar image
         run: |
+          trap 'docker rm -f sidecar-smoke >/dev/null 2>&1 || true' EXIT
+          docker rm -f sidecar-smoke >/dev/null 2>&1 || true
           docker run -d --name sidecar-smoke \
             -e DOOW_TRACK_API_KEY=dk_smoke \
             -e DOOW_TRACK_DISABLED=true \
