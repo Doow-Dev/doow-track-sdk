@@ -65,7 +65,7 @@ git push origin typescript/v1.0.0
 
 Today only the TypeScript workflow acts on a tag. It publishes the npm package, the sidecar image `ghcr.io/doow-dev/doow-track-sidecar` with the tags `X.Y.Z`, `X`, and `latest`, and a GitHub release that carries the five CLI executables and their checksums. Tags for the other SDKs use the same naming but do not publish anything yet.
 
-Older tags (`sdk/v0.1.0` to `sdk/v0.1.10`, `typescript-v0.1.11`, `rust-v0.1.0`, and `swift-v0.1.0`) predate this convention and stay as they are. Do not create new tags in those forms, because the workflow ignores them.
+Older tags predate this convention and stay as they are: `sdk/v0.1.0` to `sdk/v0.1.10`, and the per-SDK tags that use a hyphen, such as `typescript-v0.1.11`, `python-v0.1.0`, `go-v0.1.0`, `dotnet-v0.1.1`, `rust-v0.1.0`, and `swift-v0.1.0`. List the full set with `git ls-remote --tags origin`. Do not create new tags in those forms, because the workflow ignores them.
 
 ## License
 

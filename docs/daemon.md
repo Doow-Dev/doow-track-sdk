@@ -133,7 +133,7 @@ Values are resolved in this order, and the first match wins:
 | Mode | Behavior |
 |------|----------|
 | `stdin` | Reads newline-delimited JSON until stdin closes. This is pipe mode: the CLI flushes and exits at end of input |
-| `file` | Reads the whole file from the beginning when the daemon starts, then polls it every 200 milliseconds for appended lines. The read position is kept in memory only, so a restart reads the file again and sends every line again as new events. A file that is truncated or rotated is not detected, so restart the daemon after rotating the file |
+| `file` | Reads the whole file from the beginning when the daemon starts, then polls it every 200 milliseconds for appended lines. The read position is kept in memory only, so a restart reads the file again and sends every line again as new events. A line is read only after its newline is written, so the last line of a file is not sent until a newline follows it. A file that is truncated or rotated is not detected, so restart the daemon after rotating the file |
 | `tcp` | Listens on the port on all network interfaces. It accepts up to 10 connections at once, closes a connection that is idle for 60 seconds, and drops a line longer than 1 MiB |
 
 Each line must be one JSON object. A malformed line is written to stderr and skipped. The TCP listener has no authentication, so bind it to a private network or restrict it with a firewall rule.
@@ -177,16 +177,15 @@ The unit leaves out `--pidfile`, because systemd tracks the process itself and t
 When the daemon receives `SIGHUP`, it:
 
 1. Re-reads the config file
-2. Builds a new tracker and a new input reader from it
-3. Swaps them in
-4. Stops the old input reader, then shuts down the old tracker, which flushes its remaining events
-5. Starts the new input reader
+2. Builds a new tracker from it and starts sending new events through it
+3. Shuts down the old tracker, which flushes its remaining events
 
-Use it to rotate the API key or change flush settings. Three limits apply:
+The input reader keeps running throughout, so a file input keeps its read position and does not send lines again, and a TCP listener keeps accepting connections.
+
+Use it to rotate the API key or change flush settings. Two limits apply:
 
 - The input source is fixed when the daemon starts, so a changed `input` block needs a restart.
 - A key given with `--api-key` keeps overriding the config file, so rotate a key in the config file only when the daemon was not started with that flag.
-- A TCP listener is closed and reopened during the reload, so connections attempted in that moment are refused. Clients should retry.
 
 ## Pipe mode
 
@@ -199,4 +198,4 @@ When no `input` is configured, or `input.mode` is `"stdin"`, the CLI runs in pip
 
 ## Shutdown
 
-On `SIGTERM` or `SIGINT`, the daemon stops its input reader, flushes queued events, removes the PID file, and exits with status 0. The flush waits up to 5 seconds.
+On `SIGTERM` or `SIGINT`, the daemon stops its input reader, which closes any TCP client that is still connected, then flushes queued events, removes the PID file, and exits with status 0. The flush waits up to 5 seconds.
