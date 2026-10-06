@@ -320,7 +320,7 @@ if err != nil {
 
 ## Short-lived processes
 
-A Lambda handler or command-line program that exits right after it handles a request can lose events that are still queued. Call `Flush()` and then `Shutdown()` before the process ends, and set `FlushAt` to 1 if every event must be sent immediately.
+A Lambda handler or command-line program that exits right after it handles a request can lose events that are still queued. Call `Flush()` before each handler returns and `Shutdown()` only when the process is about to exit, because later `Track` calls are dropped after `Shutdown()`. Set `FlushAt` to 1 if every event must be sent immediately.
 
 ## Batching and outages
 

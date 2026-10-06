@@ -122,7 +122,7 @@ let tracker = try Tracker("dk_your_api_key", options: TrackerOptions(
 
 ## Short-lived processes
 
-A command-line tool or app extension that exits right after it finishes its work can lose events that are still queued. Call `flush()` and then `shutdown()` before the process ends, and set `flushAt` to 1 if every event must be sent immediately.
+A command-line tool or app extension that exits right after it finishes its work can lose events that are still queued. Call `flush()` before each handler returns and `shutdown()` only when the process is about to exit, because a tracker that has been shut down drops later events. Set `flushAt` to 1 if every event must be sent immediately.
 
 ## Batching and outages
 

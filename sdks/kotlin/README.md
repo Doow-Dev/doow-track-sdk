@@ -128,7 +128,7 @@ val tracker = Tracker("dk_your_api_key", TrackerOptions(
 
 ## Short-lived processes
 
-A function or command-line program that exits right after it handles a request can lose events that are still queued. Call `flush()` and then `shutdown()` (or `close()`) before the process ends, and set `flushAt` to 1 if every event must be sent immediately.
+A function or command-line program that exits right after it handles a request can lose events that are still queued. Call `flush()` before each handler returns and `shutdown()` (or `close()`) only when the process is about to exit, because a tracker that has been shut down drops later events. Set `flushAt` to 1 if every event must be sent immediately.
 
 ## Batching and outages
 

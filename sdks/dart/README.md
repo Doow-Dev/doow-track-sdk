@@ -170,7 +170,7 @@ class _MyAppState extends State<MyApp> {
 
 ## Short-lived processes
 
-A script or function that exits right after it handles a request can lose events that are still queued. Call `flush()` and then `shutdown()` before the process ends, and set `flushAt` to 1 if every event must be sent immediately.
+A script or function that exits right after it handles a request can lose events that are still queued. Call `flush()` before each handler returns and `shutdown()` only when the process is about to exit, because a tracker that has been shut down drops later events. Set `flushAt` to 1 if every event must be sent immediately.
 
 ## Batching and outages
 

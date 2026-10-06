@@ -174,7 +174,7 @@ async fn example() {
 
 ## Short-lived processes
 
-A function or command-line program that exits right after it handles a request can lose events that are still queued. Await `flush()` and then `shutdown()` before the process ends, and set `flush_at` to 1 if every event must be sent immediately.
+A function or command-line program that exits right after it handles a request can lose events that are still queued. Await `flush()` before each handler returns and `shutdown()` only when the process is about to exit, because it stops the background flush loop. Set `flush_at` to 1 if every event must be sent immediately.
 
 ## Batching and outages
 

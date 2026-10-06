@@ -358,7 +358,7 @@ def my_view(request):
 
 ## Short-lived processes
 
-A Lambda handler or script that exits right after it handles a request can lose events that are still queued. Call `flush()` and then `shutdown()` before the process ends (`await` both on `AsyncTracker`), and set `flush_at` to 1 if every event must be sent immediately.
+A Lambda handler or script that exits right after it handles a request can lose events that are still queued. Call `flush()` before each handler returns and `shutdown()` only when the process is about to exit (`await` both on `AsyncTracker`), because a tracker that has been shut down drops later events. Set `flush_at` to 1 if every event must be sent immediately.
 
 ## Batching and outages
 

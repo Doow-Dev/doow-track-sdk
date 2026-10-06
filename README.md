@@ -35,7 +35,7 @@ When the API is unreachable (a network error, `408`, `429`, or `5xx` after the r
 
 ## Short-lived processes
 
-A function or script that exits right after it handles a request can lose events that are still in the queue. Call the SDK's flush or shutdown method before the process ends, and set the flush threshold (`flushAt`, spelled as each SDK spells it) to 1 if every event must leave immediately. The TypeScript SDK's `withLambda`, `withVercel`, and `withAzureFunction` wrappers do both, as described in the [TypeScript serverless guide](sdks/typescript/docs/serverless.md).
+A function or script that exits right after it handles a request can lose events that are still in the queue. Call the SDK's flush method before the handler returns, and call its shutdown method only when the process itself is about to exit, because a tracker that has been shut down stops its background flushing, most SDKs also drop any event tracked afterwards, and a warm function instance reuses its tracker. Set the flush threshold (`flushAt`, spelled as each SDK spells it) to 1 if every event must leave immediately. The TypeScript SDK's `withLambda`, `withVercel`, and `withAzureFunction` wrappers set the threshold to 1 and flush before the handler returns, as described in the [TypeScript serverless guide](sdks/typescript/docs/serverless.md).
 
 ## Standalone CLI / daemon
 

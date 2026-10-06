@@ -147,7 +147,7 @@ end
 
 ## Short-lived processes
 
-A script, rake task, or function that exits right after it handles a request can lose events that are still queued. Call `flush` and then `shutdown` before the process ends, and set `flush_at` to 1 if every event must be sent immediately.
+A script, rake task, or function that exits right after it handles a request can lose events that are still queued. Call `flush` before each handler returns and `shutdown` only when the process is about to exit, because it stops the background flusher. Set `flush_at` to 1 if every event must be sent immediately.
 
 ## Batching and outages
 
