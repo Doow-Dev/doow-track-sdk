@@ -11,6 +11,7 @@
 ### Fixes
 
 - Error and partial-accept responses are read as a stream and cut off at 64 KiB, so an oversized or endless body can no longer be buffered in full.
+- Server-supplied error text has Unicode bidirectional controls and line or paragraph separators replaced with spaces, in addition to control characters.
 
 ### Behavior changes
 
