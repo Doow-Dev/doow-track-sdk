@@ -14,6 +14,7 @@
 
 ### Fixes
 
+- Server-supplied error text has Unicode bidirectional controls and line or paragraph separators replaced with spaces, in addition to control characters.
 - Requests now send the `batch_id`/`sdk_version` envelope and per-event `event_id`, `occurred_at`, `source_system`, and `measurements`.
 - HTTP 207 partial acceptance is reported to `onError` as `PartialAcceptError` with each rejected event and reason, and is not retried.
 - A permanent 4xx no longer escapes `flush()`, so the periodic flush keeps running.

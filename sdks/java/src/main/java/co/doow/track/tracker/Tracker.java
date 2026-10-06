@@ -15,6 +15,7 @@ import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.function.Consumer;
+import java.util.regex.Pattern;
 import java.util.zip.GZIPOutputStream;
 
 public class Tracker implements AutoCloseable {
@@ -312,9 +313,12 @@ public class Tracker implements AutoCloseable {
         return Math.min(Math.max(ms, 0), MAX_RETRY_AFTER_MS);
     }
 
+    private static final Pattern UNSAFE_TEXT = Pattern.compile(
+            "[\\p{Cc}\\x{61C}\\x{200E}\\x{200F}\\x{2028}\\x{2029}\\x{202A}-\\x{202E}\\x{2066}-\\x{2069}]");
+
     static String sanitize(String text) {
         if (text == null) return "";
-        String cleaned = text.replaceAll("\\p{Cc}", " ");
+        String cleaned = UNSAFE_TEXT.matcher(text).replaceAll(" ");
         return cleaned.length() > MAX_ERROR_TEXT ? cleaned.substring(0, MAX_ERROR_TEXT) + "..." : cleaned;
     }
 

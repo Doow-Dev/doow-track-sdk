@@ -415,6 +415,19 @@ class TrackerProtocolTest {
         assertTrue(cleaned.length() <= 520);
     }
 
+    @Test
+    void bidirectionalControlsAndLineSeparatorsAreStripped() {
+        int[] unsafe = {0x202E, 0x2066, 0x2069, 0x200F, 0x061C, 0x2028, 0x2029};
+        StringBuilder input = new StringBuilder("a");
+        for (int i = 0; i < unsafe.length; i++) {
+            if (i > 0) input.append('b');
+            input.appendCodePoint(unsafe[i]);
+        }
+        input.append('c');
+
+        assertEquals("a" + " b".repeat(unsafe.length - 1) + " c", Tracker.sanitize(input.toString()));
+    }
+
     private void awaitBodies(int count) throws InterruptedException {
         long deadline = System.currentTimeMillis() + 5000;
         while (bodies.size() < count && System.currentTimeMillis() < deadline) Thread.sleep(20);
