@@ -16,7 +16,7 @@ Each release of the TypeScript SDK (tags of the form `typescript-vX.Y.Z`) attach
 | macOS arm64 (Apple silicon) | `doow-track-darwin-arm64` | `doow-track-darwin-arm64.sha256` |
 | Windows Server x64 | `doow-track-windows-x64.exe` | `doow-track-windows-x64.exe.sha256` |
 
-The older releases named `sdk/v0.1.0` to `sdk/v0.1.4` have only the four Linux and macOS executables and no Windows build. Linux x64, Linux arm64, macOS x64, macOS arm64, and Windows x64 are the only platforms with a release asset. Every release is built and smoke tested on all five (the Windows executable on Windows Server). If you run another platform, use the [sidecar image](sidecar.md) or one of the language SDKs instead.
+Linux x64, Linux arm64, macOS x64, macOS arm64, and Windows x64 are the only platforms with a release asset. Every release is built and smoke tested on all five (the Windows executable on Windows Server). If you run another platform, use the [sidecar image](sidecar.md) or one of the language SDKs instead.
 
 ### Verify the download
 

@@ -68,8 +68,6 @@ Two pipelines act on a tag, and each SDK has exactly one publisher:
 - The Woodpecker pipeline in `.woodpecker.yml` publishes every SDK except TypeScript to its registry.
 - The GitHub Actions workflow `.github/workflows/doow-track-sdk-publish.yml` publishes TypeScript. It rejects a tag that is not plain `X.Y.Z` or that differs from the version in `sdks/typescript/package.json`. It then builds and tests everything, publishes the sidecar image `ghcr.io/doow-dev/doow-track-sidecar` with the tags `X.Y.Z`, `X`, and `latest`, creates a GitHub release that carries the five CLI executables and their checksums, and publishes the npm package last, because an npm version can never be reused.
 
-The older tags `sdk/v0.1.0` to `sdk/v0.1.10` predate this convention and stay as they are. Do not create new tags in that form, because no pipeline acts on them. List the full set of tags with `git ls-remote --tags origin`.
-
 ## License
 
 MIT
