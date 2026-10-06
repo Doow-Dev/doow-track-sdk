@@ -1,7 +1,8 @@
 # Doow Track SDKs — Unified CI/CD Pipeline
 #
 # CI: On push/PR, tests only SDKs with changes
-# Publish: On tag (e.g., python/v0.2.0), publishes that SDK to its registry
+# Publish: On tag (e.g., python-v0.2.0), publishes that SDK to its registry. TypeScript is the
+# exception and is published by GitHub Actions.
 
 when:
   - event: [push, pull_request, tag]
@@ -155,39 +156,11 @@ steps:
 # PUBLISH — Deploy to registries on tag
 # ============================================================================
 
-  # --- TypeScript → npm + Docker ---
-  - name: publish-typescript
-    image: node:22
-    commands:
-      - rm -rf node_modules package-lock.json
-      - echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" > ~/.npmrc
-      - cd sdks/typescript && npm install && npm run build && npm test && npm publish --access public
-    environment:
-      NPM_TOKEN:
-        from_secret: npm_token
-    when:
-      - event: tag
-        ref: refs/tags/typescript-v*
-
-  - name: publish-typescript-docker
-    image: woodpeckerci/plugin-docker-buildx
-    privileged: true
-    settings:
-      repo: ghcr.io/doow-dev/doow-track-sidecar
-      dockerfile: sdks/typescript/Dockerfile
-      context: sdks/typescript
-      registry: ghcr.io
-      platforms: linux/amd64,linux/arm64
-      tags:
-        - latest
-        - ${CI_COMMIT_TAG##typescript/v}
-      username:
-        from_secret: ghcr_username
-      password:
-        from_secret: ghcr_token
-    when:
-      - event: tag
-        ref: refs/tags/typescript-v*
+  # --- TypeScript: published by .github/workflows/doow-track-sdk-publish.yml ---
+  # A typescript-v* tag publishes the npm package, the sidecar image, and the CLI release from
+  # GitHub Actions. Do not add TypeScript publish steps here, or one tag would publish twice.
+  # The earlier steps built the sidecar image with the wrong Docker context, which produced
+  # the image tagged typescript-v0.1.11 that has no sidecar entry point.
 
   # --- React → npm ---
   - name: publish-react
