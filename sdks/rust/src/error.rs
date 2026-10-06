@@ -7,11 +7,25 @@ pub type Result<T> = std::result::Result<T, DoowError>;
 
 const MAX_ERROR_TEXT: usize = 512;
 
-/// Strip control characters and cap server-supplied text before it enters a message
+fn is_unsafe_char(c: char) -> bool {
+    c.is_control()
+        || matches!(
+            c,
+            '\u{61c}'
+                | '\u{200e}'
+                | '\u{200f}'
+                | '\u{2028}'
+                | '\u{2029}'
+                | '\u{202a}'..='\u{202e}'
+                | '\u{2066}'..='\u{2069}'
+        )
+}
+
+/// Strip control, bidirectional, and line-separator characters and cap server-supplied text
 pub fn sanitize_text(text: &str) -> String {
     let cleaned: String = text
         .chars()
-        .map(|c| if c.is_control() { ' ' } else { c })
+        .map(|c| if is_unsafe_char(c) { ' ' } else { c })
         .collect();
     if cleaned.chars().count() > MAX_ERROR_TEXT {
         let mut truncated: String = cleaned.chars().take(MAX_ERROR_TEXT).collect();

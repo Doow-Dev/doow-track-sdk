@@ -806,6 +806,13 @@ mod tests {
         assert!(cleaned.chars().count() <= 520);
     }
 
+    #[test]
+    fn bidirectional_controls_and_line_separators_are_stripped() {
+        let cleaned =
+            sanitize_text("a\u{202e}b\u{2066}c\u{2069}d\u{200f}e\u{61c}f\u{2028}g\u{2029}h");
+        assert_eq!(cleaned, "a b c d e f g h");
+    }
+
     #[tokio::test]
     async fn flush_of_more_than_500_events_sends_chunks_of_at_most_500_with_distinct_batch_ids() {
         let server = MockServer::start().await;
