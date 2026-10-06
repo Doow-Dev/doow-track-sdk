@@ -11,5 +11,6 @@
 ### Fixes
 
 - The tracker reads at most 64 KiB of a response body, so an oversized or endless response can no longer exhaust memory.
+- `sanitizeText` also replaces Unicode bidirectional controls and line or paragraph separators with spaces.
 - Requests send the `batch_id`/`sdk_version` envelope, HTTP 207 is reported as `PartialAcceptError`, and `shutdown` flushes queued events before closing.
 - `Retry-After` is clamped to 30 seconds and a throwing `onError` handler no longer causes a resend.

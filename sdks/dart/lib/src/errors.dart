@@ -2,8 +2,13 @@ import 'dart:convert';
 
 const _maxErrorText = 512;
 
+final _unsafeText = RegExp(
+  r'[\x00-\x1f\x7f-\x9f\u{61c}\u{200e}\u{200f}\u{2028}\u{2029}\u{202a}-\u{202e}\u{2066}-\u{2069}]',
+  unicode: true,
+);
+
 String sanitizeText(Object? value) {
-  final text = '$value'.replaceAll(RegExp(r'[\x00-\x1f\x7f-\x9f]'), ' ');
+  final text = '$value'.replaceAll(_unsafeText, ' ');
   return text.length > _maxErrorText ? '${text.substring(0, _maxErrorText)}...' : text;
 }
 

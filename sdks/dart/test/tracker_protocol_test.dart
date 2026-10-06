@@ -451,4 +451,10 @@ void main() {
     expect(cleaned.contains('\x9b'), isFalse);
     expect(cleaned.length, lessThanOrEqualTo(520));
   });
+
+  test('bidirectional controls and line separators are stripped', () {
+    final cleaned = sanitizeText(
+        'a\u{202e}b\u{2066}c\u{2069}d\u{200f}e\u{61c}f\u{2028}g\u{2029}h');
+    expect(cleaned, 'a b c d e f g h');
+  });
 }
