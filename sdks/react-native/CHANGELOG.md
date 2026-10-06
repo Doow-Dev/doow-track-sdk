@@ -10,6 +10,7 @@
 
 ### Fixes
 
+- Error and partial-accept responses are read as a stream and cut off at 64 KiB when the runtime exposes a response stream. React Native's built-in `fetch` does not, so there the body is read whole and then truncated.
 - Requests send the `batch_id`/`sdk_version` envelope, and HTTP 207 rejections reach `onError` as `PartialAcceptError` without being requeued.
 - Permanently rejected batches are reported and dropped instead of requeued forever, and `Retry-After` is clamped to 30 seconds.
 - The test script now runs `vitest` (Jest was never installed).

@@ -91,7 +91,7 @@ export function toWireBatch(batchId: string, events: QueuedEvent[]): WireBatch {
 }
 
 const MAX_ERROR_TEXT = 512;
-const MAX_BODY_CHARS = 1 << 20;
+const MAX_BODY_CHARS = 64 * 1024;
 
 export function sanitizeText(value: unknown): string {
   // eslint-disable-next-line no-control-regex
@@ -101,7 +101,19 @@ export function sanitizeText(value: unknown): string {
 
 export async function readBoundedText(response: Response): Promise<string> {
   try {
-    return (await response.text()).slice(0, MAX_BODY_CHARS);
+    const reader = response.body?.getReader();
+    if (!reader || typeof TextDecoder === 'undefined') {
+      return (await response.text()).slice(0, MAX_BODY_CHARS);
+    }
+    const decoder = new TextDecoder();
+    let text = '';
+    while (text.length < MAX_BODY_CHARS) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      text += decoder.decode(value, { stream: true });
+    }
+    await reader.cancel().catch(() => undefined);
+    return text.slice(0, MAX_BODY_CHARS);
   } catch {
     return '';
   }

@@ -8,6 +8,10 @@
 - After a transient failure (network error, `429`, or `5xx` after the retries) the remaining chunks are requeued instead of each spending a full retry budget, and count-triggered flushes pause until the next flush interval.
 - A flush of more than 500 events is sent as separate requests of at most 500 events, each with its own batch id, so a large backlog no longer exceeds the API's per-minute event limit and loops on `429`.
 
+### Fixes
+
+- Error and partial-accept responses are read as a stream and cut off at 64 KiB, so an oversized or endless body can no longer be buffered in full.
+
 ### Behavior changes
 
 - `ServerTracker` accepts an `onError` option. HTTP 207 partial acceptance is reported there as `PartialAcceptError` and does not throw. Previously a 207 was treated as success and rejections were lost.

@@ -1,6 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Tracker } from '../tracker';
-import { PartialAcceptError, MAX_RETRY_AFTER_MS, parseRetryAfterMs, sanitizeText } from '../wire';
+import {
+  PartialAcceptError,
+  MAX_RETRY_AFTER_MS,
+  parseRetryAfterMs,
+  readBoundedText,
+  sanitizeText,
+} from '../wire';
 
 interface Call {
   url: string;
@@ -464,5 +470,37 @@ describe('sanitizeText', () => {
     const cleaned = sanitizeText(`line1\nline2\u001b[31m\u009b31m${'x'.repeat(2000)}`);
     expect(cleaned).not.toMatch(/[\u0000-\u001f\u007f-\u009f]/);
     expect(cleaned.length).toBeLessThanOrEqual(520);
+  });
+});
+
+describe('readBoundedText', () => {
+  it('stops pulling an endless body after 64 KiB', async () => {
+    let pulled = 0;
+    const stream = new ReadableStream<Uint8Array>(
+      {
+        pull(controller) {
+          pulled += 1;
+          controller.enqueue(new Uint8Array(65536).fill(120));
+          if (pulled >= 40) controller.close();
+        },
+      },
+      { highWaterMark: 0 },
+    );
+
+    const text = await readBoundedText(new Response(stream));
+
+    expect(text.length).toBeLessThanOrEqual(65536);
+    expect(pulled).toBeLessThanOrEqual(3);
+  });
+
+  it('returns a small body whole', async () => {
+    expect(await readBoundedText(new Response('{"a":1}'))).toBe('{"a":1}');
+  });
+
+  it('returns an empty string when the body cannot be read', async () => {
+    const response = new Response('x');
+    await response.text();
+
+    expect(await readBoundedText(response)).toBe('');
   });
 });
