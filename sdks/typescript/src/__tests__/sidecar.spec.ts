@@ -162,6 +162,28 @@ describe('S82: pipeLines — line size limit', () => {
     expect(errors).toEqual([`Line exceeds ${max} bytes`]);
   });
 
+  it('measures the limit in bytes, so multi-byte text counts for what it occupies', async () => {
+    const { max } = await run([]);
+    // The euro sign is one UTF-16 unit and three UTF-8 bytes.
+    const fits = '€'.repeat(Math.floor(max / 3));
+    const tooBig = '€'.repeat(Math.floor(max / 3) + 1);
+    const { lines, errors } = await run([`${tooBig}\n${fits}\n`]);
+
+    expect(Buffer.byteLength(fits, 'utf8')).toBeLessThanOrEqual(max);
+    expect(Buffer.byteLength(tooBig, 'utf8')).toBeGreaterThan(max);
+    expect(lines).toEqual([fits]);
+    expect(errors).toEqual([`Line exceeds ${max} bytes`]);
+  });
+
+  it('accepts a line of exactly the limit and rejects one byte more, with CRLF endings', async () => {
+    const { max } = await run([]);
+    const exact = 'a'.repeat(max);
+    const { lines, errors } = await run([`${exact}\r\n${exact}a\r\n`]);
+
+    expect(lines).toEqual([exact]);
+    expect(errors).toEqual([`Line exceeds ${max} bytes`]);
+  });
+
   it('still splits normal lines and sends a final line without a newline', async () => {
     const { lines, errors } = await run(['{"a":1}\n{"b"', ':2}\n{"c":3}']);
 

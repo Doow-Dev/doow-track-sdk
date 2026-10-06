@@ -33,6 +33,18 @@ export interface InputReader {
 /** Split a stream into lines, calling onLine for each complete line. */
 export const MAX_LINE_BYTES = 1_048_576;
 
+/**
+ * True when a line is larger than the limit in UTF-8 bytes, not in characters. A trailing carriage
+ * return belongs to a CRLF line ending, so it does not count. A UTF-16 unit takes between one and
+ * three bytes, which lets the length alone settle most lines without counting bytes.
+ */
+function exceedsLineLimit(text: string): boolean {
+  const end = text.endsWith('\r') ? text.length - 1 : text.length;
+  if (end > MAX_LINE_BYTES) return true;
+  if (end * 3 <= MAX_LINE_BYTES) return false;
+  return Buffer.byteLength(text.slice(0, end), 'utf8') > MAX_LINE_BYTES;
+}
+
 export function pipeLines(
   readable: Readable,
   onLine: (line: string) => void,
@@ -60,7 +72,7 @@ export function pipeLines(
     buf = parts.pop() ?? '';
     // Every part left in the array is a complete line.
     for (const raw of parts) {
-      if (raw.length > MAX_LINE_BYTES) {
+      if (exceedsLineLimit(raw)) {
         reportTooLong();
         continue;
       }
@@ -68,7 +80,7 @@ export function pipeLines(
       if (line.length > 0) onLine(line);
     }
 
-    if (buf.length > MAX_LINE_BYTES) {
+    if (exceedsLineLimit(buf)) {
       reportTooLong();
       buf = '';
       discarding = true;
@@ -76,7 +88,7 @@ export function pipeLines(
   });
   readable.on('end', () => {
     if (!discarding) {
-      if (buf.length > MAX_LINE_BYTES) {
+      if (exceedsLineLimit(buf)) {
         reportTooLong();
       } else {
         const remaining = buf.trim();

@@ -15,7 +15,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixes
 
-- The 1 MiB line limit of the stdin and TCP inputs now applies to every line. A line over the limit is reported as `Input error: Line exceeds 1048576 bytes` and dropped, including a line that arrives complete with its newline and the last line before end of input, and the rest of an oversized line is discarded instead of being parsed as a line of its own. The stdin input also never reported the error before.
+- The 1 MiB line limit of the stdin and TCP inputs is measured in UTF-8 bytes, ignores the carriage return of a CRLF line ending, and now applies to every line. A line over the limit is reported as `Input error: Line exceeds 1048576 bytes` and dropped, including a line that arrives complete with its newline and the last line before end of input, and the rest of an oversized line is discarded instead of being parsed as a line of its own. The stdin input also never reported the error before.
 - A file input that cannot be read, for example because of its permissions, is now reported once in the log as `Input error: Cannot read <path>` instead of reading zero events without any message.
 - The sidecar and the CLI daemon no longer hang on `SIGTERM` or `SIGINT` while a TCP client stays connected. Stopping the TCP input now closes connected clients, so the final flush runs instead of waiting for the idle timeout or a SIGKILL.
 - A CLI config reload on `SIGHUP` now swaps only the tracker. It no longer restarts the input reader, which re-sent every line of a file input from its first byte and refused TCP connections during the restart.
