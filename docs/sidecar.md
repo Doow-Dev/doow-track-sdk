@@ -14,7 +14,7 @@ The sidecar is configured only through environment variables. It does not read a
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `DOOW_TRACK_API_KEY` | yes | none | SDK API key. The sidecar exits at startup without it |
+| `DOOW_TRACK_API_KEY` | yes | none | SDK key, created in the dashboard under Settings > API Keys > Create key > SDK key. The sidecar exits at startup without it |
 | `DOOW_TRACK_INPUT` | no | `stdin` | `stdin`, `file:<path>`, or `tcp:<port>`. Any other value stops the sidecar at startup |
 | `DOOW_TRACK_HEALTH_PORT` | no | `9090` | Port for the health endpoint |
 | `DOOW_TRACK_ENDPOINT` | no | `https://api.doow.co` | Telemetry server URL |

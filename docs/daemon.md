@@ -93,7 +93,7 @@ Only `api_key` is required, and it can also come from the `--api-key` flag or th
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `api_key` | `string` | none | SDK API key. Keys start with `dk_`. The CLI does not check the prefix, and the API answers `401` for a key it does not accept |
+| `api_key` | `string` | none | SDK key, created in the dashboard under Settings > API Keys > Create key > SDK key. Keys start with `dk_`. The CLI does not check the prefix, and the API answers `401` for a key it does not accept |
 | `endpoint` | `string` | `https://api.doow.co` | Telemetry server URL |
 | `attribution` | `object` | `{}` | Default attribution merged into every event |
 | `input.mode` | `"stdin" \| "file" \| "tcp"` | `stdin` | Input mode |

@@ -14,7 +14,7 @@ The OTLP push integration lets you point your existing OpenTelemetry Collector a
 
 ## Step 1: Get an API key
 
-Generate a `dk_` prefixed API key from the Doow dashboard under Settings > API Keys > SDK Keys. The same key type works for both SDK telemetry and OTLP push.
+In the Doow dashboard, open Settings > API Keys, select **Create key**, and choose **SDK key** in the dialog. The key starts with `dk_`. The same SDK key works for both SDK telemetry and OTLP push. Regular API keys and MCP keys are created from the same button, but they are not accepted by the telemetry endpoints.
 
 ## Step 2: Configure the collector
 
