@@ -115,7 +115,7 @@ jobs:
       - uses: ruby/setup-ruby@14594264cd68ce8a2345dd349bc3d138a4ef85c8 # v1
         with:
           ruby-version: ${{ matrix.ruby-version }}
-      - run: gem install rspec webmock --no-document
+      - run: gem install rspec -v 3.13.2 --no-document && gem install webmock -v 3.26.4 --no-document
       - run: rspec -I lib -I spec
         working-directory: sdks/ruby
 

@@ -27,10 +27,10 @@ jobs:
       fail-fast: false
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Set up Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: ${{ matrix.node-version }}
           cache: 'npm'
@@ -62,7 +62,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Compare tag and package versions
         run: |
@@ -79,10 +79,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Set up Node.js 20
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '20.x'
           cache: 'npm'
@@ -95,13 +95,13 @@ jobs:
         run: npm run build
 
       - name: Set up QEMU (multi-arch)
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       - name: Verify multi-arch sidecar image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           file: sdks/typescript/Dockerfile
@@ -119,10 +119,10 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/typescript/v')
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Set up Node.js 20 (npm publish)
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '20.x'
           registry-url: 'https://registry.npmjs.org'
@@ -150,7 +150,7 @@ jobs:
       packages: write
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Extract version from tag
         id: version
@@ -161,7 +161,7 @@ jobs:
           echo "major=${MAJOR}" >> "$GITHUB_OUTPUT"
 
       - name: Log in to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ${{ env.GHCR_LOGIN_SERVER }}
           username: ${{ github.actor }}
@@ -174,13 +174,13 @@ jobs:
         run: npm run build
 
       - name: Set up QEMU (multi-arch)
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       - name: Build and push sidecar image (multi-arch)
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           file: sdks/typescript/Dockerfile
@@ -221,10 +221,10 @@ jobs:
     runs-on: ${{ matrix.runner }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Set up Node.js 24
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '24.x'
           cache: 'npm'
@@ -239,7 +239,7 @@ jobs:
       - name: Package CLI binary
         run: |
           BINARY_NAME="doow-track-${{ matrix.target }}"
-          npx pkg sdks/typescript/dist/cli.cjs --target "${{ matrix.pkg_target }}" --output "${BINARY_NAME}"
+          npx pkg@5.8.1 sdks/typescript/dist/cli.cjs --target "${{ matrix.pkg_target }}" --output "${BINARY_NAME}"
           if [[ "${BINARY_NAME}" != *.exe ]]; then chmod +x "${BINARY_NAME}"; fi
           if command -v sha256sum >/dev/null; then
             sha256sum "${BINARY_NAME}" > "${BINARY_NAME}.sha256"
@@ -262,7 +262,7 @@ jobs:
           printf '{"metric":"release_smoke","quantity":1,"license_id":"lic_smoke"}\n' | env DOOW_TRACK_DISABLED=true "./${BINARY_NAME}" --api-key dk_smoke
 
       - name: Upload CLI binary artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: cli-${{ matrix.target }}
           path: |
@@ -276,7 +276,7 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: cli-windows-x64.exe
 
@@ -305,7 +305,7 @@ jobs:
       contents: write
 
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           pattern: cli-*
           path: release-assets
@@ -316,7 +316,7 @@ jobs:
         run: echo "version=${GITHUB_REF#refs/tags/typescript/v}" >> "$GITHUB_OUTPUT"
 
       - name: Upload release assets
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           tag_name: ${{ github.ref_name }}
           name: "@doow/track v${{ steps.version.outputs.version }}"
