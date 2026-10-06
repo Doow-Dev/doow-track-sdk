@@ -334,6 +334,12 @@ RSpec.describe DoowTrack::Tracker do
     expect(cleaned.length).to be <= 520
   end
 
+  it "strips bidirectional controls and line separators" do
+    cleaned = DoowTrack.sanitize("a\u{202e}b\u{2066}c\u{2069}d\u{200f}e\u{61c}f\u{2028}g\u{2029}h")
+
+    expect(cleaned).to eq("a b c d e f g h")
+  end
+
   it "reads at most 64 KiB of a response body" do
     padded = { accepted: 1, rejected: 1, batch_id: "b-1", pad: "x" * 100_000,
                rejections: [{ event_id: "evt-x", reason: "bad" }] }

@@ -4,11 +4,12 @@ require "json"
 
 module DoowTrack
   MAX_ERROR_TEXT = 512
+  UNSAFE_TEXT = /[[:cntrl:]\u{61c}\u{200e}\u{200f}\u{2028}\u{2029}\u{202a}-\u{202e}\u{2066}-\u{2069}]/
 
   def self.sanitize(value)
     raw = value.to_s.dup
     raw.force_encoding(Encoding::UTF_8) if raw.encoding == Encoding::BINARY
-    text = raw.scrub(" ").gsub(/[[:cntrl:]]/, " ")
+    text = raw.scrub(" ").gsub(UNSAFE_TEXT, " ")
     text.length > MAX_ERROR_TEXT ? "#{text[0, MAX_ERROR_TEXT]}..." : text
   end
 
