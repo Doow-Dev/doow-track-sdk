@@ -200,7 +200,11 @@ const meter = new DoowTracker('dk_your_api_key', {
 });
 ```
 
-Failed batches are written as atomic JSON files (write-then-rename) and replayed FIFO on the next successful flush.
+Failed batches are written as atomic JSON files (write-then-rename) and replayed FIFO at the start of the next flush. The replay stops at the first batch the server cannot take, so an outage does not make it loop, and a batch that fails again or meets a `401` or a rate limit stays in the store.
+
+## Batching and outages
+
+A flush sends at most 500 events per request, and a larger backlog is split into several requests that each carry their own `batch_id`, so a large flush does not exceed the API's per-minute event limit. A `413` halves the request size until the server accepts it. When the retries for a batch are used up (a network error, `408`, `429`, or `5xx`), the batch goes to the offline store if one is configured, and a permanent `4xx` response drops only the request it rejected. When the queue reaches `maxQueueSize`, the oldest event is dropped to make room for each new one, so the newest events are the ones kept.
 
 ## Error handling
 
