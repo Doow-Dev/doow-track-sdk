@@ -251,7 +251,7 @@ jobs:
         if: matrix.target != 'windows-x64.exe'
         run: |
           BINARY_NAME="doow-track-${{ matrix.target }}"
-          EXPECTED_VERSION="doow-track v$(node -p \"require('./sdks/typescript/package.json').version\")"
+          EXPECTED_VERSION="doow-track v$(node -p "require('./sdks/typescript/package.json').version")"
           if command -v sha256sum >/dev/null; then
             sha256sum -c "${BINARY_NAME}.sha256"
           else
