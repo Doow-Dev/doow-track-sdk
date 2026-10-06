@@ -33,9 +33,21 @@ The API also rejects a request body larger than 10 MB with a non-retryable `413`
 
 When the API is unreachable (a network error, `408`, `429`, or `5xx` after the retries), the SDK stops sending, keeps the unsent events at the front of its queue, and pauses count-triggered flushes for one flush interval. If the queue reaches its maximum size during a long outage, the behavior depends on the SDK. Go, PHP, Python, Rust, and TypeScript drop the oldest event to make room for each new one, whereas Dart, .NET, Java, Kotlin, Next.js, React, React Native, Ruby, and Swift drop new events until the queue has room again. Each SDK's README states which policy it uses.
 
+## Short-lived processes
+
+A function or script that exits right after it handles a request can lose events that are still in the queue. Call the SDK's flush or shutdown method before the process ends, and set the flush threshold (`flushAt`, spelled as each SDK spells it) to 1 if every event must leave immediately. The TypeScript SDK's `withLambda`, `withVercel`, and `withAzureFunction` wrappers do both, as described in the [TypeScript serverless guide](sdks/typescript/docs/serverless.md).
+
 ## Standalone CLI / daemon
 
-The `doow-track` executable is also released for Linux x64/arm64, macOS x64/arm64, and Windows Server x64. It accepts newline-delimited JSON events, so applications in any supported language can use it without installing Node.js or a language SDK on the server. See the [TypeScript daemon guide](sdks/typescript/docs/daemon.md) for downloads, configuration, and service setup.
+The `doow-track` executable is also released for Linux x64/arm64, macOS x64/arm64, and Windows Server x64. It accepts newline-delimited JSON events, so applications in any supported language can use it without installing Node.js or a language SDK on the server. See the [daemon guide](docs/daemon.md) for downloads, configuration, and service setup.
+
+## Guides for any language
+
+These guides do not depend on a particular SDK:
+
+- [Daemon / CLI guide](docs/daemon.md) covers the standalone executable, its systemd unit, and the config file.
+- [Sidecar guide](docs/sidecar.md) covers the Docker image for Docker Compose and Kubernetes, which takes events over stdin, a file, or TCP.
+- [OTLP guide](docs/otlp.md) covers forwarding usage metrics from an OpenTelemetry Collector without installing an SDK.
 
 ## Contributing
 

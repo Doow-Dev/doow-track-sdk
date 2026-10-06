@@ -164,7 +164,7 @@ echo '{"metric":"api_calls","quantity":1,"license_id":"lic_..."}' | ./doow-track
 kill -HUP $(cat /var/run/doow-track.pid)
 ```
 
-See the [Daemon / CLI guide](docs/daemon.md) for the five OS/CPU downloads, Windows Server usage, and service configuration.
+See the [Daemon / CLI guide](../../docs/daemon.md) for the five OS/CPU downloads, Windows Server usage, and service configuration.
 
 Config file (`doow-track.json`):
 
@@ -224,6 +224,6 @@ After `AUTH_FAILURE`, the SDK stops emitting permanently (check `meter.stopped`)
 ## Further reading
 
 - [Serverless guide](docs/serverless.md) — Lambda, Vercel, Azure Functions
-- [Sidecar guide](docs/sidecar.md) — Docker Compose, Kubernetes sidecar pattern
-- [Daemon / CLI guide](docs/daemon.md) — systemd unit file, config file reference
-- [OTLP push guide](docs/otlp.md) — OpenTelemetry Collector config, GenAI semconv mapping
+- [Sidecar guide](../../docs/sidecar.md) — Docker Compose, Kubernetes sidecar pattern
+- [Daemon / CLI guide](../../docs/daemon.md) — systemd unit file, config file reference
+- [OTLP push guide](../../docs/otlp.md) — OpenTelemetry Collector config, GenAI semconv mapping
