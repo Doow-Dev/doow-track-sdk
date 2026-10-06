@@ -129,12 +129,10 @@ services:
     environment:
       - DOOW_TRACK_API_KEY=dk_your_api_key
       - DOOW_TRACK_ENDPOINT=https://api.doow.co
-      - DOOW_TRACK_INPUT=tcp          # stdin | file-tail | tcp
-      - DOOW_TRACK_TCP_PORT=9091
+      - DOOW_TRACK_INPUT=tcp:9091     # stdin | file:<path> | tcp:<port>
       - DOOW_TRACK_HEALTH_PORT=9090
-    ports:
-      - '9090:9090'   # health check
-      - '9091:9091'   # TCP event ingestion
+    expose:
+      - '9091'                        # TCP event ingestion, private to the Compose network
     healthcheck:
       test: ['CMD', 'wget', '-qO-', 'http://localhost:9090/healthz']
       interval: 10s
@@ -142,7 +140,7 @@ services:
       retries: 3
 ```
 
-Send events from your app as newline-delimited JSON:
+See the [Sidecar guide](../../docs/sidecar.md) for every environment variable, the input modes and their limits, and Kubernetes. Send events from your app as newline-delimited JSON:
 
 ```json
 {"metric":"api_calls","quantity":1,"license_id":"lic_..."}
