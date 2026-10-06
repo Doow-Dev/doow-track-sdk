@@ -33,6 +33,8 @@ export interface InputReader {
 /** Split a stream into lines, calling onLine for each complete line. */
 export const MAX_LINE_BYTES = 1_048_576;
 
+const TOO_LONG_MESSAGE = `Line exceeds ${MAX_LINE_BYTES} bytes`;
+
 /**
  * True when a line is larger than the limit in UTF-8 bytes, not in characters. A trailing carriage
  * return belongs to a CRLF line ending, so it does not count. A UTF-16 unit takes between one and
@@ -55,7 +57,7 @@ export function pipeLines(
   // line is not parsed as if it were a line of its own.
   let discarding = false;
   const reportTooLong = (): void => {
-    onError?.(new Error(`Line exceeds ${MAX_LINE_BYTES} bytes`), '');
+    onError?.(new Error(TOO_LONG_MESSAGE), '');
   };
 
   readable.on('data', (chunk: Buffer | string) => {
@@ -144,7 +146,14 @@ function createFileReader(
   let stopped = false;
   let pollTimer: ReturnType<typeof setTimeout> | null = null;
   let cursor = 0; // byte offset into file
+  // While inside a line longer than the limit, skip its remaining bytes to the next newline instead
+  // of parsing the tail as a line of its own.
+  let discarding = false;
   let lastReadError = '';
+
+  const reportTooLong = (): void => {
+    onError(new Error(TOO_LONG_MESSAGE), '');
+  };
 
   async function readChunk(): Promise<void> {
     if (stopped) return;
@@ -178,19 +187,42 @@ function createFileReader(
       });
       stream.on('end', () => {
         lastReadError = '';
-        cursor = stat.size;
-        // Process lines
+
+        if (discarding) {
+          const newline = buf.indexOf('\n');
+          if (newline === -1) {
+            cursor = stat.size;
+            resolve();
+            return;
+          }
+          discarding = false;
+          buf = buf.slice(newline + 1);
+        }
+
         const lines = buf.split('\n');
-        for (let i = 0; i < lines.length - 1; i++) {
-          const line = lines[i]!.trim();
+        const tail = lines.pop() ?? '';
+
+        for (const raw of lines) {
+          if (exceedsLineLimit(raw)) {
+            reportTooLong();
+            continue;
+          }
+          const line = raw.trim();
           if (line.length > 0) dispatchLine(line, onEvent, onError);
         }
-        // Last segment may be incomplete — don't advance cursor past it
-        const last = lines[lines.length - 1]!.trim();
-        if (last.length > 0) {
-          // Rewind cursor to not skip the incomplete line
-          cursor -= Buffer.byteLength(lines[lines.length - 1]!, 'utf8');
+
+        // The last segment has no newline yet, so it is not a line. Keep its start so the next read
+        // sees it whole, unless it already exceeds the limit, in which case it can only grow.
+        if (tail.trim().length === 0) {
+          cursor = stat.size;
+        } else if (exceedsLineLimit(tail)) {
+          reportTooLong();
+          cursor = stat.size;
+          discarding = true;
+        } else {
+          cursor = stat.size - Buffer.byteLength(tail, 'utf8');
         }
+
         resolve();
       });
       stream.on('error', (err: Error) => {

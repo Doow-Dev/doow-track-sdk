@@ -255,6 +255,74 @@ describe('S82: InputReader — file mode', () => {
     expect(errors).toHaveLength(1);
     expect(errors[0]!.message).toContain(dir);
   });
+
+  it('drops a line longer than the limit and keeps the lines around it', async () => {
+    const { createInputReader, MAX_LINE_BYTES } = await import('../sidecar/input-reader.js');
+    const os = await import('os');
+    const path = await import('path');
+    const fsP = await import('fs/promises');
+
+    const filePath = path.join(os.tmpdir(), `doow-oversize-${Date.now()}.jsonl`);
+    const oversized = `{"metric":"${'x'.repeat(MAX_LINE_BYTES)}"}\n`;
+    const before = '{"metric":"before","quantity":1,"license_id":"lic_1"}\n';
+    const after = '{"metric":"after","quantity":2,"license_id":"lic_1"}\n';
+    await fsP.writeFile(filePath, before + oversized + after, 'utf8');
+
+    const received: string[] = [];
+    const errors: Error[] = [];
+    const reader = createInputReader({
+      mode: { type: 'file', path: filePath },
+      onEvent: (raw) => received.push(raw),
+      onError: (err) => errors.push(err),
+    });
+
+    await reader.start();
+    await new Promise((r) => setTimeout(r, 300));
+    await reader.stop();
+    await fsP.unlink(filePath).catch(() => undefined);
+
+    const metrics = received.map((r) => (JSON.parse(r) as { metric: string }).metric);
+    expect(metrics).toContain('before');
+    expect(metrics).toContain('after');
+    expect(metrics).not.toContain('x'.repeat(MAX_LINE_BYTES));
+    expect(errors.map((e) => e.message)).toContain(`Line exceeds ${MAX_LINE_BYTES} bytes`);
+  });
+
+  it('does not parse the tail of an oversized line that has not received its newline yet', async () => {
+    const { createInputReader, MAX_LINE_BYTES } = await import('../sidecar/input-reader.js');
+    const os = await import('os');
+    const path = await import('path');
+    const fsP = await import('fs/promises');
+
+    const filePath = path.join(os.tmpdir(), `doow-oversize-tail-${Date.now()}.jsonl`);
+    await fsP.writeFile(
+      filePath,
+      `{"metric":"before","quantity":1,"license_id":"lic_1"}\n${'x'.repeat(MAX_LINE_BYTES + 1024)}`,
+      'utf8',
+    );
+
+    const received: string[] = [];
+    const errors: Error[] = [];
+    const reader = createInputReader({
+      mode: { type: 'file', path: filePath },
+      onEvent: (raw) => received.push(raw),
+      onError: (err) => errors.push(err),
+    });
+
+    await reader.start();
+    await new Promise((r) => setTimeout(r, 400));
+
+    // The rest of the oversized line arrives with its newline, followed by a real line. The tail of
+    // the dropped line must not be read as a line of its own.
+    await fsP.appendFile(filePath, `}tail\n{"metric":"after","quantity":2,"license_id":"lic_1"}\n`, 'utf8');
+    await new Promise((r) => setTimeout(r, 400));
+    await reader.stop();
+    await fsP.unlink(filePath).catch(() => undefined);
+
+    const metrics = received.map((r) => (JSON.parse(r) as { metric: string }).metric);
+    expect(metrics).toEqual(['before', 'after']);
+    expect(errors.map((e) => e.message)).toEqual([`Line exceeds ${MAX_LINE_BYTES} bytes`]);
+  });
 });
 
 // ─── input-reader: TCP mode ───────────────────────────────────────────────
