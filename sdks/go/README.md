@@ -1,6 +1,6 @@
 # Doow Track Go SDK
 
-[![Go Version](https://img.shields.io/badge/Go-1.26+-00ADD8?style=flat&logo=go)](https://go.dev)
+[![Go Version](https://img.shields.io/badge/Go-1.22+-00ADD8?style=flat&logo=go)](https://go.dev)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Go Reference](https://pkg.go.dev/badge/github.com/Doow-Dev/doow-track-sdk/sdks/go.svg)](https://pkg.go.dev/github.com/Doow-Dev/doow-track-sdk/sdks/go)
 

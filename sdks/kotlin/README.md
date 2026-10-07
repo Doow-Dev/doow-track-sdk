@@ -24,14 +24,14 @@ Official Kotlin SDK for [Doow](https://doow.co) usage telemetry and management.
 
 ```kotlin
 dependencies {
-    implementation("co.doow:doow-track-kotlin:0.1.0")
+    implementation("co.doow:doow-track-kotlin:0.1.1")
 }
 ```
 
 ### Gradle (Groovy)
 
 ```groovy
-implementation 'co.doow:doow-track-kotlin:0.1.0'
+implementation 'co.doow:doow-track-kotlin:0.1.1'
 ```
 
 ---

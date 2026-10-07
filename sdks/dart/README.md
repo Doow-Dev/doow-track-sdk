@@ -34,7 +34,7 @@ dependencies:
     git:
       url: https://github.com/Doow-Dev/doow-track-sdk.git
       path: sdks/dart
-      ref: dart-v0.1.0
+      ref: dart-v0.1.1
 ```
 
 ---

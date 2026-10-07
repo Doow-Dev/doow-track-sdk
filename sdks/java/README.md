@@ -26,14 +26,14 @@ Official Java SDK for [Doow](https://doow.co) usage telemetry and management.
 <dependency>
     <groupId>co.doow</groupId>
     <artifactId>doow-track</artifactId>
-    <version>0.1.0</version>
+    <version>0.1.1</version>
 </dependency>
 ```
 
 ### Gradle
 
 ```groovy
-implementation 'co.doow:doow-track:0.1.0'
+implementation 'co.doow:doow-track:0.1.1'
 ```
 
 ---
