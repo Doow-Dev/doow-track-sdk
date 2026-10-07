@@ -270,8 +270,11 @@ steps:
             "https://uploads.github.com/repos/Doow-Dev/doow-track-sdk/releases/$RELEASE_ID/assets?name=$asset"
         done
     environment:
+      # The same classic PAT the sidecar image push uses. Creating a release and uploading assets
+      # needs contents write, so this token must carry the repo scope as well as write:packages.
+      # It must also be enabled for the tag event, or the variable arrives empty and the curl 401s.
       GITHUB_TOKEN:
-        from_secret: github_token
+        from_secret: ghcr_token
     when:
       - event: tag
         ref: refs/tags/typescript-v*
