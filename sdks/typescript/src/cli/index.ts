@@ -18,7 +18,7 @@
  *
  * Flags:
  *   --config <path>    Path to JSON config file
- *   --api-key <key>    API key (overrides config + env)
+ *   --api-key <key>    API key (overrides the config file; DOOW_TRACK_API_KEY still wins)
  *   --pidfile <path>   Write PID to file
  *   --version          Print version and exit
  */
@@ -37,6 +37,7 @@ type FsPromisesModule = {
 
 declare const process: {
   argv: string[];
+  pkg?: unknown;
   pid: number;
   env: Record<string, string | undefined>;
   stdin: {
@@ -59,7 +60,8 @@ async function loadFsPromises(): Promise<FsPromisesModule> {
 
 // ─── Version ───────────────────────────────────────────────────────────────
 
-const VERSION = '0.1.0';
+declare const __SDK_VERSION__: string;
+const VERSION = __SDK_VERSION__;
 
 // ─── Arg parsing ──────────────────────────────────────────────────────────
 
@@ -72,7 +74,7 @@ interface ParsedArgs {
 }
 
 function parseArgs(argv: string[]): ParsedArgs {
-  const args = argv.slice(2); // strip node + script
+  const args = argv.slice(process.pkg ? 1 : 2);
   const result: ParsedArgs = { version: false, help: false };
 
   for (let i = 0; i < args.length; i++) {
@@ -177,27 +179,27 @@ async function main(): Promise<void> {
 
   const inputMode = resolveInputMode(config);
 
-  function buildReader(trk: DoowTracker): ReturnType<typeof createInputReader> {
-    return createInputReader({
-      mode: inputMode,
-      onEvent: (raw: string) => {
-        try {
-          const event = JSON.parse(raw) as TrackEvent;
-          trk.track(event);
-        } catch (e) {
-          const err = e instanceof Error ? e : new Error(String(e));
-          process.stderr.write(`[doow-track] Malformed event — skipping: ${err.message}\n`);
-        }
-      },
-      onError: (err: Error, line: string) => {
-        process.stderr.write(
-          `[doow-track] Malformed line — skipping: ${err.message} | line: ${line.slice(0, 100)}\n`,
-        );
-      },
-    });
-  }
-
-  let reader = buildReader(tracker);
+  // The reader reads `tracker` on every event, so a reload can swap the tracker while the
+  // reader keeps its file position and its open TCP listener.
+  const reader = createInputReader({
+    mode: inputMode,
+    onEvent: (raw: string) => {
+      try {
+        const event = JSON.parse(raw) as TrackEvent;
+        tracker.track(event);
+      } catch (e) {
+        const err = e instanceof Error ? e : new Error(String(e));
+        process.stderr.write(`[doow-track] Malformed event — skipping: ${err.message}\n`);
+      }
+    },
+    onError: (err: Error, line: string) => {
+      process.stderr.write(
+        line === ''
+          ? `[doow-track] Input error: ${err.message}\n`
+          : `[doow-track] Malformed line — skipping: ${err.message} | line: ${line.slice(0, 100)}\n`,
+      );
+    },
+  });
   await reader.start();
 
   // ─── Stdin pipe-mode: exit when stdin closes ──────────────────────────────
@@ -240,19 +242,21 @@ async function main(): Promise<void> {
       try {
         const newConfig = await resolveConfig(parsed.configPath, cliOverrides);
         const oldTracker = tracker;
-        const oldReader = reader;
 
-        const newTracker = buildTracker(newConfig);
-        const newReader = buildReader(newTracker);
-
-        // Swap atomically
-        tracker = newTracker;
-        reader = newReader;
+        // Swap the tracker only. The input source is fixed at startup, and restarting the
+        // reader would re-read a file from its first byte and refuse TCP connections.
+        tracker = buildTracker(newConfig);
         config = newConfig;
 
-        await oldReader.stop();
-        await oldTracker.shutdown();
-        await newReader.start();
+        try {
+          await oldTracker.shutdown();
+        } catch (e) {
+          const err = e instanceof Error ? e : new Error(String(e));
+          process.stderr.write(
+            `[doow-track] Config reloaded, but flushing the previous tracker failed: ${err.message}\n`,
+          );
+          return;
+        }
 
         process.stderr.write('[doow-track] Config reloaded.\n');
       } catch (e) {

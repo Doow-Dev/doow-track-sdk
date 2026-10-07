@@ -7,6 +7,32 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## Unreleased
+
+## [0.1.13] — 2026-10-07
+
+### Changed
+
+- The package metadata now points at `https://github.com/Doow-Dev/doow-track-sdk`, where all fourteen SDKs live, instead of the retired `doow-track` repository that this package advertised since before the SDKs were consolidated.
+
+## [0.1.12] — 2026-10-07
+
+### Behavior changes
+
+- The sidecar image now runs as the non-root `node` user (user ID 1000) on Node 22 instead of root on Node 20. A file mounted for `file:` input must be readable by user ID 1000, and the image works with a read-only root filesystem, all capabilities dropped, and `no-new-privileges`.
+
+### Fixes
+
+- The 1 MiB line limit of the stdin, file, and TCP inputs is measured in UTF-8 bytes, ignores the carriage return of a CRLF line ending, and now applies to every line. A line over the limit is reported as `Input error: Line exceeds 1048576 bytes` and dropped, including a line that arrives complete with its newline and the last line before end of input, and the rest of an oversized line is discarded instead of being parsed as a line of its own. The stdin input also never reported the error before, and the file input did not enforce the limit at all.
+- A file input that cannot be read, for example because of its permissions, is now reported once in the log as `Input error: Cannot read <path>` instead of reading zero events without any message.
+- The sidecar and the CLI daemon no longer hang on `SIGTERM` or `SIGINT` while a TCP client stays connected. Stopping the TCP input now closes connected clients, so the final flush runs instead of waiting for the idle timeout or a SIGKILL.
+- A CLI config reload on `SIGHUP` now swaps only the tracker. It no longer restarts the input reader, which re-sent every line of a file input from its first byte and refused TCP connections during the restart.
+- Replaying the offline store ends at the first batch the server cannot take, so an outage no longer cycles the same batches forever, and a 401 or a rate-limited replay puts the batch back in the store instead of discarding it.
+- Server-supplied rejection text has Unicode bidirectional controls and line or paragraph separators replaced with spaces, in addition to control characters.
+- HTTP 207 rejections are read from the API's numeric `rejected` plus `rejections[]` shape, sanitized, and reported through `onError` without a resend.
+- Only 429, 5xx, and network errors are retried. A permanent 4xx is reported once, and a single event that exceeds the 413 payload limit is reported instead of being retried forever.
+- `Retry-After` is clamped to 30 seconds, and a throwing `onError` handler never escapes `flush`.
+
 ## [0.1.0] — 2026-04-20
 
 Initial release.

@@ -1,11 +1,11 @@
 [package]
 name = "doow-track"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 authors = ["Doow <support@doow.co>"]
 description = "Official Doow SDK for Rust - usage telemetry and management"
 license = "MIT"
-repository = "https://github.com/Doow-Dev/doow-track-rust"
+repository = "https://github.com/Doow-Dev/doow-track-sdk"
 documentation = "https://docs.rs/doow-track"
 keywords = ["doow", "telemetry", "usage", "tracking", "metering"]
 categories = ["api-bindings", "web-programming"]
@@ -24,4 +24,7 @@ async-trait = "0.1"
 
 [dev-dependencies]
 tokio-test = "0.4"
+futures-util = "0.3"
+http = "0.2"
+reqwest = { version = "0.11", features = ["stream"] }
 wiremock = "0.5"

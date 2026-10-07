@@ -14,7 +14,7 @@ Official Kotlin SDK for [Doow](https://doow.co) usage telemetry and management.
 | **Compression** | Automatic gzip for payloads >1KB |
 | **Retries** | Exponential backoff with configurable retry count |
 | **Type Safety** | kotlinx.serialization with data classes |
-| **Sidecar** | JAR for stdin/file/tcp input modes |
+| **Sidecar** | Use the language-agnostic sidecar for stdin/file/tcp input. Not shipped with this package; see [Sidecar guide](../../docs/sidecar.md) |
 
 ---
 
@@ -24,14 +24,14 @@ Official Kotlin SDK for [Doow](https://doow.co) usage telemetry and management.
 
 ```kotlin
 dependencies {
-    implementation("co.doow:doow-track:0.1.0")
+    implementation("co.doow:doow-track-kotlin:0.1.1")
 }
 ```
 
 ### Gradle (Groovy)
 
 ```groovy
-implementation 'co.doow:doow-track:0.1.0'
+implementation 'co.doow:doow-track-kotlin:0.1.1'
 ```
 
 ---
@@ -125,6 +125,14 @@ val tracker = Tracker("dk_your_api_key", TrackerOptions(
 | `DOOW_TRACK_DEBUG` | Set `true` for debug logs | `false` |
 
 ---
+
+## Short-lived processes
+
+A function or command-line program that exits right after it handles a request can lose events that are still queued. Call `flush()` before each handler returns and `shutdown()` (or `close()`) only when the process is about to exit, because a tracker that has been shut down drops later events. Set `flushAt` to 1 if every event must be sent immediately.
+
+## Batching and outages
+
+A flush sends at most 500 events per request, and a larger backlog is split into several requests that each carry their own `batch_id`, so a large flush does not exceed the API's per-minute event limit. After a transient failure (a network error, `408`, `429`, or `5xx` once the retries are used up) the tracker stops sending, puts the unsent events back at the front of the queue, and does not flush on the event-count trigger again until one flush interval has passed. A permanent `4xx` response drops only the request it rejected. When the queue reaches `maxQueueSize` during a long outage, new events are dropped until the queue has room again, so the oldest events are the ones kept.
 
 ## License
 

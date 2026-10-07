@@ -8,15 +8,17 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
 const (
-	SDKVersion           = "0.1.0"
+	SDKVersion           = "0.1.1"
 	defaultEndpoint      = "https://api.doow.co"
 	defaultFlushAt       = 20
 	defaultFlushInterval = 10 * time.Second
@@ -26,6 +28,7 @@ const (
 	defaultRetryCount    = 3
 	defaultMaxFlushes    = 30
 	defaultShutdownTime  = 5 * time.Second
+	maxBatchEvents       = 500
 )
 
 func generateUUID() string {
@@ -40,33 +43,51 @@ func generateUUID() string {
 
 // Tracker handles usage telemetry batching and submission
 type Tracker struct {
-	apiKey      string
-	endpoint    string
-	enabled     bool
-	attribution map[string]interface{}
-	debug       bool
-	flushAt     int
-	flushInterval time.Duration
-	maxPayloadBytes int
-	maxQueueSize    int
-	timeout         time.Duration
-	retryCount      int
-	disableCompression bool
+	apiKey               string
+	endpoint             string
+	enabled              bool
+	attribution          map[string]interface{}
+	debug                bool
+	flushAt              int
+	flushInterval        time.Duration
+	maxPayloadBytes      int
+	maxQueueSize         int
+	timeout              time.Duration
+	retryCount           int
+	disableCompression   bool
 	maxConcurrentFlushes int
-	shutdownTimeout time.Duration
-	onError         func(error)
-	beforeSend      func(SerializedEvent) *SerializedEvent
-	beforeFlush     func([]SerializedEvent) []SerializedEvent
-	offlineStore    OfflineStore
+	shutdownTimeout      time.Duration
+	onError              func(error)
+	beforeSend           func(SerializedEvent) *SerializedEvent
+	beforeFlush          func([]SerializedEvent) []SerializedEvent
+	offlineStore         OfflineStore
 
-	client     *http.Client
-	mu         sync.Mutex
-	buffer     []SerializedEvent
-	shutdown   chan struct{}
-	done       chan struct{}
-	flushSem   chan struct{}
-	rateLimit  *RateLimit
+	client    *http.Client
+	mu        sync.Mutex
+	buffer    []SerializedEvent
+	shutdown  chan struct{}
+	done      chan struct{}
+	flushSem  chan struct{}
+	rateLimit *RateLimit
+	inflight  sync.WaitGroup
+	closed    atomic.Bool
+	closeOnce sync.Once
+	holdUntil atomic.Int64
 }
+
+var processStart = time.Now()
+
+func monotonicNow() int64 {
+	return int64(time.Since(processStart))
+}
+
+type sendOutcome int
+
+const (
+	sendDone sendOutcome = iota
+	sendStored
+	sendFailed
+)
 
 // NewTracker creates a new telemetry tracker
 func NewTracker(apiKey string, opts *TrackerOptions) *Tracker {
@@ -154,6 +175,12 @@ func NewTracker(apiKey string, opts *TrackerOptions) *Tracker {
 		}
 	}
 
+	reportError := onError
+	onError = func(err error) {
+		defer func() { _ = recover() }()
+		reportError(err)
+	}
+
 	t := &Tracker{
 		apiKey:               apiKey,
 		endpoint:             endpoint,
@@ -193,6 +220,10 @@ func (t *Tracker) log(format string, args ...interface{}) {
 // Track queues a telemetry event for submission
 func (t *Tracker) Track(event TrackEvent) {
 	if !t.enabled {
+		return
+	}
+	if t.closed.Load() {
+		t.log("tracker is shut down, dropping event")
 		return
 	}
 
@@ -249,11 +280,15 @@ func (t *Tracker) Track(event TrackEvent) {
 		t.log("queue full, dropped oldest event")
 	}
 	t.buffer = append(t.buffer, serialized)
-	shouldFlush := len(t.buffer) >= t.flushAt
+	shouldFlush := len(t.buffer) >= t.flushAt && monotonicNow() >= t.holdUntil.Load()
 	t.mu.Unlock()
 
 	if shouldFlush {
-		go t.Flush()
+		t.inflight.Add(1)
+		go func() {
+			defer t.inflight.Done()
+			t.Flush()
+		}()
 	}
 }
 
@@ -287,10 +322,48 @@ func (t *Tracker) Flush() error {
 		defer func() { <-t.flushSem }()
 	}
 
-	return t.sendBatch(events)
+	var firstErr error
+	for start := 0; start < len(events); start += maxBatchEvents {
+		end := start + maxBatchEvents
+		if end > len(events) {
+			end = len(events)
+		}
+		outcome, err := t.sendBatch(events[start:end])
+		if err != nil && firstErr == nil {
+			firstErr = err
+		}
+		if outcome != sendDone {
+			if t.closed.Load() {
+				if outcome == sendStored {
+					continue
+				}
+				break
+			}
+			resume := start
+			if outcome == sendStored {
+				resume = end
+			}
+			t.requeue(events[resume:])
+			t.holdUntil.Store(monotonicNow() + int64(t.flushInterval))
+			break
+		}
+	}
+	return firstErr
 }
 
-func (t *Tracker) sendBatch(events []SerializedEvent) error {
+func (t *Tracker) requeue(events []SerializedEvent) {
+	if len(events) == 0 || t.closed.Load() {
+		return
+	}
+	t.mu.Lock()
+	t.buffer = append(append([]SerializedEvent{}, events...), t.buffer...)
+	if len(t.buffer) > t.maxQueueSize {
+		t.buffer = t.buffer[:t.maxQueueSize]
+	}
+	t.mu.Unlock()
+}
+
+func (t *Tracker) sendBatch(events []SerializedEvent) (sendOutcome, error) {
 	batchID := generateUUID()
 
 	// Convert to wire format
@@ -321,45 +394,52 @@ func (t *Tracker) sendBatch(events []SerializedEvent) error {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		t.onError(fmt.Errorf("marshal batch: %w", err))
-		return err
+		return sendDone, err
 	}
 
 	t.log("sending batch %s with %d events (%d bytes)", batchID, len(events), len(body))
 
 	// Retry with exponential backoff
 	var lastErr error
+	var serverDelay time.Duration
 	for attempt := 0; attempt <= t.retryCount; attempt++ {
 		if attempt > 0 {
 			backoff := time.Duration(1<<uint(attempt-1)) * 100 * time.Millisecond
 			if backoff > 10*time.Second {
 				backoff = 10 * time.Second
 			}
+			if serverDelay > backoff {
+				backoff = serverDelay
+			}
 			time.Sleep(backoff)
 			t.log("retry attempt %d after %v", attempt, backoff)
 		}
+		serverDelay = 0
 
 		err := t.doSend(body)
 		if err == nil {
 			t.log("batch %s sent successfully", batchID)
-			return nil
+			return sendDone, nil
 		}
 
 		lastErr = err
 
-		// Check if retryable
+		if partial, ok := err.(*PartialAcceptError); ok {
+			t.onError(partial)
+			return sendDone, partial
+		}
+
 		if apiErr, ok := err.(*APIError); ok {
-			if apiErr.Status == 401 || apiErr.Status == 403 {
+			if apiErr.IsPermanent() {
 				t.onError(err)
-				return err // Not retryable
+				return sendDone, err
 			}
-			if apiErr.Status == 429 {
-				// Rate limited - wait longer
-				time.Sleep(5 * time.Second)
-			}
+			serverDelay = apiErr.RetryAfter
 		}
 	}
 
 	// All retries failed - try offline store
+	outcome := sendFailed
 	if t.offlineStore != nil {
 		payloadStr := string(body)
 		batch := SerializedBatch{
@@ -371,11 +451,12 @@ func (t *Tracker) sendBatch(events []SerializedEvent) error {
 			t.onError(fmt.Errorf("offline store push: %w", err))
 		} else {
 			t.log("batch %s saved to offline store", batchID)
+			outcome = sendStored
 		}
 	}
 
 	t.onError(lastErr)
-	return lastErr
+	return outcome, lastErr
 }
 
 func (t *Tracker) doSend(body []byte) error {
@@ -431,12 +512,23 @@ func (t *Tracker) doSend(body []byte) error {
 		}
 	}
 
+	if resp.StatusCode == http.StatusMultiStatus {
+		var partial PartialAcceptError
+		if err := json.NewDecoder(io.LimitReader(resp.Body, maxResponseBytes)).Decode(&partial); err != nil {
+			t.log("unparseable 207 body: %v", err)
+		}
+		partial.sanitize()
+		return &partial
+	}
+
 	if resp.StatusCode >= 400 {
 		var apiErr APIError
-		if err := json.NewDecoder(resp.Body).Decode(&apiErr); err != nil {
+		if err := json.NewDecoder(io.LimitReader(resp.Body, maxResponseBytes)).Decode(&apiErr); err != nil {
 			apiErr = APIError{Status: resp.StatusCode, Message: resp.Status}
 		}
+		apiErr.Message = sanitizeText(apiErr.Message)
 		apiErr.Status = resp.StatusCode
+		apiErr.RetryAfter = parseRetryAfter(resp.Header.Get("Retry-After"))
 		return &apiErr
 	}
 
@@ -461,6 +553,7 @@ func (t *Tracker) flushLoop() {
 			}
 		case <-t.shutdown:
 			t.Flush()
+			t.inflight.Wait()
 			return
 		}
 	}
@@ -481,7 +574,14 @@ func (t *Tracker) drainOfflineStore() {
 
 		body, _ := json.Marshal(payload)
 		if err := t.doSend(body); err != nil {
-			// Put it back
+			if partial, ok := err.(*PartialAcceptError); ok {
+				t.onError(partial)
+				continue
+			}
+			if apiErr, ok := err.(*APIError); ok && apiErr.IsPermanent() {
+				t.onError(err)
+				continue
+			}
 			t.offlineStore.Push(*batch)
 			return
 		}
@@ -491,7 +591,10 @@ func (t *Tracker) drainOfflineStore() {
 
 // Shutdown flushes remaining events and stops the tracker
 func (t *Tracker) Shutdown() error {
-	close(t.shutdown)
+	t.closeOnce.Do(func() {
+		t.closed.Store(true)
+		close(t.shutdown)
+	})
 
 	select {
 	case <-t.done:
@@ -504,4 +607,26 @@ func (t *Tracker) Shutdown() error {
 // GetRateLimit returns the last known rate limit info
 func (t *Tracker) GetRateLimit() *RateLimit {
 	return t.rateLimit
+}
+
+const maxRetryAfter = 30 * time.Second
+const maxResponseBytes = 1 << 20
+
+func parseRetryAfter(header string) time.Duration {
+	if header == "" {
+		return 0
+	}
+	var d time.Duration
+	if seconds, err := strconv.ParseFloat(header, 64); err == nil {
+		d = time.Duration(seconds * float64(time.Second))
+	} else if at, err := http.ParseTime(header); err == nil {
+		d = time.Until(at)
+	}
+	if d < 0 {
+		return 0
+	}
+	if d > maxRetryAfter {
+		return maxRetryAfter
+	}
+	return d
 }

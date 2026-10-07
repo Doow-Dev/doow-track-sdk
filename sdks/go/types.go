@@ -74,23 +74,23 @@ type OfflineStore interface {
 
 // TrackerOptions configures the telemetry tracker
 type TrackerOptions struct {
-	Endpoint            string
-	Enabled             *bool // nil = true (default), false = disabled
-	Attribution         map[string]interface{}
-	Debug               bool
-	FlushAt             int
-	FlushInterval       time.Duration
-	MaxPayloadBytes     int
-	MaxQueueSize        int
-	Timeout             time.Duration
-	RetryCount          int
-	DisableCompression  bool
+	Endpoint             string
+	Enabled              *bool // nil = true (default), false = disabled
+	Attribution          map[string]interface{}
+	Debug                bool
+	FlushAt              int
+	FlushInterval        time.Duration
+	MaxPayloadBytes      int
+	MaxQueueSize         int
+	Timeout              time.Duration
+	RetryCount           int
+	DisableCompression   bool
 	MaxConcurrentFlushes int
-	ShutdownTimeout     time.Duration
-	OnError             func(error)
-	BeforeSend          func(SerializedEvent) *SerializedEvent
-	BeforeFlush         func([]SerializedEvent) []SerializedEvent
-	OfflineStore        OfflineStore
+	ShutdownTimeout      time.Duration
+	OnError              func(error)
+	BeforeSend           func(SerializedEvent) *SerializedEvent
+	BeforeFlush          func([]SerializedEvent) []SerializedEvent
+	OfflineStore         OfflineStore
 }
 
 // RateLimit info from API response

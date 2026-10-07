@@ -1,6 +1,6 @@
 {
   "name": "@doow/track-react",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Official React SDK for Doow usage telemetry",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
@@ -19,7 +19,7 @@
     "build": "tsup src/index.ts --format cjs,esm --dts --clean",
     "dev": "tsup src/index.ts --format cjs,esm --dts --watch",
     "lint": "eslint src",
-    "test": "vitest"
+    "test": "vitest run"
   },
   "peerDependencies": {
     "react": ">=17.0.0"
@@ -43,6 +43,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Doow-Dev/doow-track-react.git"
+    "url": "https://github.com/Doow-Dev/doow-track-sdk.git",
+    "directory": "sdks/react"
   }
 }

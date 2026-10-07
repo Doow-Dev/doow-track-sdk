@@ -118,6 +118,80 @@ describe('S82: parseInputMode', () => {
   });
 });
 
+// ─── input-reader: line splitting and the line size limit ─────────────────
+
+describe('S82: pipeLines — line size limit', () => {
+  async function run(chunks: string[], end = true) {
+    const { pipeLines, MAX_LINE_BYTES } = await import('../sidecar/input-reader.js');
+    const { PassThrough } = await import('stream');
+    const stream = new PassThrough();
+    const lines: string[] = [];
+    const errors: string[] = [];
+    pipeLines(
+      stream,
+      (line) => lines.push(line),
+      (err) => errors.push(err.message),
+    );
+    for (const chunk of chunks) stream.write(chunk);
+    if (end) stream.end();
+    await new Promise((r) => setTimeout(r, 30));
+    return { lines, errors, max: MAX_LINE_BYTES };
+  }
+
+  it('rejects a line over the limit that arrives complete in one chunk', async () => {
+    const { max } = await run([]);
+    const { lines, errors } = await run([`${'a'.repeat(max + 10)}\n{"ok":1}\n`]);
+
+    expect(lines).toEqual(['{"ok":1}']);
+    expect(errors).toEqual([`Line exceeds ${max} bytes`]);
+  });
+
+  it('rejects an oversized last line at end of input instead of dispatching it', async () => {
+    const { max } = await run([]);
+    const { lines, errors } = await run([`{"ok":1}\n${'a'.repeat(max + 10)}`]);
+
+    expect(lines).toEqual(['{"ok":1}']);
+    expect(errors).toEqual([`Line exceeds ${max} bytes`]);
+  });
+
+  it('drops the rest of an oversized line that spans chunks instead of parsing the tail', async () => {
+    const { max } = await run([]);
+    const { lines, errors } = await run([`${'a'.repeat(max + 10)}`, 'tail\n{"ok":2}\n']);
+
+    expect(lines).toEqual(['{"ok":2}']);
+    expect(errors).toEqual([`Line exceeds ${max} bytes`]);
+  });
+
+  it('measures the limit in bytes, so multi-byte text counts for what it occupies', async () => {
+    const { max } = await run([]);
+    // The euro sign is one UTF-16 unit and three UTF-8 bytes.
+    const fits = '€'.repeat(Math.floor(max / 3));
+    const tooBig = '€'.repeat(Math.floor(max / 3) + 1);
+    const { lines, errors } = await run([`${tooBig}\n${fits}\n`]);
+
+    expect(Buffer.byteLength(fits, 'utf8')).toBeLessThanOrEqual(max);
+    expect(Buffer.byteLength(tooBig, 'utf8')).toBeGreaterThan(max);
+    expect(lines).toEqual([fits]);
+    expect(errors).toEqual([`Line exceeds ${max} bytes`]);
+  });
+
+  it('accepts a line of exactly the limit and rejects one byte more, with CRLF endings', async () => {
+    const { max } = await run([]);
+    const exact = 'a'.repeat(max);
+    const { lines, errors } = await run([`${exact}\r\n${exact}a\r\n`]);
+
+    expect(lines).toEqual([exact]);
+    expect(errors).toEqual([`Line exceeds ${max} bytes`]);
+  });
+
+  it('still splits normal lines and sends a final line without a newline', async () => {
+    const { lines, errors } = await run(['{"a":1}\n{"b"', ':2}\n{"c":3}']);
+
+    expect(lines).toEqual(['{"a":1}', '{"b":2}', '{"c":3}']);
+    expect(errors).toEqual([]);
+  });
+});
+
 // ─── input-reader: file mode ──────────────────────────────────────────────
 
 describe('S82: InputReader — file mode', () => {
@@ -156,6 +230,99 @@ describe('S82: InputReader — file mode', () => {
     expect(metrics).toContain('builds');
     expect(metrics).toContain('deploys');
   });
+
+  it('reports a file it cannot read once instead of failing silently', async () => {
+    const { createInputReader } = await import('../sidecar/input-reader.js');
+    const os = await import('os');
+    const path = await import('path');
+    const fsP = await import('fs/promises');
+
+    // A directory cannot be read as a file for any user, root included, so it fails the same way a
+    // file with the wrong permissions does.
+    const dir = await fsP.mkdtemp(path.join(os.tmpdir(), 'doow-unreadable-'));
+    const errors: Error[] = [];
+    const reader = createInputReader({
+      mode: { type: 'file', path: dir },
+      onEvent: () => undefined,
+      onError: (err) => errors.push(err),
+    });
+
+    await reader.start();
+    await new Promise((r) => setTimeout(r, 900));
+    await reader.stop();
+    await fsP.rm(dir, { recursive: true, force: true });
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0]!.message).toContain(dir);
+  });
+
+  it('drops a line longer than the limit and keeps the lines around it', async () => {
+    const { createInputReader, MAX_LINE_BYTES } = await import('../sidecar/input-reader.js');
+    const os = await import('os');
+    const path = await import('path');
+    const fsP = await import('fs/promises');
+
+    const filePath = path.join(os.tmpdir(), `doow-oversize-${Date.now()}.jsonl`);
+    const oversized = `{"metric":"${'x'.repeat(MAX_LINE_BYTES)}"}\n`;
+    const before = '{"metric":"before","quantity":1,"license_id":"lic_1"}\n';
+    const after = '{"metric":"after","quantity":2,"license_id":"lic_1"}\n';
+    await fsP.writeFile(filePath, before + oversized + after, 'utf8');
+
+    const received: string[] = [];
+    const errors: Error[] = [];
+    const reader = createInputReader({
+      mode: { type: 'file', path: filePath },
+      onEvent: (raw) => received.push(raw),
+      onError: (err) => errors.push(err),
+    });
+
+    await reader.start();
+    await new Promise((r) => setTimeout(r, 300));
+    await reader.stop();
+    await fsP.unlink(filePath).catch(() => undefined);
+
+    const metrics = received.map((r) => (JSON.parse(r) as { metric: string }).metric);
+    expect(metrics).toContain('before');
+    expect(metrics).toContain('after');
+    expect(metrics).not.toContain('x'.repeat(MAX_LINE_BYTES));
+    expect(errors.map((e) => e.message)).toContain(`Line exceeds ${MAX_LINE_BYTES} bytes`);
+  });
+
+  it('does not parse the tail of an oversized line that has not received its newline yet', async () => {
+    const { createInputReader, MAX_LINE_BYTES } = await import('../sidecar/input-reader.js');
+    const os = await import('os');
+    const path = await import('path');
+    const fsP = await import('fs/promises');
+
+    const filePath = path.join(os.tmpdir(), `doow-oversize-tail-${Date.now()}.jsonl`);
+    await fsP.writeFile(
+      filePath,
+      `{"metric":"before","quantity":1,"license_id":"lic_1"}\n${'x'.repeat(MAX_LINE_BYTES + 1024)}`,
+      'utf8',
+    );
+
+    const received: string[] = [];
+    const errors: Error[] = [];
+    const reader = createInputReader({
+      mode: { type: 'file', path: filePath },
+      onEvent: (raw) => received.push(raw),
+      onError: (err) => errors.push(err),
+    });
+
+    await reader.start();
+    await new Promise((r) => setTimeout(r, 400));
+
+    // The rest of the oversized line arrives with its newline, followed by a real line. The tail of
+    // the dropped line must not be read as a line of its own.
+    await fsP.appendFile(filePath, `}tail\n{"metric":"after","quantity":2,"license_id":"lic_1"}\n`, 'utf8');
+    await new Promise((r) => setTimeout(r, 400));
+    await reader.stop();
+    await fsP.unlink(filePath).catch(() => undefined);
+
+    const metrics = received.map((r) => (JSON.parse(r) as { metric: string }).metric);
+    expect(metrics).toEqual(['before', 'after']);
+    expect(errors.map((e) => e.message)).toEqual([`Line exceeds ${MAX_LINE_BYTES} bytes`]);
+  });
 });
 
 // ─── input-reader: TCP mode ───────────────────────────────────────────────
@@ -191,6 +358,34 @@ describe('S82: InputReader — TCP mode', () => {
 
     expect(received).toHaveLength(1);
     expect((JSON.parse(received[0]!) as { metric: string }).metric).toBe('api_calls');
+  });
+
+  it('stop() closes a client that is still connected instead of waiting for it', async () => {
+    const { createInputReader } = await import('../sidecar/input-reader.js');
+    const received: string[] = [];
+    const port = nextPort();
+    const reader = createInputReader({
+      mode: { type: 'tcp', port },
+      onEvent: (raw) => received.push(raw),
+      onError: () => undefined,
+    });
+    await reader.start();
+
+    const client = net.createConnection(port, '127.0.0.1');
+    const closed = new Promise<void>((resolve) => client.once('close', () => resolve()));
+    await new Promise<void>((resolve) => client.once('connect', () => resolve()));
+    client.write('{"metric":"api_calls","quantity":1,"license_id":"lic_1"}\n');
+    await new Promise((r) => setTimeout(r, 50));
+
+    const outcome = await Promise.race([
+      reader.stop().then(() => 'stopped'),
+      new Promise<string>((resolve) => setTimeout(() => resolve('hung'), 2000)),
+    ]);
+    client.destroy();
+
+    expect(outcome).toBe('stopped');
+    await closed;
+    expect(received).toHaveLength(1);
   });
 });
 

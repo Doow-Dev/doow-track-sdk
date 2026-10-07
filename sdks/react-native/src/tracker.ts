@@ -1,16 +1,21 @@
 import { AppState, AppStateStatus } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { TrackEvent, TrackerOptions } from './types';
-
-function generateUUID(): string {
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-    const r = (Math.random() * 16) | 0;
-    const v = c === 'x' ? r : (r & 0x3) | 0x8;
-    return v.toString(16);
-  });
-}
+import {
+  NonRetryableError,
+  generateUUID,
+  isTransientStatus,
+  notify,
+  parseRetryAfterMs,
+  readBoundedText,
+  sanitizeText,
+  readPartialAccept,
+  toWireBatch,
+  type QueuedEvent,
+} from './wire';
 
 const STORAGE_KEY = '@doow/track/queue';
+const MAX_BATCH_EVENTS = 500;
 
 const DEFAULT_OPTIONS: Required<Omit<TrackerOptions, 'attribution' | 'onError'>> = {
   endpoint: 'https://api.doow.co',
@@ -30,9 +35,10 @@ export class Tracker {
     attribution?: Record<string, unknown>;
     onError?: (error: Error) => void;
   };
-  private queue: TrackEvent[] = [];
+  private queue: QueuedEvent[] = [];
   private flushTimer: ReturnType<typeof setInterval> | null = null;
   private shutdown = false;
+  private holdUntil = 0;
   private appStateSubscription: { remove: () => void } | null = null;
 
   constructor(apiKey: string, options: TrackerOptions = {}) {
@@ -55,7 +61,12 @@ export class Tracker {
     try {
       const stored = await AsyncStorage.getItem(STORAGE_KEY);
       if (stored) {
-        this.queue = JSON.parse(stored);
+        const parsed = JSON.parse(stored) as Array<Partial<QueuedEvent> & TrackEvent>;
+        this.queue = parsed.map((e) => ({
+          ...e,
+          eventId: e.eventId ?? generateUUID(),
+          timestamp: e.timestamp ?? new Date().toISOString(),
+        }));
         this.log(`Loaded ${this.queue.length} events from storage`);
       }
     } catch (error) {
@@ -99,8 +110,9 @@ export class Tracker {
       return;
     }
 
-    const enrichedEvent: TrackEvent = {
+    const enrichedEvent: QueuedEvent = {
       ...event,
+      eventId: generateUUID(),
       timestamp: event.timestamp || new Date().toISOString(),
       attribution: { ...event.attribution, ...this.options.attribution },
     };
@@ -109,7 +121,7 @@ export class Tracker {
     this.persistQueue();
     this.log(`Queued event: ${event.metric}`);
 
-    if (this.queue.length >= this.options.flushAt) {
+    if (this.queue.length >= this.options.flushAt && performance.now() >= this.holdUntil) {
       this.flush();
     }
   }
@@ -123,28 +135,30 @@ export class Tracker {
 
     this.log(`Flushing ${batch.length} events`);
 
-    try {
-      await this.sendWithRetry(batch);
-    } catch (error) {
-      this.queue = [...batch, ...this.queue];
-      await this.persistQueue();
-      this.options.onError?.(error as Error);
-      this.log(`Flush failed: ${error}`);
+    for (let i = 0; i < batch.length; i += MAX_BATCH_EVENTS) {
+      try {
+        await this.sendWithRetry(batch.slice(i, i + MAX_BATCH_EVENTS));
+      } catch (error) {
+        notify(this.options.onError, error as Error);
+        this.log(`Flush failed: ${error}`);
+        if (!(error instanceof NonRetryableError)) {
+          this.holdUntil = performance.now() + this.options.flushIntervalMs;
+          this.queue = [...batch.slice(i), ...this.queue].slice(0, this.options.maxQueueSize);
+          await this.persistQueue();
+          return;
+        }
+      }
     }
   }
 
-  private async sendWithRetry(batch: TrackEvent[]): Promise<void> {
-    const payload = JSON.stringify({
-      events: batch.map((e) => ({
-        event_id: generateUUID(),
-        metric: e.metric,
-        quantity: e.quantity,
-        license_id: e.licenseId,
-        unit: e.unit,
-        attribution: e.attribution,
-        timestamp: e.timestamp,
-      })),
-    });
+  private async sendWithRetry(batch: QueuedEvent[]): Promise<void> {
+    const batchId = generateUUID();
+    let payload: string;
+    try {
+      payload = JSON.stringify(toWireBatch(batchId, batch));
+    } catch (error) {
+      throw new NonRetryableError(`Could not serialize events: ${sanitizeText(String(error))}`);
+    }
 
     for (let attempt = 0; attempt <= this.options.retryCount; attempt++) {
       try {
@@ -163,26 +177,32 @@ export class Tracker {
 
         clearTimeout(timeout);
 
+        if (response.status === 207) {
+          notify(this.options.onError, await readPartialAccept(response, batchId));
+          return;
+        }
+
         if (response.ok) {
           this.log('Batch sent successfully');
           return;
         }
 
-        if (response.status === 429) {
-          const retryAfter = response.headers.get('Retry-After');
-          const delay = retryAfter ? parseInt(retryAfter, 10) * 1000 : 100 * Math.pow(2, attempt);
+        if (isTransientStatus(response.status)) {
+          if (attempt === this.options.retryCount) {
+            throw new Error(`HTTP ${response.status} after ${attempt + 1} attempts`);
+          }
+          const retryAfter =
+            response.status === 429 || response.status === 503
+              ? parseRetryAfterMs(response.headers.get('Retry-After'))
+              : undefined;
+          const delay = retryAfter ?? 100 * Math.pow(2, attempt);
           await this.sleep(delay);
           continue;
         }
 
-        if (response.status >= 500) {
-          await this.sleep(100 * Math.pow(2, attempt));
-          continue;
-        }
-
-        throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+        throw new NonRetryableError(`HTTP ${response.status}: ${sanitizeText(await readBoundedText(response))}`);
       } catch (error) {
-        if (attempt === this.options.retryCount) throw error;
+        if (error instanceof NonRetryableError || attempt === this.options.retryCount) throw error;
         await this.sleep(100 * Math.pow(2, attempt));
       }
     }

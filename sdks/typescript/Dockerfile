@@ -1,16 +1,14 @@
-FROM node:20-alpine
+FROM node:22-alpine
 
 WORKDIR /app
 
-# Copy package files
-COPY package.json package-lock.json ./
+ARG SDK_VERSION
+LABEL org.opencontainers.image.version=$SDK_VERSION
 
-# Install production dependencies only
-RUN npm ci --omit=dev
+COPY sdks/typescript/dist/sidecar.cjs ./dist/sidecar.cjs
 
-# Copy compiled source
-# Assumes `npm run build` has already been run before docker build
-COPY dist/ ./dist/
+# The sidecar only reads input and makes outbound requests, so it needs no root access.
+USER node
 
 # Health check
 HEALTHCHECK --interval=10s --timeout=5s --start-period=5s --retries=3 \

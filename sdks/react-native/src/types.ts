@@ -1,7 +1,15 @@
+export interface MetricTupleHint {
+  app_name: string;
+  license_name: string;
+  metric_name: string;
+}
+
 export interface TrackEvent {
   metric: string;
   quantity: number;
   licenseId: string;
+  sourceSystem?: string;
+  metricTupleHint?: MetricTupleHint;
   unit?: string;
   attribution?: Record<string, unknown>;
   timestamp?: string;

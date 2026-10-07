@@ -1,12 +1,12 @@
 {
   "name": "@doow/track",
-  "version": "0.1.11",
+  "version": "0.1.13",
   "description": "Customer-facing SDK for emitting usage telemetry to Doow",
   "license": "MIT",
   "author": "Doow",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Doow-Dev/doow-track.git",
+    "url": "https://github.com/Doow-Dev/doow-track-sdk.git",
     "directory": "sdks/typescript"
   },
   "main": "./dist/cjs/index.js",
@@ -20,7 +20,9 @@
     }
   },
   "files": [
-    "dist",
+    "dist/cjs",
+    "dist/esm",
+    "dist/types",
     "README.md",
     "CHANGELOG.md"
   ],

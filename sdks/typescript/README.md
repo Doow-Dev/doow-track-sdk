@@ -68,12 +68,12 @@ Long-lived Node.js processes use the timer-based auto-flush. In serverless envir
 ```ts
 import { DoowTracker } from '@doow/track';
 
-const meter = new DoowTracker(process.env.DOOW_API_KEY!);
+const meter = new DoowTracker(process.env.DOOW_TRACK_API_KEY!);
 
 export const handler = meter.withLambda(async (event, context) => {
   meter.track({ metric: 'api_calls', quantity: 1, license_id: 'lic_...' });
   return { statusCode: 200, body: 'ok' };
-  // shutdown() is called automatically in a finally block
+  // flush() is called automatically in a finally block
 });
 ```
 
@@ -83,7 +83,7 @@ export const handler = meter.withLambda(async (event, context) => {
 import { DoowTracker } from '@doow/track';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
-const meter = new DoowTracker(process.env.DOOW_API_KEY!);
+const meter = new DoowTracker(process.env.DOOW_TRACK_API_KEY!);
 
 export default meter.withVercel(async (req: VercelRequest, res: VercelResponse) => {
   meter.track({ metric: 'requests', quantity: 1, license_id: 'lic_...' });
@@ -97,7 +97,7 @@ export default meter.withVercel(async (req: VercelRequest, res: VercelResponse) 
 import { DoowTracker } from '@doow/track';
 import type { Context } from '@azure/functions';
 
-const meter = new DoowTracker(process.env.DOOW_API_KEY!);
+const meter = new DoowTracker(process.env.DOOW_TRACK_API_KEY!);
 
 export default meter.withAzureFunction(async (context: Context, req: unknown) => {
   meter.track({ metric: 'executions', quantity: 1, license_id: 'lic_...' });
@@ -107,9 +107,9 @@ export default meter.withAzureFunction(async (context: Context, req: unknown) =>
 
 ## Sidecar Docker Compose example
 
-For use cases where you emit telemetry from non-Node.js services (Python, Go, Rust, etc.), run the sidecar container on VMs, Kubernetes, Azure Container Apps, ECS, and any other platform that can run containers, then pipe JSON events to it over stdin or TCP.
+For applications in any language, run the sidecar container on VMs, Kubernetes, Azure Container Apps, ECS, or any platform that can run containers, then send it newline-delimited JSON over stdin, a file, or TCP.
 
-The published image is public on GitHub Container Registry at `ghcr.io/doow-dev/doow-track-sidecar`.
+The image is currently private on GitHub Container Registry at `ghcr.io/doow-dev/doow-track-sidecar`. Customers need package read access and must authenticate Docker to GHCR before pulling it.
 
 ```yaml
 # docker-compose.yml
@@ -129,12 +129,10 @@ services:
     environment:
       - DOOW_TRACK_API_KEY=dk_your_api_key
       - DOOW_TRACK_ENDPOINT=https://api.doow.co
-      - DOOW_TRACK_INPUT=tcp          # stdin | file-tail | tcp
-      - DOOW_TRACK_TCP_PORT=9091
+      - DOOW_TRACK_INPUT=tcp:9091     # stdin | file:<path> | tcp:<port>
       - DOOW_TRACK_HEALTH_PORT=9090
-    ports:
-      - '9090:9090'   # health check
-      - '9091:9091'   # TCP event ingestion
+    expose:
+      - '9091'                        # TCP event ingestion, private to the Compose network
     healthcheck:
       test: ['CMD', 'wget', '-qO-', 'http://localhost:9090/healthz']
       interval: 10s
@@ -142,7 +140,7 @@ services:
       retries: 3
 ```
 
-Send events from your app as newline-delimited JSON:
+See the [Sidecar guide](../../docs/sidecar.md) for every environment variable, the input modes and their limits, and Kubernetes. Send events from your app as newline-delimited JSON:
 
 ```json
 {"metric":"api_calls","quantity":1,"license_id":"lic_..."}
@@ -151,18 +149,20 @@ Send events from your app as newline-delimited JSON:
 
 ## CLI usage
 
-Run the sidecar as a standalone daemon process:
+The standalone `doow-track` daemon accepts newline-delimited JSON from applications in any language. Its downloaded binaries need neither Node.js nor a language SDK:
 
 ```bash
 # Start as daemon with config file
-npx @doow/track --config ./doow-track.json --pidfile /var/run/doow-track.pid
+./doow-track --config ./doow-track.json --pidfile /var/run/doow-track.pid
 
 # Pipe mode: pipe newline-delimited JSON from stdin
-echo '{"metric":"api_calls","quantity":1,"license_id":"lic_..."}' | npx @doow/track
+echo '{"metric":"api_calls","quantity":1,"license_id":"lic_..."}' | ./doow-track --api-key dk_...
 
-# Reload config without restart (daemon mode)
+# Linux/macOS: reload config without restart
 kill -HUP $(cat /var/run/doow-track.pid)
 ```
+
+See the [Daemon / CLI guide](../../docs/daemon.md) for the five OS/CPU downloads, Windows Server usage, and service configuration.
 
 Config file (`doow-track.json`):
 
@@ -181,7 +181,7 @@ Config file (`doow-track.json`):
 | Flag | Description |
 |------|-------------|
 | `--config <path>` | Path to JSON config file |
-| `--api-key <key>` | API key (overrides config and env) |
+| `--api-key <key>` | API key (overrides the config file; `DOOW_TRACK_API_KEY` still wins) |
 | `--pidfile <path>` | Write PID to file (daemon mode) |
 | `--version` | Print SDK version and exit |
 | `--help` | Print usage and exit |
@@ -198,7 +198,11 @@ const meter = new DoowTracker('dk_your_api_key', {
 });
 ```
 
-Failed batches are written as atomic JSON files (write-then-rename) and replayed FIFO on the next successful flush.
+Failed batches are written as atomic JSON files (write-then-rename) and replayed FIFO at the start of the next flush. The replay stops at the first batch the server cannot take, so an outage does not make it loop, and a batch that fails again or meets a `401` or a rate limit stays in the store.
+
+## Batching and outages
+
+A flush sends at most 500 events per request, and a larger backlog is split into several requests that each carry their own `batch_id`, so a large flush does not exceed the API's per-minute event limit. A `413` halves the request size until the server accepts it. When the retries for a batch are used up, a network error, `408`, or `5xx` sends the batch to the offline store if one is configured, while a `429` leaves the batch queued in memory for the next flush and is written back to the store only if it came from there. A permanent `4xx` response drops only the request it rejected. When the queue reaches `maxQueueSize`, the oldest event is dropped to make room for each new one, so the newest events are the ones kept.
 
 ## Error handling
 
@@ -218,6 +222,6 @@ After `AUTH_FAILURE`, the SDK stops emitting permanently (check `meter.stopped`)
 ## Further reading
 
 - [Serverless guide](docs/serverless.md) — Lambda, Vercel, Azure Functions
-- [Sidecar guide](docs/sidecar.md) — Docker Compose, Kubernetes sidecar pattern
-- [Daemon / CLI guide](docs/daemon.md) — systemd unit file, config file reference
-- [OTLP push guide](docs/otlp.md) — OpenTelemetry Collector config, GenAI semconv mapping
+- [Sidecar guide](../../docs/sidecar.md) — Docker Compose, Kubernetes sidecar pattern
+- [Daemon / CLI guide](../../docs/daemon.md) — systemd unit file, config file reference
+- [OTLP push guide](../../docs/otlp.md) — OpenTelemetry Collector config, GenAI semconv mapping

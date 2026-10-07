@@ -1,15 +1,19 @@
 import type { TrackEvent, TrackerOptions } from './types';
+import {
+  NonRetryableError,
+  generateUUID,
+  isTransientStatus,
+  notify,
+  parseRetryAfterMs,
+  readBoundedText,
+  sanitizeText,
+  readPartialAccept,
+  toWireBatch,
+  type QueuedEvent,
+} from './wire';
 
-function generateUUID(): string {
-  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
-    return crypto.randomUUID();
-  }
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-    const r = (Math.random() * 16) | 0;
-    const v = c === 'x' ? r : (r & 0x3) | 0x8;
-    return v.toString(16);
-  });
-}
+const KEEPALIVE_LIMIT_BYTES = 60_000;
+const MAX_BATCH_EVENTS = 500;
 
 const DEFAULT_OPTIONS: Required<Omit<TrackerOptions, 'attribution' | 'onError'>> = {
   endpoint: 'https://api.doow.co',
@@ -29,9 +33,14 @@ export class Tracker {
     attribution?: Record<string, unknown>;
     onError?: (error: Error) => void;
   };
-  private queue: TrackEvent[] = [];
+  private queue: QueuedEvent[] = [];
   private flushTimer: ReturnType<typeof setInterval> | null = null;
   private shutdown = false;
+  private holdUntil = 0;
+  private readonly unloadHandler = (): void => this.flushSync();
+  private readonly visibilityHandler = (): void => {
+    if (document.visibilityState === 'hidden') this.flushSync();
+  };
 
   constructor(apiKey: string, options: TrackerOptions = {}) {
     if (!apiKey.startsWith('dk_')) {
@@ -51,12 +60,15 @@ export class Tracker {
   private setupLifecycleHooks(): void {
     if (typeof window === 'undefined') return;
 
-    window.addEventListener('beforeunload', () => this.flushSync());
-    document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'hidden') {
-        this.flushSync();
-      }
-    });
+    window.addEventListener('beforeunload', this.unloadHandler);
+    document.addEventListener('visibilitychange', this.visibilityHandler);
+  }
+
+  private removeLifecycleHooks(): void {
+    if (typeof window === 'undefined') return;
+
+    window.removeEventListener('beforeunload', this.unloadHandler);
+    document.removeEventListener('visibilitychange', this.visibilityHandler);
   }
 
   private log(message: string): void {
@@ -73,8 +85,9 @@ export class Tracker {
       return;
     }
 
-    const enrichedEvent: TrackEvent = {
+    const enrichedEvent: QueuedEvent = {
       ...event,
+      eventId: generateUUID(),
       timestamp: event.timestamp || new Date().toISOString(),
       attribution: { ...event.attribution, ...this.options.attribution },
     };
@@ -82,7 +95,7 @@ export class Tracker {
     this.queue.push(enrichedEvent);
     this.log(`Queued event: ${event.metric}`);
 
-    if (this.queue.length >= this.options.flushAt) {
+    if (this.queue.length >= this.options.flushAt && performance.now() >= this.holdUntil) {
       this.flush();
     }
   }
@@ -95,46 +108,77 @@ export class Tracker {
 
     this.log(`Flushing ${batch.length} events`);
 
-    try {
-      await this.sendWithRetry(batch);
-    } catch (error) {
-      this.options.onError?.(error as Error);
-      this.log(`Flush failed: ${error}`);
+    for (let i = 0; i < batch.length; i += MAX_BATCH_EVENTS) {
+      try {
+        await this.sendWithRetry(batch.slice(i, i + MAX_BATCH_EVENTS));
+      } catch (error) {
+        notify(this.options.onError, error as Error);
+        this.log(`Flush failed: ${error}`);
+        if (!(error instanceof NonRetryableError)) {
+          this.holdUntil = performance.now() + this.options.flushIntervalMs;
+          this.requeue(batch.slice(i));
+          return;
+        }
+      }
     }
   }
 
   private flushSync(): void {
-    if (this.queue.length === 0 || typeof navigator === 'undefined') return;
+    if (this.queue.length === 0 || typeof fetch === 'undefined') return;
 
-    const payload = JSON.stringify({
-      events: this.queue.map((e) => ({
-        event_id: generateUUID(),
-        metric: e.metric,
-        quantity: e.quantity,
-        license_id: e.licenseId,
-        unit: e.unit,
-        attribution: e.attribution,
-        timestamp: e.timestamp,
-      })),
-    });
+    const chunk = this.firstKeepaliveChunk(this.queue);
+    this.queue = this.queue.slice(chunk.length);
+    const batchId = generateUUID();
 
-    const blob = new Blob([payload], { type: 'application/json' });
-    navigator.sendBeacon(`${this.options.endpoint}/telemetry/events`, blob);
-    this.queue = [];
+    fetch(`${this.options.endpoint}/telemetry/events`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${this.apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(toWireBatch(batchId, chunk)),
+      keepalive: true,
+    })
+      .then(async (response) => {
+        if (response.status === 207) {
+          notify(this.options.onError, await readPartialAccept(response, batchId));
+        } else if (!response.ok) {
+          if (isTransientStatus(response.status)) this.requeue(chunk);
+          notify(this.options.onError, new Error(`Unload flush failed: HTTP ${response.status}`));
+        }
+      })
+      .catch((error: unknown) => {
+        this.requeue(chunk);
+        notify(this.options.onError, error as Error);
+        this.log(`Unload flush failed: ${error}`);
+      });
   }
 
-  private async sendWithRetry(batch: TrackEvent[]): Promise<void> {
-    const payload = JSON.stringify({
-      events: batch.map((e) => ({
-        event_id: generateUUID(),
-        metric: e.metric,
-        quantity: e.quantity,
-        license_id: e.licenseId,
-        unit: e.unit,
-        attribution: e.attribution,
-        timestamp: e.timestamp,
-      })),
-    });
+  private requeue(chunk: QueuedEvent[]): void {
+    if (this.shutdown) return;
+    this.queue = [...chunk, ...this.queue].slice(0, this.options.maxQueueSize);
+  }
+
+  private firstKeepaliveChunk(events: QueuedEvent[]): QueuedEvent[] {
+    const encoder = new TextEncoder();
+    let chunk = events;
+    while (
+      chunk.length > 1 &&
+      encoder.encode(JSON.stringify(toWireBatch('x', chunk))).length > KEEPALIVE_LIMIT_BYTES
+    ) {
+      chunk = chunk.slice(0, Math.ceil(chunk.length / 2));
+    }
+    return chunk;
+  }
+
+  private async sendWithRetry(batch: QueuedEvent[]): Promise<void> {
+    const batchId = generateUUID();
+    let payload: string;
+    try {
+      payload = JSON.stringify(toWireBatch(batchId, batch));
+    } catch (error) {
+      throw new NonRetryableError(`Could not serialize events: ${sanitizeText(String(error))}`);
+    }
 
     const headers: Record<string, string> = {
       'Authorization': `Bearer ${this.apiKey}`,
@@ -163,26 +207,32 @@ export class Tracker {
 
         clearTimeout(timeout);
 
+        if (response.status === 207) {
+          notify(this.options.onError, await readPartialAccept(response, batchId));
+          return;
+        }
+
         if (response.ok) {
           this.log('Batch sent successfully');
           return;
         }
 
-        if (response.status === 429) {
-          const retryAfter = response.headers.get('Retry-After');
-          const delay = retryAfter ? parseInt(retryAfter, 10) * 1000 : 100 * Math.pow(2, attempt);
+        if (isTransientStatus(response.status)) {
+          if (attempt === this.options.retryCount) {
+            throw new Error(`HTTP ${response.status} after ${attempt + 1} attempts`);
+          }
+          const retryAfter =
+            response.status === 429 || response.status === 503
+              ? parseRetryAfterMs(response.headers.get('Retry-After'))
+              : undefined;
+          const delay = retryAfter ?? 100 * Math.pow(2, attempt);
           await this.sleep(delay);
           continue;
         }
 
-        if (response.status >= 500) {
-          await this.sleep(100 * Math.pow(2, attempt));
-          continue;
-        }
-
-        throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+        throw new NonRetryableError(`HTTP ${response.status}: ${sanitizeText(await readBoundedText(response))}`);
       } catch (error) {
-        if (attempt === this.options.retryCount) throw error;
+        if (error instanceof NonRetryableError || attempt === this.options.retryCount) throw error;
         await this.sleep(100 * Math.pow(2, attempt));
       }
     }
@@ -195,6 +245,25 @@ export class Tracker {
   destroy(): void {
     this.shutdown = true;
     if (this.flushTimer) clearInterval(this.flushTimer);
-    this.flushSync();
+    this.removeLifecycleHooks();
+    void this.drainRemaining();
+  }
+
+  private async drainRemaining(): Promise<void> {
+    while (this.queue.length > 0) {
+      const batch = this.queue.splice(0, MAX_BATCH_EVENTS);
+      try {
+        await this.sendWithRetry(batch);
+      } catch (error) {
+        notify(this.options.onError, error as Error);
+        this.log(`Drain failed: ${error}`);
+        if (!(error instanceof NonRetryableError)) {
+          const dropped = batch.length + this.queue.length;
+          this.queue = [];
+          notify(this.options.onError, new Error(`Dropped ${dropped} events at shutdown after a transient failure`));
+          return;
+        }
+      }
+    }
   }
 }

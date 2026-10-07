@@ -15,7 +15,7 @@ Official Rust SDK for [Doow](https://doow.co) usage telemetry and management.
 | **Compression** | Automatic gzip for payloads >1KB |
 | **Retries** | Exponential backoff with configurable retry count |
 | **Type Safety** | Full Rust type definitions |
-| **Sidecar** | Binary for stdin/file/tcp input modes |
+| **Sidecar** | Use the language-agnostic sidecar for stdin/file/tcp input. Not shipped with this package; see [Sidecar guide](../../docs/sidecar.md) |
 
 ---
 
@@ -127,6 +127,7 @@ let options = TrackerOptions {
     attribution: [
         ("service".to_string(), serde_json::json!("api-gateway")),
     ].into_iter().collect(),
+    on_error: None,
 };
 
 let tracker = Tracker::new("dk_your_api_key", Some(options));
@@ -171,6 +172,14 @@ async fn example() {
 ```
 
 ---
+
+## Short-lived processes
+
+A function or command-line program that exits right after it handles a request can lose events that are still queued. Await `flush()` before each handler returns and `shutdown()` only when the process is about to exit, because it stops the background flush loop. Set `flush_at` to 1 if every event must be sent immediately.
+
+## Batching and outages
+
+A flush sends at most 500 events per request, and a larger backlog is split into several requests that each carry their own `batch_id`, so a large flush does not exceed the API's per-minute event limit. After a transient failure (a network error, `408`, `429`, or `5xx` once the retries are used up) the tracker stops sending, puts the unsent events back at the front of the queue, and does not flush on the event-count trigger again until one flush interval has passed. A permanent `4xx` response drops only the request it rejected. When the queue reaches `max_queue_size`, the oldest event is dropped to make room for each new one, so the newest events are the ones kept.
 
 ## License
 

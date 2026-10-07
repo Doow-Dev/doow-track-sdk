@@ -12,17 +12,24 @@
   "scripts": {
     "prepare": "[ -n \"$CI\" ] || husky",
     "lint": "npm run lint --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspace @doow/track",
     "build": "npm run build --workspaces --if-present",
     "test": "npm run test --workspaces --if-present"
   },
   "devDependencies": {
     "@commitlint/cli": "^19.0.0",
     "@commitlint/config-conventional": "^19.0.0",
+    "@yao-pkg/pkg": "6.23.0",
     "husky": "^9.0.0"
   },
   "repository": {
     "type": "git",
     "url": "https://github.com/Doow-Dev/doow-track-sdk.git"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "optionalDependencies": {
+    "@rollup/rollup-darwin-arm64": "4.60.2",
+    "@rollup/rollup-linux-arm64-gnu": "4.60.2",
+    "@rollup/rollup-linux-x64-gnu": "4.60.2"
+  }
 }

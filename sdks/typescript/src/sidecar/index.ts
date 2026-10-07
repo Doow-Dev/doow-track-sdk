@@ -63,7 +63,9 @@ async function main(): Promise<void> {
     },
     onError: (err: Error, line: string): void => {
       console.warn(
-        `[doow-sidecar] Malformed line — skipping: ${err.message} | line: ${line.slice(0, 100)}`,
+        line === ''
+          ? `[doow-sidecar] Input error: ${err.message}`
+          : `[doow-sidecar] Malformed line — skipping: ${err.message} | line: ${line.slice(0, 100)}`,
       );
     },
   });

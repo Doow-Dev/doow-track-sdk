@@ -10,9 +10,9 @@ All commits must follow the [Conventional Commits](https://www.conventionalcommi
 
 ### Types
 
-- `fix` - Bug fix (triggers patch release: 0.0.X)
-- `feat` - New feature (triggers minor release: 0.X.0)
-- `chore` - Maintenance tasks (no release)
+- `fix` - Bug fix
+- `feat` - New feature
+- `chore` - Maintenance tasks
 - `docs` - Documentation only
 - `refactor` - Code change that neither fixes a bug nor adds a feature
 - `test` - Adding or updating tests
@@ -48,16 +48,8 @@ feat(typescript): redesign track() API
 BREAKING CHANGE: track() now requires a config object instead of positional args
 ```
 
-This triggers a major release (X.0.0).
+Whoever cuts the next release should treat this as a major version bump.
 
 ## Releasing
 
-Releases are automatic. When you merge to `main`:
-
-1. CI reads your commit messages
-2. Determines version bump per SDK
-3. Updates version numbers
-4. Publishes to package registries
-5. Creates git tags
-
-You don't need to manually bump versions or create tags.
+Commit messages do not trigger or version a release. A release is a git tag named `<sdk>-vX.Y.Z`, as described in the Releasing section of the [README](./README.md). Bump the version in the SDK's package file and merge it first. The TypeScript pipeline rejects a tag that is not plain `X.Y.Z` or that does not match that version.

@@ -37,6 +37,7 @@ export type {
   CustomTransport,
   TransportPayload,
   TransportResponse,
+  EventRejection,
   PartialAcceptResponse,
 } from './types.js';
 

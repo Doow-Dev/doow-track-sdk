@@ -7,7 +7,9 @@ namespace Doow\Track\Tracker;
 use Doow\Track\DoowError;
 use Doow\Track\TrackEvent;
 use Doow\Track\EventKind;
+use Doow\Track\PartialAcceptError;
 use GuzzleHttp\Client;
+use GuzzleHttp\ClientInterface;
 use GuzzleHttp\Exception\GuzzleException;
 use Ramsey\Uuid\Uuid;
 
@@ -25,6 +27,7 @@ class TrackerOptions
         public bool $disableCompression = false,
         public array $attribution = [],
         public ?\Closure $onError = null,
+        public ?ClientInterface $httpClient = null,
     ) {
         // Environment overrides
         if ($env = getenv('DOOW_TRACK_ENDPOINT')) {
@@ -48,20 +51,25 @@ class TrackerOptions
 class Tracker
 {
     private const SDK_VERSION = '0.1.0';
+    private const MAX_BODY_BYTES = 1048576;
+    private const MAX_BATCH_EVENTS = 500;
 
     private string $apiKey;
     private TrackerOptions $options;
-    private Client $client;
+    private ClientInterface $client;
     private array $buffer = [];
+    private int $holdUntil = 0;
 
     public function __construct(string $apiKey, ?TrackerOptions $options = null)
     {
         $this->apiKey = getenv('DOOW_TRACK_API_KEY') ?: $apiKey;
         $this->options = $options ?? new TrackerOptions();
 
-        $this->client = new Client([
+        $this->client = $this->options->httpClient ?? new Client([
             'timeout' => $this->options->timeoutMs / 1000,
         ]);
+
+        register_shutdown_function(fn () => $this->flush());
     }
 
     private function log(string $message): void
@@ -90,7 +98,7 @@ class Tracker
             'kind' => $event->kind->value,
             'timestamp' => $timestamp,
             'source_system' => $event->sourceSystem,
-            'metric_tuple_hint' => $event->metricTupleHint,
+            'metric_tuple_hint' => $event->metricTupleHint?->toArray(),
             'attribution' => !empty($attribution) ? $attribution : null,
             'metadata' => $event->metadata,
         ];
@@ -102,7 +110,7 @@ class Tracker
             $this->log('queue full, dropped oldest event');
         }
 
-        if (count($this->buffer) >= $this->options->flushAt) {
+        if (count($this->buffer) >= $this->options->flushAt && hrtime(true) >= $this->holdUntil) {
             $this->flush();
         }
     }
@@ -116,13 +124,33 @@ class Tracker
         $events = $this->buffer;
         $this->buffer = [];
 
-        try {
-            $this->sendBatch($events);
-        } catch (\Exception $e) {
-            $this->log("flush error: {$e->getMessage()}");
-            if ($this->options->onError) {
-                ($this->options->onError)($e);
+        foreach (array_chunk($events, self::MAX_BATCH_EVENTS) as $index => $chunk) {
+            try {
+                $this->sendBatch($chunk);
+            } catch (\Exception $e) {
+                $this->log("flush error: {$e->getMessage()}");
+                if ($this->options->onError) {
+                    try {
+                        ($this->options->onError)($e);
+                    } catch (\Throwable) {
+                        $this->log('onError handler threw');
+                    }
+                }
+                if ($e instanceof DoowError && $e->isRetryable()) {
+                    $this->requeue(array_slice($events, $index * self::MAX_BATCH_EVENTS));
+                    $this->holdUntil = hrtime(true) + $this->options->flushIntervalMs * 1_000_000;
+
+                    return;
+                }
             }
+        }
+    }
+
+    private function requeue(array $events): void
+    {
+        $this->buffer = array_merge($events, $this->buffer);
+        if (count($this->buffer) > $this->options->maxQueueSize) {
+            $this->buffer = array_slice($this->buffer, 0, $this->options->maxQueueSize);
         }
     }
 
@@ -131,20 +159,23 @@ class Tracker
         $batchId = Uuid::uuid4()->toString();
 
         $wireEvents = array_map(function ($e) {
-            return [
+            $measurement = array_filter([
+                'metric_name' => $e['metric'],
+                'quantity' => $e['quantity'],
+                'metric_tuple_hint' => $e['metric_tuple_hint'],
+            ], fn ($v) => $v !== null);
+
+            return array_filter([
                 'event_id' => $e['event_id'],
                 'license_id' => $e['license_id'],
                 'occurred_at' => $e['timestamp'],
-                'source_system' => $e['source_system'] ?? 'sdk',
+                'source_system' => trim((string) ($e['source_system'] ?? '')) === '' ? 'sdk' : $e['source_system'],
                 'kind' => $e['kind'],
+                'unit' => $e['unit'],
                 'attribution' => $e['attribution'],
                 'metadata' => $e['metadata'],
-                'measurements' => [[
-                    'metric_name' => $e['metric'],
-                    'quantity' => $e['quantity'],
-                    'metric_tuple_hint' => $e['metric_tuple_hint'],
-                ]],
-            ];
+                'measurements' => [$measurement],
+            ], fn ($v) => $v !== null);
         }, $events);
 
         $payload = [
@@ -161,21 +192,26 @@ class Tracker
         for ($attempt = 0; $attempt <= $this->options->retryCount; $attempt++) {
             if ($attempt > 0) {
                 $backoff = min(100 * (1 << ($attempt - 1)), 10000);
+                if ($lastError instanceof DoowError && $lastError->retryAfterSeconds !== null) {
+                    $backoff = max($backoff, (int) ($lastError->retryAfterSeconds * 1000));
+                }
                 usleep($backoff * 1000);
                 $this->log("retry attempt {$attempt} after {$backoff}ms");
             }
 
             try {
-                $this->doSend($body);
+                $this->doSend($body, $batchId);
                 $this->log("batch {$batchId} sent successfully");
                 return;
+            } catch (PartialAcceptError $e) {
+                throw $e;
             } catch (DoowError $e) {
                 $lastError = $e;
                 if (!$e->isRetryable()) {
                     throw $e;
                 }
             } catch (GuzzleException $e) {
-                $lastError = $e;
+                $lastError = new DoowError(status: 0, message: get_class($e) . ': ' . $e->getMessage());
             }
         }
 
@@ -184,7 +220,7 @@ class Tracker
         }
     }
 
-    private function doSend(string $body): void
+    private function doSend(string $body, string $batchId): void
     {
         $headers = [
             'Authorization' => "Bearer {$this->apiKey}",
@@ -208,20 +244,65 @@ class Tracker
                 'headers' => $headers,
                 'body' => $reqBody,
                 'http_errors' => false,
+                'stream' => true,
             ]
         );
 
         $statusCode = $response->getStatusCode();
 
+        if ($statusCode === 207) {
+            throw PartialAcceptError::fromBody($this->readBody($response), $batchId);
+        }
+
         if ($statusCode >= 400) {
-            $data = json_decode($response->getBody()->getContents(), true) ?? [];
+            $data = json_decode($this->readBody($response), true);
+            $data = is_array($data) ? $data : [];
             throw new DoowError(
                 status: $statusCode,
-                message: $data['message'] ?? 'Unknown error',
-                errorClass: $data['errorClass'] ?? null,
+                message: DoowError::sanitize($data['message'] ?? 'Unknown error'),
+                errorClass: isset($data['errorClass']) ? DoowError::sanitize($data['errorClass']) : null,
                 details: $data,
+                retryAfterSeconds: in_array($statusCode, [429, 503], true) ? self::parseRetryAfter($response->getHeaderLine('Retry-After')) : null,
             );
         }
+    }
+
+    private function readBody(\Psr\Http\Message\ResponseInterface $response): string
+    {
+        $body = $response->getBody();
+        $content = '';
+        try {
+            while (!$body->eof() && strlen($content) < self::MAX_BODY_BYTES) {
+                $chunk = $body->read(min(8192, self::MAX_BODY_BYTES - strlen($content)));
+                if ($chunk === '') {
+                    break;
+                }
+                $content .= $chunk;
+            }
+        } catch (\RuntimeException) {
+            return $content;
+        }
+
+        return $content;
+    }
+
+    public static function parseRetryAfter(string $header): ?float
+    {
+        $header = trim($header);
+        if ($header === '') {
+            return null;
+        }
+        if (is_numeric($header)) {
+            $seconds = (float) $header;
+        } else {
+            $at = strtotime($header);
+            if ($at === false) {
+                return null;
+            }
+            $seconds = (float) ($at - time());
+        }
+
+        return min(max($seconds, 0.0), 30.0);
     }
 
     public function shutdown(): void

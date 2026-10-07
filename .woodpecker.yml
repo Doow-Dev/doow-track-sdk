@@ -1,7 +1,9 @@
 # Doow Track SDKs — Unified CI/CD Pipeline
 #
 # CI: On push/PR, tests only SDKs with changes
-# Publish: On tag (e.g., python/v0.2.0), publishes that SDK to its registry
+# Publish: On tag (e.g., python-v0.2.0), publishes that SDK to its registry, TypeScript included.
+# Woodpecker publishes every SDK. The GitHub Actions workflow is legacy from before the migration
+# and has not run since May 2026, so nothing should be routed through it.
 
 when:
   - event: [push, pull_request, tag]
@@ -104,10 +106,12 @@ steps:
         path: "sdks/java/**"
 
   # --- Kotlin SDK ---
+  # No `|| true` here: the mask hid real failures. The build skips signing when no key is
+  # present, so this runs on a plain push without any release secret.
   - name: ci-kotlin
     image: gradle:8-jdk17
     commands:
-      - cd sdks/kotlin && gradle build || true
+      - cd sdks/kotlin && gradle build
     when:
       - event: [push, pull_request]
         path: "sdks/kotlin/**"
@@ -143,28 +147,57 @@ steps:
         path: "sdks/php/**"
 
   # --- Swift SDK ---
+  # Runs from the repository root so the root Package.swift, which is the manifest a consumer
+  # actually resolves, is the one under test. The previous form also swallowed failures with
+  # `|| true`, so a broken Swift SDK could never fail CI.
   - name: ci-swift
-    image: swift:5.9
+    image: swift:6.0
     commands:
-      - cd sdks/swift && swift build && swift test || true
+      - swift build
+      - swift test
     when:
       - event: [push, pull_request]
-        path: "sdks/swift/**"
+        path:
+          - "sdks/swift/**"
+          - "Package.swift"
 
 # ============================================================================
 # PUBLISH — Deploy to registries on tag
 # ============================================================================
 
-  # --- TypeScript → npm + Docker ---
-  - name: publish-typescript
+  # --- TypeScript → npm + sidecar image ---
+  # Woodpecker publishes TypeScript. The image step sets context to the repo root because the
+  # Dockerfile copies sdks/typescript/dist/sidecar.cjs, which only exists after a build, so the
+  # bundle is built first. npm publishes last: a published npm version can never be reused.
+  # The first step stops the pipeline before anything is published when the tag is not a plain
+  # X.Y.Z version (a prerelease would take the latest tags) or does not match the package.
+  - name: verify-typescript-version
     image: node:22
     commands:
-      - rm -rf node_modules package-lock.json
-      - echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" > ~/.npmrc
-      - cd sdks/typescript && npm install && npm run build && npm test && npm publish --access public
-    environment:
-      NPM_TOKEN:
-        from_secret: npm_token
+      - |
+        node -e "
+        const tag = process.env.CI_COMMIT_TAG.replace('typescript-v', '');
+        const version = require('./sdks/typescript/package.json').version;
+        const parts = tag.split('.');
+        const plain = parts.length === 3 && parts.every((part) => String(Number(part)) === part);
+        if (!plain) {
+          console.error('Tag version ' + tag + ' must be plain X.Y.Z, because a prerelease would take the latest tags.');
+          process.exit(1);
+        }
+        if (tag !== version) {
+          console.error('Tag version ' + tag + ' does not match the sdks/typescript/package.json version ' + version + '.');
+          process.exit(1);
+        }
+        "
+    when:
+      - event: tag
+        ref: refs/tags/typescript-v*
+
+  - name: build-typescript-sidecar
+    image: node:22
+    commands:
+      - npm ci
+      - npm run build --workspace @doow/track
     when:
       - event: tag
         ref: refs/tags/typescript-v*
@@ -175,16 +208,83 @@ steps:
     settings:
       repo: ghcr.io/doow-dev/doow-track-sidecar
       dockerfile: sdks/typescript/Dockerfile
-      context: sdks/typescript
+      context: .
       registry: ghcr.io
       platforms: linux/amd64,linux/arm64
+      build_args:
+        - SDK_VERSION=${CI_COMMIT_TAG##typescript-v}
       tags:
         - latest
-        - ${CI_COMMIT_TAG##typescript/v}
+        - "0"
+        - ${CI_COMMIT_TAG##typescript-v}
       username:
         from_secret: ghcr_username
       password:
         from_secret: ghcr_token
+    when:
+      - event: tag
+        ref: refs/tags/typescript-v*
+
+  # --- TypeScript CLI binaries → GitHub Release ---
+  # Ported from the retired GitHub Actions workflow, which needed five native runners because it
+  # smoke-tested each binary on its own platform. pkg cross-compiles every target from Linux, so
+  # one agent builds all five, at the cost of only being able to execute the Linux x64 one. All
+  # five wrap the same cli.cjs, so a broken bundle still fails that smoke test.
+  #
+  # The build step is load-bearing: the version is baked into the bundle at rollup time, so
+  # packaging a stale dist/ ships the previous version under the new tag.
+  - name: publish-typescript-cli
+    image: node:24
+    commands:
+      - |
+        set -e
+        npm ci
+        npm run build
+        VERSION=$(node -p "require('./sdks/typescript/package.json').version")
+        mkdir -p release-assets
+        for pair in linux-x64:node24-linux-x64 linux-arm64:node24-linux-arm64 darwin-x64:node24-macos-x64 darwin-arm64:node24-macos-arm64 windows-x64.exe:node24-win-x64; do
+          TARGET="${pair%%:*}"
+          PKG_TARGET="${pair#*:}"
+          npx --no-install pkg sdks/typescript/dist/cli.cjs --target "$PKG_TARGET" --output "release-assets/doow-track-$TARGET"
+          case "$TARGET" in *.exe) ;; *) chmod +x "release-assets/doow-track-$TARGET" ;; esac
+          ( cd release-assets && sha256sum "doow-track-$TARGET" > "doow-track-$TARGET.sha256" )
+        done
+
+        cd release-assets
+        sha256sum -c doow-track-linux-x64.sha256
+        test "$(./doow-track-linux-x64 --version)" = "doow-track v$VERSION"
+        ./doow-track-linux-x64 --help | grep -q 'Usage: doow-track'
+        printf '{"metric":"release_smoke","quantity":1,"license_id":"lic_smoke"}\n' | env DOOW_TRACK_DISABLED=true ./doow-track-linux-x64 --api-key dk_smoke
+
+        RELEASE_ID=$(curl -fsS -X POST \
+          -H "Authorization: Bearer $GITHUB_TOKEN" \
+          -H "Accept: application/vnd.github+json" \
+          "https://api.github.com/repos/Doow-Dev/doow-track-sdk/releases" \
+          -d "{\"tag_name\":\"$CI_COMMIT_TAG\",\"name\":\"@doow/track v$VERSION\"}" \
+          | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>console.log(JSON.parse(s).id))")
+        for asset in doow-track-*; do
+          curl -fsS -X POST \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "Content-Type: application/octet-stream" \
+            --data-binary "@$asset" \
+            "https://uploads.github.com/repos/Doow-Dev/doow-track-sdk/releases/$RELEASE_ID/assets?name=$asset"
+        done
+    environment:
+      GITHUB_TOKEN:
+        from_secret: github_token
+    when:
+      - event: tag
+        ref: refs/tags/typescript-v*
+
+  - name: publish-typescript
+    image: node:22
+    commands:
+      - rm -rf node_modules package-lock.json
+      - echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" > ~/.npmrc
+      - cd sdks/typescript && npm install && npm run build && npm test && npm publish --access public
+    environment:
+      NPM_TOKEN:
+        from_secret: npm_token
     when:
       - event: tag
         ref: refs/tags/typescript-v*
@@ -252,7 +352,7 @@ steps:
       - echo "Go module published automatically via tag to pkg.go.dev"
     when:
       - event: tag
-        ref: refs/tags/go-v*
+        ref: refs/tags/sdks/go/v*
 
   # --- Rust → crates.io ---
   - name: publish-rust
@@ -282,7 +382,7 @@ steps:
   - name: publish-java
     image: maven:3.9-eclipse-temurin-17
     commands:
-      - 'apt-get update && apt-get install -y gnupg && mkdir -p ~/.m2 && echo "<settings><servers><server><id>central</id><username>$MAVEN_USERNAME</username><password>$MAVEN_PASSWORD</password></server></servers><profiles><profile><id>gpg</id><properties><gpg.passphrase>$MAVEN_SIGNING_PASSWORD</gpg.passphrase></properties></profile></profiles><activeProfiles><activeProfile>gpg</activeProfile></activeProfiles></settings>" > ~/.m2/settings.xml && echo "$MAVEN_SIGNING_KEY" | gpg --batch --import && cd sdks/java && mvn clean deploy -DskipTests -Dgpg.passphrase="$MAVEN_SIGNING_PASSWORD"'
+      - 'apt-get update && apt-get install -y gnupg && mkdir -p ~/.m2 && echo "<settings><servers><server><id>central</id><username>$MAVEN_USERNAME</username><password>$MAVEN_PASSWORD</password></server></servers><profiles><profile><id>gpg</id><properties><gpg.passphrase>$MAVEN_SIGNING_PASSWORD</gpg.passphrase></properties></profile></profiles><activeProfiles><activeProfile>gpg</activeProfile></activeProfiles></settings>" > ~/.m2/settings.xml && echo "$MAVEN_SIGNING_KEY" | gpg --batch --import && cd sdks/java && mvn clean deploy -Prelease -DskipTests -Dgpg.passphrase="$MAVEN_SIGNING_PASSWORD"'
     environment:
       MAVEN_USERNAME:
         from_secret: maven_username
@@ -296,11 +396,15 @@ steps:
       - event: tag
         ref: refs/tags/java-v*
 
-  # --- Kotlin → Maven Central ---
+  # --- Kotlin → Maven Central (Central Portal) ---
+  # The Central Portal Publisher API takes a user token rather than an account login, and the
+  # build base64-encodes it from these two values. publishingType is AUTOMATIC, matching the
+  # autoPublish setting the Java POM uses. Since plugin 1.3.0 the portal task stages and uploads
+  # by itself, so it does not need a preceding `gradle publish`.
   - name: publish-kotlin
     image: gradle:8-jdk17
     commands:
-      - cd sdks/kotlin && gradle build && gradle publish
+      - cd sdks/kotlin && gradle publishToMavenCentralPortal
     environment:
       MAVEN_USERNAME:
         from_secret: maven_username
@@ -351,10 +455,13 @@ steps:
 
   # --- Swift → SPM (auto via tag, just run tests) ---
   - name: publish-swift
-    image: swift:5.9
+    image: swift:6.0
     commands:
-      - cd sdks/swift && swift build && swift test || true
+      - swift build
+      - swift test
       - echo "Swift package available automatically via tag for SPM"
     when:
       - event: tag
         ref: refs/tags/swift-v*
+      - event: tag
+        ref: refs/tags/v*

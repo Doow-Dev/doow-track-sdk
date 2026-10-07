@@ -5,15 +5,64 @@ use thiserror::Error;
 /// Result type for Doow SDK operations
 pub type Result<T> = std::result::Result<T, DoowError>;
 
+const MAX_ERROR_TEXT: usize = 512;
+
+fn is_unsafe_char(c: char) -> bool {
+    c.is_control()
+        || matches!(
+            c,
+            '\u{61c}'
+                | '\u{200e}'
+                | '\u{200f}'
+                | '\u{2028}'
+                | '\u{2029}'
+                | '\u{202a}'..='\u{202e}'
+                | '\u{2066}'..='\u{2069}'
+        )
+}
+
+/// Strip control, bidirectional, and line-separator characters and cap server-supplied text
+pub fn sanitize_text(text: &str) -> String {
+    let cleaned: String = text
+        .chars()
+        .map(|c| if is_unsafe_char(c) { ' ' } else { c })
+        .collect();
+    if cleaned.chars().count() > MAX_ERROR_TEXT {
+        let mut truncated: String = cleaned.chars().take(MAX_ERROR_TEXT).collect();
+        truncated.push_str("...");
+        truncated
+    } else {
+        cleaned
+    }
+}
+
+/// One event the API refused inside an otherwise accepted batch
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct Rejection {
+    pub event_id: String,
+    pub reason: String,
+}
+
 /// Doow SDK error
 #[derive(Debug, Error)]
 pub enum DoowError {
+    /// HTTP 207: some events in the batch were rejected. The batch id is
+    /// already recorded server side, so the batch is never retried.
+    #[error("doow: batch {batch_id} partially accepted: {rejected} rejected")]
+    PartialAccept {
+        accepted: u32,
+        rejected: u32,
+        batch_id: String,
+        rejections: Vec<Rejection>,
+    },
+
     /// API error response
     #[error("doow: {message} (status={status})")]
     Api {
         status: u16,
         message: String,
         error_class: Option<String>,
+        retry_after: Option<std::time::Duration>,
     },
 
     /// HTTP request error
@@ -42,8 +91,9 @@ impl DoowError {
     pub fn api(status: u16, message: impl Into<String>, error_class: Option<String>) -> Self {
         Self::Api {
             status,
-            message: message.into(),
+            message: sanitize_text(&message.into()),
             error_class,
+            retry_after: None,
         }
     }
 
@@ -75,7 +125,7 @@ impl DoowError {
     /// Check if error is retryable
     pub fn is_retryable(&self) -> bool {
         match self {
-            Self::Api { status, .. } => matches!(status, 429 | 500 | 502 | 503 | 504),
+            Self::Api { status, .. } => matches!(status, 408 | 429 | 500..=599),
             Self::Request(_) => true,
             _ => false,
         }

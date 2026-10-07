@@ -1,7 +1,7 @@
 //! Telemetry tracker for Doow SDK.
 
-use crate::error::{DoowError, Result};
-use crate::types::{EventKind, SerializedEvent, TrackEvent};
+use crate::error::{sanitize_text, DoowError, Rejection, Result};
+use crate::types::{EventKind, MetricTupleHint, SerializedEvent, TrackEvent};
 use chrono::Utc;
 use flate2::write::GzEncoder;
 use flate2::Compression;
@@ -9,8 +9,9 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::Write;
-use std::sync::Arc;
-use std::time::Duration;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, OnceLock};
+use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, Mutex, RwLock};
 use uuid::Uuid;
 
@@ -21,6 +22,17 @@ const DEFAULT_FLUSH_INTERVAL_MS: u64 = 10_000;
 const DEFAULT_MAX_QUEUE_SIZE: usize = 10_000;
 const DEFAULT_TIMEOUT_MS: u64 = 10_000;
 const DEFAULT_RETRY_COUNT: u32 = 3;
+const MAX_BATCH_EVENTS: usize = 500;
+
+/// Callback invoked for every delivery failure, including partial rejections
+#[derive(Clone)]
+pub struct ErrorHandler(pub Arc<dyn Fn(&DoowError) + Send + Sync>);
+
+impl std::fmt::Debug for ErrorHandler {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ErrorHandler")
+    }
+}
 
 /// Tracker configuration options
 #[derive(Debug, Clone)]
@@ -35,6 +47,7 @@ pub struct TrackerOptions {
     pub retry_count: u32,
     pub disable_compression: bool,
     pub attribution: HashMap<String, serde_json::Value>,
+    pub on_error: Option<ErrorHandler>,
 }
 
 impl Default for TrackerOptions {
@@ -61,20 +74,21 @@ impl Default for TrackerOptions {
             retry_count: DEFAULT_RETRY_COUNT,
             disable_compression: false,
             attribution: HashMap::new(),
+            on_error: None,
         }
     }
 }
 
 #[derive(Serialize)]
-struct WireMeasurement {
+pub(crate) struct WireMeasurement {
     metric_name: String,
     quantity: f64,
     #[serde(skip_serializing_if = "Option::is_none")]
-    metric_tuple_hint: Option<String>,
+    metric_tuple_hint: Option<MetricTupleHint>,
 }
 
 #[derive(Serialize)]
-struct WireEvent {
+pub(crate) struct WireEvent {
     event_id: String,
     license_id: String,
     occurred_at: String,
@@ -88,10 +102,86 @@ struct WireEvent {
 }
 
 #[derive(Serialize)]
-struct BatchPayload {
+pub(crate) struct BatchPayload {
     batch_id: String,
     sdk_version: String,
     events: Vec<WireEvent>,
+}
+
+#[derive(Deserialize)]
+struct PartialAcceptBody {
+    #[serde(default)]
+    accepted: u32,
+    #[serde(default)]
+    rejected: u32,
+    #[serde(default)]
+    batch_id: String,
+    #[serde(default)]
+    rejections: Vec<Rejection>,
+}
+
+const MAX_BODY_BYTES: usize = 1 << 20;
+const MAX_RETRY_AFTER: Duration = Duration::from_secs(30);
+
+async fn read_capped(mut resp: reqwest::Response, debug: bool) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    loop {
+        match resp.chunk().await {
+            Ok(Some(chunk)) => {
+                let room = MAX_BODY_BYTES - bytes.len();
+                bytes.extend_from_slice(&chunk[..chunk.len().min(room)]);
+                if bytes.len() >= MAX_BODY_BYTES {
+                    break;
+                }
+            }
+            Ok(None) => break,
+            Err(error) => {
+                if debug {
+                    eprintln!("[doow/track] response body read stopped: {}", error);
+                }
+                break;
+            }
+        }
+    }
+    bytes
+}
+
+pub(crate) fn parse_retry_after(header: Option<&str>) -> Option<Duration> {
+    let seconds: f64 = header?.trim().parse().ok()?;
+    if !seconds.is_finite() || seconds < 0.0 {
+        return None;
+    }
+    Some(Duration::from_secs_f64(seconds.min(MAX_RETRY_AFTER.as_secs_f64())))
+}
+
+pub(crate) fn build_payload(batch_id: &str, events: &[SerializedEvent]) -> BatchPayload {
+    BatchPayload {
+        batch_id: batch_id.to_string(),
+        sdk_version: SDK_VERSION.to_string(),
+        events: events
+            .iter()
+            .map(|e| WireEvent {
+                event_id: e.event_id.clone(),
+                license_id: e.license_id.clone(),
+                occurred_at: e.timestamp.clone(),
+                source_system: e
+                    .source_system
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or("sdk")
+                    .to_string(),
+                kind: e.kind.clone(),
+                attribution: e.attribution.clone(),
+                metadata: e.metadata.clone(),
+                measurements: vec![WireMeasurement {
+                    metric_name: e.metric.clone(),
+                    quantity: e.quantity,
+                    metric_tuple_hint: e.metric_tuple_hint.clone(),
+                }],
+            })
+            .collect(),
+    }
 }
 
 #[derive(Deserialize)]
@@ -109,6 +199,12 @@ pub struct Tracker {
     buffer: Arc<Mutex<Vec<SerializedEvent>>>,
     shutdown_tx: Option<mpsc::Sender<()>>,
     shutdown_complete: Arc<RwLock<bool>>,
+    hold_until: Arc<AtomicU64>,
+}
+
+fn now_ms() -> u64 {
+    static START: OnceLock<Instant> = OnceLock::new();
+    START.get_or_init(Instant::now).elapsed().as_millis() as u64
 }
 
 impl Tracker {
@@ -124,6 +220,7 @@ impl Tracker {
 
         let buffer = Arc::new(Mutex::new(Vec::with_capacity(options.max_queue_size)));
         let shutdown_complete = Arc::new(RwLock::new(false));
+        let hold_until = Arc::new(AtomicU64::new(0));
 
         let (shutdown_tx, shutdown_rx) = mpsc::channel(1);
 
@@ -134,6 +231,7 @@ impl Tracker {
             buffer: buffer.clone(),
             shutdown_tx: Some(shutdown_tx),
             shutdown_complete: shutdown_complete.clone(),
+            hold_until: hold_until.clone(),
         };
 
         // Start flush loop
@@ -143,6 +241,7 @@ impl Tracker {
             let flush_client = client;
             let flush_api_key = api_key;
             let flush_shutdown_complete = shutdown_complete;
+            let flush_hold_until = hold_until;
 
             tokio::spawn(async move {
                 Self::flush_loop(
@@ -152,6 +251,7 @@ impl Tracker {
                     flush_api_key,
                     shutdown_rx,
                     flush_shutdown_complete,
+                    flush_hold_until,
                 )
                 .await;
             });
@@ -163,6 +263,15 @@ impl Tracker {
     fn log(&self, msg: &str) {
         if self.options.debug {
             eprintln!("[doow/track] {}", msg);
+        }
+    }
+
+    fn report(options: &TrackerOptions, error: &DoowError) {
+        if options.debug {
+            eprintln!("[doow/track] {}", error);
+        }
+        if let Some(handler) = &options.on_error {
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| (handler.0)(error)));
         }
     }
 
@@ -207,7 +316,8 @@ impl Tracker {
         }
         buffer.push(serialized);
 
-        let should_flush = buffer.len() >= self.options.flush_at;
+        let should_flush = buffer.len() >= self.options.flush_at
+            && now_ms() >= self.hold_until.load(Ordering::Relaxed);
         drop(buffer);
 
         if should_flush {
@@ -225,37 +335,42 @@ impl Tracker {
             std::mem::take(&mut *buffer)
         };
 
-        if let Err(e) = self.send_batch(events).await {
-            self.log(&format!("flush error: {}", e));
+        self.send_in_chunks(events).await;
+    }
+
+    async fn send_in_chunks(&self, events: Vec<SerializedEvent>) {
+        let mut sent = 0;
+        for chunk in events.chunks(MAX_BATCH_EVENTS) {
+            if let Err(e) = self.send_batch(chunk.to_vec()).await {
+                Self::report(&self.options, &e);
+                if e.is_retryable() {
+                    self.requeue(events[sent..].to_vec()).await;
+                    self.hold_until.store(
+                        now_ms().saturating_add(self.options.flush_interval_ms),
+                        Ordering::Relaxed,
+                    );
+                    return;
+                }
+            }
+            sent += chunk.len();
         }
+    }
+
+    async fn requeue(&self, events: Vec<SerializedEvent>) {
+        if events.is_empty() {
+            return;
+        }
+        let mut buffer = self.buffer.lock().await;
+        let mut restored = events;
+        restored.append(&mut buffer);
+        restored.truncate(self.options.max_queue_size);
+        *buffer = restored;
     }
 
     async fn send_batch(&self, events: Vec<SerializedEvent>) -> Result<()> {
         let batch_id = Uuid::new_v4().to_string();
 
-        let wire_events: Vec<WireEvent> = events
-            .iter()
-            .map(|e| WireEvent {
-                event_id: e.event_id.clone(),
-                license_id: e.license_id.clone(),
-                occurred_at: e.timestamp.clone(),
-                source_system: e.source_system.clone().unwrap_or_else(|| "sdk".to_string()),
-                kind: e.kind.clone(),
-                attribution: e.attribution.clone(),
-                metadata: e.metadata.clone(),
-                measurements: vec![WireMeasurement {
-                    metric_name: e.metric.clone(),
-                    quantity: e.quantity,
-                    metric_tuple_hint: e.metric_tuple_hint.as_ref().and_then(|h| serde_json::to_string(h).ok()),
-                }],
-            })
-            .collect();
-
-        let payload = BatchPayload {
-            batch_id: batch_id.clone(),
-            sdk_version: SDK_VERSION.to_string(),
-            events: wire_events,
-        };
+        let payload = build_payload(&batch_id, &events);
 
         let body = serde_json::to_vec(&payload)?;
         self.log(&format!(
@@ -266,10 +381,14 @@ impl Tracker {
         ));
 
         let mut last_error = None;
+        let mut server_delay: Option<Duration> = None;
 
         for attempt in 0..=self.options.retry_count {
             if attempt > 0 {
-                let backoff = Duration::from_millis(100 * (1 << (attempt - 1)).min(100));
+                let mut backoff = Duration::from_millis(100 * (1 << (attempt - 1)).min(100));
+                if let Some(delay) = server_delay.take() {
+                    backoff = backoff.max(delay);
+                }
                 tokio::time::sleep(backoff).await;
                 self.log(&format!("retry attempt {} after {:?}", attempt, backoff));
             }
@@ -283,6 +402,10 @@ impl Tracker {
                     if !e.is_retryable() {
                         return Err(e);
                     }
+                    server_delay = match &e {
+                        DoowError::Api { retry_after, .. } => *retry_after,
+                        _ => None,
+                    };
                     last_error = Some(e);
                 }
             }
@@ -314,21 +437,54 @@ impl Tracker {
 
         let resp = req.body(req_body).send().await?;
 
-        if resp.status().is_success() {
+        let status = resp.status().as_u16();
+        let retry_after = parse_retry_after(
+            resp.headers().get("retry-after").and_then(|v| v.to_str().ok()),
+        );
+        let body_bytes = read_capped(resp, self.options.debug).await;
+
+        if status == 207 {
+            let body: PartialAcceptBody =
+                serde_json::from_slice(&body_bytes).unwrap_or(PartialAcceptBody {
+                    accepted: 0,
+                    rejected: 0,
+                    batch_id: String::new(),
+                    rejections: Vec::new(),
+                });
+            return Err(DoowError::PartialAccept {
+                accepted: body.accepted,
+                rejected: body.rejected,
+                batch_id: sanitize_text(&body.batch_id),
+                rejections: body
+                    .rejections
+                    .into_iter()
+                    .map(|r| Rejection {
+                        event_id: sanitize_text(&r.event_id),
+                        reason: sanitize_text(&r.reason),
+                    })
+                    .collect(),
+            });
+        }
+
+        if (200..300).contains(&status) {
             return Ok(());
         }
 
-        let status = resp.status().as_u16();
-        let error_resp: ApiErrorResponse = resp.json().await.unwrap_or(ApiErrorResponse {
-            message: None,
-            error_class: None,
-        });
+        let error_resp: ApiErrorResponse =
+            serde_json::from_slice(&body_bytes).unwrap_or(ApiErrorResponse {
+                message: None,
+                error_class: None,
+            });
 
-        Err(DoowError::api(
+        let mut error = DoowError::api(
             status,
             error_resp.message.unwrap_or_else(|| "Unknown error".to_string()),
             error_resp.error_class,
-        ))
+        );
+        if let DoowError::Api { retry_after: slot, .. } = &mut error {
+            *slot = if status == 429 || status == 503 { retry_after } else { None };
+        }
+        Err(error)
     }
 
     async fn flush_loop(
@@ -338,6 +494,7 @@ impl Tracker {
         api_key: String,
         mut shutdown_rx: mpsc::Receiver<()>,
         shutdown_complete: Arc<RwLock<bool>>,
+        hold_until: Arc<AtomicU64>,
     ) {
         let interval = Duration::from_millis(options.flush_interval_ms);
 
@@ -359,13 +516,10 @@ impl Tracker {
                         buffer: buffer.clone(),
                         shutdown_tx: None,
                         shutdown_complete: shutdown_complete.clone(),
+                        hold_until: hold_until.clone(),
                     };
 
-                    if let Err(e) = tracker.send_batch(events).await {
-                        if options.debug {
-                            eprintln!("[doow/track] periodic flush error: {}", e);
-                        }
-                    }
+                    tracker.send_in_chunks(events).await;
                 }
                 _ = shutdown_rx.recv() => {
                     // Final flush
@@ -382,8 +536,9 @@ impl Tracker {
                             buffer: buffer.clone(),
                             shutdown_tx: None,
                             shutdown_complete: shutdown_complete.clone(),
+                            hold_until: hold_until.clone(),
                         };
-                        let _ = tracker.send_batch(events).await;
+                        tracker.send_in_chunks(events).await;
                     }
 
                     *shutdown_complete.write().await = true;
@@ -395,6 +550,9 @@ impl Tracker {
 
     /// Shutdown the tracker, flushing remaining events
     pub async fn shutdown(&self) {
+        if !self.options.enabled {
+            return;
+        }
         if let Some(tx) = &self.shutdown_tx {
             let _ = tx.send(()).await;
 
@@ -406,5 +564,539 @@ impl Tracker {
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::{EventKind, SerializedEvent};
+    use std::sync::Mutex as StdMutex;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    fn event(id: &str) -> SerializedEvent {
+        SerializedEvent {
+            event_id: id.to_string(),
+            metric: "api_calls".to_string(),
+            quantity: 1.0,
+            license_id: "lic_1".to_string(),
+            unit: None,
+            kind: EventKind::default(),
+            timestamp: "2026-10-04T00:00:00Z".to_string(),
+            source_system: None,
+            metric_tuple_hint: Some(MetricTupleHint {
+                app_name: "app".to_string(),
+                license_name: "lic".to_string(),
+                metric_name: "calls".to_string(),
+            }),
+            attribution: None,
+            metadata: None,
+        }
+    }
+
+    #[test]
+    fn tuple_hint_serializes_as_object() {
+        let json = serde_json::to_value(build_payload("b1", &[event("e1")])).unwrap();
+        let hint = &json["events"][0]["measurements"][0]["metric_tuple_hint"];
+        assert!(hint.is_object(), "hint must be an object, got {hint}");
+        assert_eq!(hint["app_name"], "app");
+        assert_eq!(hint["license_name"], "lic");
+        assert_eq!(hint["metric_name"], "calls");
+        assert_eq!(json["batch_id"], "b1");
+        assert_eq!(json["events"][0]["source_system"], "sdk");
+    }
+
+    fn tracker_for(server: &MockServer, errors: Arc<StdMutex<Vec<String>>>) -> Tracker {
+        let sink = errors.clone();
+        Tracker::new(
+            "dk_test",
+            Some(TrackerOptions {
+                endpoint: server.uri(),
+                retry_count: 2,
+                flush_at: 1000,
+                on_error: Some(ErrorHandler(Arc::new(move |e| {
+                    if let DoowError::PartialAccept { rejections, .. } = e {
+                        for r in rejections {
+                            sink.lock().unwrap().push(format!("{}:{}", r.event_id, r.reason));
+                        }
+                    }
+                }))),
+                ..Default::default()
+            }),
+        )
+    }
+
+    #[tokio::test]
+    async fn accepted_batch_posts_once_and_reports_nothing() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/telemetry/events"))
+            .respond_with(ResponseTemplate::new(202).set_body_json(
+                serde_json::json!({"accepted": 1, "rejected": 0, "batch_id": "b"}),
+            ))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let errors = Arc::new(StdMutex::new(Vec::new()));
+        let tracker = tracker_for(&server, errors.clone());
+        tracker.send_batch(vec![event("e1")]).await.unwrap();
+        assert!(errors.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn retry_reuses_batch_and_event_ids() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/telemetry/events"))
+            .respond_with(ResponseTemplate::new(503))
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/telemetry/events"))
+            .respond_with(ResponseTemplate::new(202))
+            .mount(&server)
+            .await;
+        let errors = Arc::new(StdMutex::new(Vec::new()));
+        let tracker = tracker_for(&server, errors.clone());
+        tracker.send_batch(vec![event("e1")]).await.unwrap();
+
+        let requests = server.received_requests().await.unwrap();
+        assert_eq!(requests.len(), 2);
+        let first: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+        let second: serde_json::Value = serde_json::from_slice(&requests[1].body).unwrap();
+        assert_eq!(first["batch_id"], second["batch_id"]);
+        assert_eq!(first["events"][0]["event_id"], second["events"][0]["event_id"]);
+    }
+
+    #[tokio::test]
+    async fn partial_accept_reports_each_rejection_without_retry() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/telemetry/events"))
+            .respond_with(ResponseTemplate::new(207).set_body_json(serde_json::json!({
+                "accepted": 1,
+                "rejected": 1,
+                "batch_id": "b",
+                "rejections": [{"event_id": "e2", "reason": "license_id is required"}]
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let errors = Arc::new(StdMutex::new(Vec::new()));
+        let tracker = tracker_for(&server, errors.clone());
+        tracker.track(TrackEvent {
+            metric: "m".to_string(),
+            quantity: 1.0,
+            license_id: "l".to_string(),
+            ..Default::default()
+        })
+        .await;
+        tracker.flush().await;
+        assert_eq!(
+            *errors.lock().unwrap(),
+            vec!["e2:license_id is required".to_string()]
+        );
+    }
+
+    fn streaming_response(
+        chunks: impl futures_util::Stream<Item = std::result::Result<Vec<u8>, std::io::Error>> + Send + Sync + 'static,
+    ) -> reqwest::Response {
+        reqwest::Response::from(http::Response::new(reqwest::Body::wrap_stream(chunks)))
+    }
+
+    #[tokio::test]
+    async fn read_capped_stops_pulling_chunks_at_the_cap() {
+        let pulled = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter = pulled.clone();
+        let endless = futures_util::stream::unfold((), move |_| {
+            let counter = counter.clone();
+            async move {
+                counter.fetch_add(4096, std::sync::atomic::Ordering::SeqCst);
+                tokio::task::yield_now().await;
+                Some((Ok::<_, std::io::Error>(vec![b'x'; 4096]), ()))
+            }
+        });
+
+        let bytes = tokio::time::timeout(
+            Duration::from_secs(5),
+            read_capped(streaming_response(endless), false),
+        )
+        .await
+        .expect("read_capped kept pulling an endless body past the cap");
+
+        assert_eq!(bytes.len(), MAX_BODY_BYTES);
+        assert!(pulled.load(std::sync::atomic::Ordering::SeqCst) <= MAX_BODY_BYTES + 4 * 4096);
+    }
+
+    #[tokio::test]
+    async fn read_capped_keeps_what_it_read_when_the_stream_errors() {
+        let chunks = futures_util::stream::iter(vec![
+            Ok::<_, std::io::Error>(vec![b'a'; 10]),
+            Err(std::io::Error::new(std::io::ErrorKind::ConnectionReset, "reset")),
+            Ok(vec![b'b'; 10]),
+        ]);
+
+        let bytes = read_capped(streaming_response(chunks), false).await;
+
+        assert_eq!(bytes, vec![b'a'; 10]);
+    }
+
+    #[test]
+    fn absurd_retry_after_values_are_clamped_not_panicking() {
+        for header in ["1e30", "1e308", "340282366920938463463374607431768211456", "inf", "NaN", "-5"] {
+            let _ = parse_retry_after(Some(header));
+        }
+        assert_eq!(parse_retry_after(Some("1e30")), Some(MAX_RETRY_AFTER));
+    }
+
+    #[tokio::test]
+    async fn malformed_partial_accept_body_is_reported_without_resend() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/telemetry/events"))
+            .respond_with(ResponseTemplate::new(207).set_body_json(serde_json::json!({
+                "accepted": "abc", "rejected": null, "rejections": [1, "x", {"event_id": 5}]
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let errors = Arc::new(StdMutex::new(Vec::new()));
+        let tracker = tracker_for(&server, errors);
+        let result = tracker.send_batch(vec![event("e1")]).await;
+        assert!(matches!(result, Err(DoowError::PartialAccept { .. })));
+    }
+
+    #[tokio::test]
+    async fn oversized_response_bodies_are_truncated_while_streaming() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/telemetry/events"))
+            .respond_with(ResponseTemplate::new(400).set_body_string("x".repeat(MAX_BODY_BYTES + 4096)))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let errors = Arc::new(StdMutex::new(Vec::new()));
+        let tracker = tracker_for(&server, errors);
+        let result = tracker.send_batch(vec![event("e1")]).await;
+        assert!(matches!(result, Err(DoowError::Api { status: 400, .. })));
+    }
+
+    #[test]
+    fn blank_source_system_defaults_to_sdk() {
+        let mut e = event("e1");
+        e.source_system = Some("  ".to_string());
+        let json = serde_json::to_value(build_payload("b1", &[e])).unwrap();
+        assert_eq!(json["events"][0]["source_system"], "sdk");
+    }
+
+    #[test]
+    fn retry_after_is_clamped_and_garbage_ignored() {
+        assert_eq!(parse_retry_after(Some("2")), Some(Duration::from_secs(2)));
+        assert_eq!(parse_retry_after(Some("86400")), Some(MAX_RETRY_AFTER));
+        assert_eq!(parse_retry_after(Some("garbage")), None);
+        assert_eq!(parse_retry_after(None), None);
+    }
+
+    #[test]
+    fn server_text_is_sanitized_and_truncated() {
+        let cleaned = sanitize_text(&format!("line1\nline2\u{1b}[31m{}", "x".repeat(2000)));
+        assert!(!cleaned.contains('\n') && !cleaned.contains('\u{1b}'));
+        assert!(cleaned.chars().count() <= 520);
+    }
+
+    #[test]
+    fn bidirectional_controls_and_line_separators_are_stripped() {
+        let cleaned =
+            sanitize_text("a\u{202e}b\u{2066}c\u{2069}d\u{200f}e\u{61c}f\u{2028}g\u{2029}h");
+        assert_eq!(cleaned, "a b c d e f g h");
+    }
+
+    #[tokio::test]
+    async fn flush_of_more_than_500_events_sends_chunks_of_at_most_500_with_distinct_batch_ids() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/telemetry/events"))
+            .respond_with(ResponseTemplate::new(202))
+            .mount(&server)
+            .await;
+        let tracker = Tracker::new(
+            "dk_test",
+            Some(TrackerOptions {
+                endpoint: server.uri(),
+                retry_count: 0,
+                flush_at: 5000,
+                max_queue_size: 5000,
+                disable_compression: true,
+                ..Default::default()
+            }),
+        );
+        let events: Vec<SerializedEvent> = (0..1200).map(|i| event(&format!("e{i}"))).collect();
+        tracker.buffer.lock().await.extend(events);
+        tracker.flush().await;
+
+        let requests = server.received_requests().await.unwrap();
+        let bodies: Vec<serde_json::Value> = requests
+            .iter()
+            .map(|r| serde_json::from_slice(&r.body).unwrap())
+            .collect();
+        let sizes: Vec<usize> = bodies.iter().map(|b| b["events"].as_array().unwrap().len()).collect();
+        assert_eq!(sizes, vec![500, 500, 200]);
+        let batch_ids: std::collections::HashSet<_> =
+            bodies.iter().map(|b| b["batch_id"].as_str().unwrap().to_string()).collect();
+        assert_eq!(batch_ids.len(), 3);
+        let event_ids: std::collections::HashSet<_> = bodies
+            .iter()
+            .flat_map(|b| b["events"].as_array().unwrap().iter())
+            .map(|e| e["event_id"].as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(event_ids.len(), 1200);
+    }
+
+    #[tokio::test]
+    async fn later_chunks_are_still_sent_after_a_chunk_fails_permanently() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/telemetry/events"))
+            .respond_with(ResponseTemplate::new(400).set_body_json(serde_json::json!({"message": "bad"})))
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/telemetry/events"))
+            .respond_with(ResponseTemplate::new(202))
+            .mount(&server)
+            .await;
+        let reported = Arc::new(StdMutex::new(0usize));
+        let counter = reported.clone();
+        let tracker = Tracker::new(
+            "dk_test",
+            Some(TrackerOptions {
+                endpoint: server.uri(),
+                retry_count: 0,
+                flush_at: 5000,
+                max_queue_size: 5000,
+                disable_compression: true,
+                on_error: Some(ErrorHandler(Arc::new(move |_| {
+                    *counter.lock().unwrap() += 1;
+                }))),
+                ..Default::default()
+            }),
+        );
+        let events: Vec<SerializedEvent> = (0..700).map(|i| event(&format!("e{i}"))).collect();
+        tracker.buffer.lock().await.extend(events);
+        tracker.flush().await;
+
+        assert_eq!(server.received_requests().await.unwrap().len(), 2);
+        assert_eq!(*reported.lock().unwrap(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_transient_failure_requeues_that_chunk_and_every_later_chunk() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/telemetry/events"))
+            .respond_with(ResponseTemplate::new(202))
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/telemetry/events"))
+            .respond_with(ResponseTemplate::new(503))
+            .mount(&server)
+            .await;
+        let tracker = Tracker::new(
+            "dk_test",
+            Some(TrackerOptions {
+                endpoint: server.uri(),
+                retry_count: 0,
+                flush_at: 5000,
+                max_queue_size: 5000,
+                disable_compression: true,
+                ..Default::default()
+            }),
+        );
+        let events: Vec<SerializedEvent> = (0..1200).map(|i| event(&format!("e{i}"))).collect();
+        tracker.buffer.lock().await.extend(events);
+        tracker.flush().await;
+
+        let requests = server.received_requests().await.unwrap();
+        assert_eq!(requests.len(), 2);
+        let failed_chunk: Vec<String> = serde_json::from_slice::<serde_json::Value>(&requests[1].body)
+            .unwrap()["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| e["event_id"].as_str().unwrap().to_string())
+            .collect();
+        assert!(tracker.hold_until.load(Ordering::Relaxed) > now_ms());
+        let buffer = tracker.buffer.lock().await;
+        assert_eq!(buffer.len(), 700);
+        let requeued: Vec<String> = buffer.iter().take(500).map(|e| e.event_id.clone()).collect();
+        assert_eq!(requeued, failed_chunk);
+    }
+
+    #[tokio::test]
+    async fn a_transient_failure_holds_count_triggered_flushes() {
+        let server = MockServer::start().await;
+        let tracker = Tracker::new(
+            "dk_test",
+            Some(TrackerOptions {
+                endpoint: server.uri(),
+                retry_count: 0,
+                flush_at: 2,
+                disable_compression: true,
+                ..Default::default()
+            }),
+        );
+        tracker.hold_until.store(now_ms() + 100_000, Ordering::Relaxed);
+        tracker.track(TrackEvent::default()).await;
+        tracker.track(TrackEvent::default()).await;
+
+        assert_eq!(server.received_requests().await.unwrap().len(), 0);
+        assert_eq!(tracker.buffer.lock().await.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn permanent_client_error_is_not_retried() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/telemetry/events"))
+            .respond_with(ResponseTemplate::new(400).set_body_json(serde_json::json!({"message": "bad"})))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let errors = Arc::new(StdMutex::new(Vec::new()));
+        let tracker = tracker_for(&server, errors);
+        let result = tracker.send_batch(vec![event("e1")]).await;
+        assert!(matches!(result, Err(DoowError::Api { status: 400, .. })));
+    }
+
+    #[tokio::test]
+    async fn rate_limited_batch_waits_for_retry_after_and_retries_the_same_batch() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/telemetry/events"))
+            .respond_with(ResponseTemplate::new(429).insert_header("Retry-After", "1"))
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/telemetry/events"))
+            .respond_with(ResponseTemplate::new(202))
+            .mount(&server)
+            .await;
+        let errors = Arc::new(StdMutex::new(Vec::new()));
+        let tracker = tracker_for(&server, errors);
+
+        let started = std::time::Instant::now();
+        tracker.send_batch(vec![event("e1")]).await.unwrap();
+
+        assert!(started.elapsed() >= Duration::from_millis(900));
+        let requests = server.received_requests().await.unwrap();
+        assert_eq!(requests.len(), 2);
+        let first: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+        let second: serde_json::Value = serde_json::from_slice(&requests[1].body).unwrap();
+        assert_eq!(first["batch_id"], second["batch_id"]);
+    }
+
+    #[tokio::test]
+    async fn in_flight_unavailable_batch_waits_for_retry_after_and_retries_the_same_batch() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/telemetry/events"))
+            .respond_with(ResponseTemplate::new(503).insert_header("Retry-After", "1"))
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/telemetry/events"))
+            .respond_with(ResponseTemplate::new(202))
+            .mount(&server)
+            .await;
+        let errors = Arc::new(StdMutex::new(Vec::new()));
+        let tracker = tracker_for(&server, errors);
+
+        let started = std::time::Instant::now();
+        tracker.send_batch(vec![event("e1")]).await.unwrap();
+
+        assert!(started.elapsed() >= Duration::from_millis(900));
+        let requests = server.received_requests().await.unwrap();
+        assert_eq!(requests.len(), 2);
+        let first: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+        let second: serde_json::Value = serde_json::from_slice(&requests[1].body).unwrap();
+        assert_eq!(first["batch_id"], second["batch_id"]);
+    }
+
+    #[test]
+    fn every_5xx_and_408_is_retryable_but_other_4xx_is_not() {
+        for status in [408u16, 429, 500, 502, 503, 504, 520, 522, 524] {
+            assert!(DoowError::api(status, "x", None).is_retryable(), "{status}");
+        }
+        for status in [400u16, 401, 403, 404, 413, 422] {
+            assert!(!DoowError::api(status, "x", None).is_retryable(), "{status}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_panicking_error_handler_does_not_unwind_into_the_caller() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/telemetry/events"))
+            .respond_with(ResponseTemplate::new(207).set_body_json(serde_json::json!({
+                "accepted": 0, "rejected": 1, "batch_id": "b",
+                "rejections": [{"event_id": "e", "reason": "bad"}]
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let tracker = Tracker::new(
+            "dk_test",
+            Some(TrackerOptions {
+                endpoint: server.uri(),
+                retry_count: 2,
+                flush_at: 1000,
+                on_error: Some(ErrorHandler(Arc::new(|_| panic!("handler failure")))),
+                ..Default::default()
+            }),
+        );
+        tracker
+            .track(TrackEvent {
+                metric: "m".to_string(),
+                quantity: 1.0,
+                license_id: "l".to_string(),
+                ..Default::default()
+            })
+            .await;
+        tracker.flush().await;
+    }
+
+    #[tokio::test]
+    async fn shutdown_returns_when_the_tracker_is_disabled() {
+        let tracker = Tracker::new(
+            "dk_test",
+            Some(TrackerOptions {
+                enabled: false,
+                ..Default::default()
+            }),
+        );
+
+        let finished = tokio::time::timeout(Duration::from_secs(2), tracker.shutdown()).await;
+
+        assert!(
+            finished.is_ok(),
+            "shutdown must not wait for a flush loop that was never started"
+        );
+    }
+
+    #[tokio::test]
+    async fn shutdown_is_repeatable_on_an_enabled_tracker() {
+        let tracker = Tracker::new("dk_test", Some(TrackerOptions::default()));
+
+        tracker.shutdown().await;
+        let again = tokio::time::timeout(Duration::from_secs(2), tracker.shutdown()).await;
+
+        assert!(again.is_ok());
     }
 }

@@ -1,3 +1,23 @@
+import 'dart:convert';
+
+const _maxErrorText = 512;
+
+final _unsafeText = RegExp(
+  r'[\x00-\x1f\x7f-\x9f\u{61c}\u{200e}\u{200f}\u{2028}\u{2029}\u{202a}-\u{202e}\u{2066}-\u{2069}]',
+  unicode: true,
+);
+
+String sanitizeText(Object? value) {
+  final text = '$value'.replaceAll(_unsafeText, ' ');
+  return text.length > _maxErrorText ? '${text.substring(0, _maxErrorText)}...' : text;
+}
+
+int _toInt(Object? value) {
+  if (value is num) return value.toInt();
+  if (value is String) return int.tryParse(value) ?? 0;
+  return 0;
+}
+
 class DoowError implements Exception {
   final String message;
   final int? statusCode;
@@ -23,4 +43,51 @@ class RateLimitError extends DoowError {
 
   RateLimitError(String message, {this.retryAfter})
       : super(message, statusCode: 429);
+}
+
+class EventRejection {
+  final String eventId;
+  final String reason;
+
+  const EventRejection(this.eventId, this.reason);
+}
+
+class PartialAcceptError extends DoowError {
+  final int accepted;
+  final int rejected;
+  final String batchId;
+  final List<EventRejection> rejections;
+
+  PartialAcceptError({
+    required this.accepted,
+    required this.rejected,
+    required this.batchId,
+    required this.rejections,
+  }) : super(
+          'batch $batchId partially accepted: $rejected rejected'
+          '${rejections.isEmpty ? '' : ' (${rejections.first.eventId}: ${rejections.first.reason})'}',
+          statusCode: 207,
+        );
+
+  factory PartialAcceptError.fromBody(String body, String fallbackBatchId) {
+    Map<String, dynamic> data = const {};
+    try {
+      final decoded = jsonDecode(body);
+      if (decoded is Map<String, dynamic>) data = decoded;
+    } catch (_) {}
+    final raw = data['rejections'];
+    final rejections = raw is List
+        ? raw
+            .whereType<Map>()
+            .map((r) => EventRejection(
+                sanitizeText(r['event_id'] ?? 'unknown'), sanitizeText(r['reason'] ?? '')))
+            .toList()
+        : <EventRejection>[];
+    return PartialAcceptError(
+      accepted: _toInt(data['accepted']),
+      rejected: _toInt(data['rejected']),
+      batchId: sanitizeText(data['batch_id'] ?? fallbackBatchId),
+      rejections: rejections,
+    );
+  }
 }

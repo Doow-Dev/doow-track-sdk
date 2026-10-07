@@ -1,3 +1,4 @@
+import { gunzipSync } from 'zlib';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Exporter } from '../exporter.js';
 import type { CustomTransport, SerializedEvent, TransportPayload, TransportResponse } from '../types.js';
@@ -118,10 +119,15 @@ describe('Exporter — S78', () => {
     it('same batch_id on retry', async () => {
       let attempt = 0;
       const batchIds: string[] = [];
+      const eventIds: string[] = [];
       const transport: CustomTransport = {
         send: async (payload) => {
-          const body = JSON.parse(payload.body.toString()) as { batch_id: string };
+          const body = JSON.parse(payload.body.toString()) as {
+            batch_id: string;
+            events: Array<{ event_id: string }>;
+          };
           batchIds.push(body.batch_id);
+          eventIds.push(body.events[0]!.event_id);
           attempt++;
           if (attempt < 2) throw new Error('network error');
           return { status: 202, headers: {}, body: '{}' };
@@ -133,6 +139,8 @@ describe('Exporter — S78', () => {
 
       expect(batchIds).toHaveLength(2);
       expect(batchIds[0]).toBe(batchIds[1]);
+      expect(eventIds).toHaveLength(2);
+      expect(eventIds[0]).toBe(eventIds[1]);
     });
   });
 
@@ -225,8 +233,10 @@ describe('Exporter — S78', () => {
           status: 207,
           headers: {},
           body: JSON.stringify({
-            accepted: ['evt-0'],
-            rejected: [{ event_id: 'evt-1', reason: 'invalid metric' }],
+            accepted: 1,
+            rejected: 1,
+            batch_id: 'b-1',
+            rejections: [{ event_id: 'evt-1', reason: 'invalid metric' }],
           }),
         }),
       };
@@ -238,8 +248,220 @@ describe('Exporter — S78', () => {
         expect.objectContaining({
           kind: 'PARTIAL_ACCEPT',
           rejectedEventIds: ['evt-1'],
+          rejections: [{ event_id: 'evt-1', reason: 'invalid metric' }],
         }),
       );
+    });
+
+    it('207 without parseable details still reports PARTIAL_ACCEPT', async () => {
+      const onError = vi.fn();
+      const transport: CustomTransport = {
+        send: async () => ({ status: 207, headers: {}, body: 'not json' }),
+      };
+
+      const exporter = makeExporter(transport, { onError, retryCount: 0 });
+      await exporter.flush(makeEvents(2));
+
+      expect(onError).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: 'PARTIAL_ACCEPT', rejectedEventIds: [] }),
+      );
+    });
+
+    it('a malformed 207 body is reported once and never resent', async () => {
+      const onError = vi.fn();
+      let sends = 0;
+      const transport: CustomTransport = {
+        send: async () => {
+          sends++;
+          return {
+            status: 207,
+            headers: {},
+            body: JSON.stringify({ accepted: 'abc', rejected: null, rejections: [null, 1, 'x', { event_id: 5 }] }),
+          };
+        },
+      };
+      const exporter = makeExporter(transport, { onError, retryCount: 3 });
+
+      await exporter.flush(makeEvents(1));
+
+      expect(sends).toBe(1);
+      expect(onError).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: 'PARTIAL_ACCEPT', rejectedEventIds: ['5'] }),
+      );
+    });
+
+    it('sanitizes control characters and truncates rejection reasons', async () => {
+      const onError = vi.fn();
+      const transport: CustomTransport = {
+        send: async () => ({
+          status: 207,
+          headers: {},
+          body: JSON.stringify({
+            rejected: 1,
+            rejections: [{ event_id: 'e', reason: 'line1\nline2\u001b[31m' + 'x'.repeat(2000) }],
+          }),
+        }),
+      };
+      const exporter = makeExporter(transport, { onError, retryCount: 0 });
+
+      await exporter.flush(makeEvents(1));
+
+      const reason = (onError.mock.calls[0]![0] as { rejections: Array<{ reason: string }> }).rejections[0]!.reason;
+      expect(reason).not.toMatch(/[\n\u001b]/);
+      expect(reason.length).toBeLessThanOrEqual(520);
+    });
+
+    it('strips bidirectional overrides and line separators from rejection reasons', async () => {
+      const onError = vi.fn();
+      const transport: CustomTransport = {
+        send: async () => ({
+          status: 207,
+          headers: {},
+          body: JSON.stringify({
+            rejected: 1,
+            rejections: [{ event_id: 'e', reason: 'a\u{202e}b\u{2066}c\u{2069}d\u{200f}e\u{61c}f\u{2028}g\u{2029}h' }],
+          }),
+        }),
+      };
+      const exporter = makeExporter(transport, { onError, retryCount: 0 });
+
+      await exporter.flush(makeEvents(1));
+
+      const reason = (onError.mock.calls[0]![0] as { rejections: Array<{ reason: string }> }).rejections[0]!.reason;
+      expect(reason).toBe('a b c d e f g h');
+    });
+
+    it('a single event that exceeds the payload limit is reported once, not retried forever', async () => {
+      const onError = vi.fn();
+      const { transport, calls } = makeTransport(413);
+      const exporter = makeExporter(transport, { onError, retryCount: 2 });
+
+      await exporter.flush(makeEvents(1));
+
+      expect(calls).toHaveLength(1);
+      expect(onError).toHaveBeenCalledWith(expect.objectContaining({ statusCode: 413 }));
+    });
+
+    it('an oversized batch is halved until its events fit, then the stragglers are reported', async () => {
+      const onError = vi.fn();
+      const { transport, calls } = makeTransport(413);
+      const exporter = makeExporter(transport, { onError, retryCount: 0 });
+
+      await exporter.flush(makeEvents(2));
+
+      expect(calls.length).toBeLessThanOrEqual(3);
+      expect(onError).toHaveBeenCalled();
+    });
+
+    it('strips C1 control characters from rejection reasons', async () => {
+      const onError = vi.fn();
+      const transport: CustomTransport = {
+        send: async () => ({
+          status: 207,
+          headers: {},
+          body: JSON.stringify({ rejected: 1, rejections: [{ event_id: 'e', reason: 'a\u009b31mb' }] }),
+        }),
+      };
+      const exporter = makeExporter(transport, { onError, retryCount: 0 });
+
+      await exporter.flush(makeEvents(1));
+
+      const reason = (onError.mock.calls[0]![0] as { rejections: Array<{ reason: string }> }).rejections[0]!.reason;
+      expect(reason).not.toContain('\u009b');
+    });
+
+    it('a 503 with Retry-After waits at least that long before the same batch is retried', async () => {
+      const bodies: Array<{ batch_id: string }> = [];
+      let attempt = 0;
+      const transport: CustomTransport = {
+        send: async (payload) => {
+          bodies.push(JSON.parse(payload.body.toString()) as { batch_id: string });
+          attempt++;
+          return attempt === 1
+            ? { status: 503, headers: { 'retry-after': '0.4' }, body: '{}' }
+            : { status: 202, headers: {}, body: '{}' };
+        },
+      };
+      const exporter = makeExporter(transport, { retryCount: 1, disableCompression: true });
+
+      const started = Date.now();
+      await exporter.flush(makeEvents(1));
+
+      expect(bodies).toHaveLength(2);
+      expect(Date.now() - started).toBeGreaterThanOrEqual(350);
+      expect(bodies[1]!.batch_id).toBe(bodies[0]!.batch_id);
+    });
+
+    it('permanent 400 is reported once and never retried', async () => {
+      const onError = vi.fn();
+      const { transport, calls } = makeTransport(400);
+      const exporter = makeExporter(transport, { onError, retryCount: 3 });
+
+      await exporter.flush(makeEvents(1));
+
+      expect(calls).toHaveLength(1);
+      expect(onError).toHaveBeenCalledTimes(1);
+      expect(onError).toHaveBeenCalledWith(expect.objectContaining({ statusCode: 400 }));
+    });
+
+    it('a 408 request timeout is retried like a transient error', async () => {
+      const onError = vi.fn();
+      const bodies: Array<{ batch_id: string }> = [];
+      let attempt = 0;
+      const transport = {
+        async send(payload: { body: string }) {
+          attempt += 1;
+          bodies.push(JSON.parse(payload.body));
+          return attempt === 1
+            ? { status: 408, headers: {}, body: '{}' }
+            : { status: 202, headers: {}, body: '{}' };
+        },
+      };
+      const exporter = makeExporter(transport as never, { onError, retryCount: 1, disableCompression: true });
+
+      await exporter.flush(makeEvents(1));
+
+      expect(bodies).toHaveLength(2);
+      expect(bodies[1]!.batch_id).toBe(bodies[0]!.batch_id);
+      expect(onError).not.toHaveBeenCalled();
+    });
+
+    it('a throwing onError handler never escapes flush', async () => {
+      const onError = vi.fn(() => {
+        throw new Error('handler failure');
+      });
+      const { transport } = makeTransport(400);
+      const exporter = makeExporter(transport, { onError, retryCount: 0 });
+
+      await expect(exporter.flush(makeEvents(1))).resolves.toBeUndefined();
+      expect(onError).toHaveBeenCalled();
+    });
+
+    it('Retry-After is clamped to 30 seconds and tolerates garbage', () => {
+      const exporter = makeExporter(makeTransport(202).transport) as unknown as {
+        _parseRetryAfter(header: string | undefined): number | undefined;
+      };
+
+      expect(exporter._parseRetryAfter('2')).toBe(2000);
+      expect(exporter._parseRetryAfter('86400')).toBe(30_000);
+      expect(exporter._parseRetryAfter('garbage')).toBeUndefined();
+      expect(exporter._parseRetryAfter(undefined)).toBeUndefined();
+    });
+
+    it('large bodies are a real gzip stream', async () => {
+      const bodies: string[] = [];
+      const transport: CustomTransport = {
+        send: async (payload) => {
+          expect(payload.headers['Content-Encoding']).toBe('gzip');
+          bodies.push(gunzipSync(payload.body).toString('utf8'));
+          return { status: 202, headers: {}, body: '{}' };
+        },
+      };
+      const exporter = makeExporter(transport, { disableCompression: false });
+
+      await exporter.flush(makeEvents(50));
+
+      expect(JSON.parse(bodies[0]!).events).toHaveLength(50);
     });
 
     it('401 → stops emitting permanently', async () => {

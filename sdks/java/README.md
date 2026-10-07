@@ -10,12 +10,11 @@ Official Java SDK for [Doow](https://doow.co) usage telemetry and management.
 
 | Feature | Description |
 |---------|-------------|
-| **Java 17+** | Modern Java with records and var |
+| **Java 17+** | Requires Java 17 or newer, no preview features |
 | **Batching** | Events queued and sent in configurable batches |
 | **Compression** | Automatic gzip for payloads >1KB |
 | **Retries** | Exponential backoff with configurable retry count |
 | **Type Safety** | Full type definitions with enums |
-| **Sidecar** | Executable JAR for stdin/file/tcp input modes |
 
 ---
 
@@ -27,14 +26,14 @@ Official Java SDK for [Doow](https://doow.co) usage telemetry and management.
 <dependency>
     <groupId>co.doow</groupId>
     <artifactId>doow-track</artifactId>
-    <version>0.1.0</version>
+    <version>0.1.1</version>
 </dependency>
 ```
 
 ### Gradle
 
 ```groovy
-implementation 'co.doow:doow-track:0.1.0'
+implementation 'co.doow:doow-track:0.1.1'
 ```
 
 ---
@@ -146,6 +145,24 @@ try {
 
 ---
 
+## Short-lived processes
+
+A function or command-line program that exits right after it handles a request can lose events that are still queued. Call `flush()` before each handler returns and `shutdown()` (or `close()`) only when the process is about to exit, because a tracker that has been shut down drops later events. Call `setFlushAt(1)` if every event must be sent immediately.
+
+## Batching and outages
+
+A flush sends at most 500 events per request, and a larger backlog is split into several requests that each carry their own `batch_id`, so a large flush does not exceed the API's per-minute event limit. After a transient failure (a network error, `408`, `429`, or `5xx` once the retries are used up) the tracker stops sending, puts the unsent events back at the front of the queue, and does not flush on the event-count trigger again until one flush interval has passed. A permanent `4xx` response drops only the request it rejected. When the queue reaches `maxQueueSize` during a long outage, new events are dropped until the queue has room again, so the oldest events are the ones kept.
+
 ## License
 
 MIT
+
+## Releasing
+
+Signing and Central publishing run only in the `release` profile:
+
+```bash
+mvn -B -Prelease deploy
+```
+
+A plain `mvn deploy` does not sign artifacts.

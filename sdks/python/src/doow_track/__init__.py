@@ -1,6 +1,12 @@
 """Doow SDK for Python - usage telemetry and management."""
 
-from .errors import APIError, ConfigurationError, DoowError, ValidationError
+from .errors import (
+    APIError,
+    ConfigurationError,
+    DoowError,
+    PartialAcceptError,
+    ValidationError,
+)
 from .management import (
     AsyncManagement,
     ListExpensesParams,
@@ -46,6 +52,7 @@ from .types import (
 __version__ = "0.1.0"
 
 __all__ = [
+    "PartialAcceptError",
     # Version
     "__version__",
     # Tracker

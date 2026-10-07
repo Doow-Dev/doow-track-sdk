@@ -11,11 +11,11 @@ Official Dart/Flutter SDK for [Doow](https://doow.co) usage telemetry and manage
 | Feature | Description |
 |---------|-------------|
 | **Dart 3.0+** | Null-safe, async/await support |
-| **Flutter** | Works on iOS, Android, Web, Desktop |
+| **Flutter** | Works on iOS, Android, and desktop (Web is not supported) |
 | **Batching** | Events queued and sent in configurable batches |
 | **Compression** | Automatic gzip for payloads >1KB |
 | **Retries** | Exponential backoff with configurable retry count |
-| **Sidecar** | CLI for stdin/file/tcp input modes |
+| **Sidecar** | Use the language-agnostic sidecar for stdin/file/tcp input. Not shipped with this package; see [Sidecar guide](../../docs/sidecar.md) |
 
 ---
 
@@ -32,7 +32,9 @@ Or from Git:
 dependencies:
   doow_track:
     git:
-      url: https://github.com/Doow-Dev/doow-track-dart.git
+      url: https://github.com/Doow-Dev/doow-track-sdk.git
+      path: sdks/dart
+      ref: dart-v0.1.1
 ```
 
 ---
@@ -141,7 +143,7 @@ class _MyAppState extends State<MyApp> {
   void initState() {
     super.initState();
     tracker = Tracker(
-      const String.fromEnvironment('DOOW_API_KEY'),
+      const String.fromEnvironment('DOOW_TRACK_API_KEY'),
       TrackerOptions(debug: kDebugMode),
     );
   }
@@ -167,6 +169,14 @@ class _MyAppState extends State<MyApp> {
 ```
 
 ---
+
+## Short-lived processes
+
+A script or function that exits right after it handles a request can lose events that are still queued. Call `flush()` before each handler returns and `shutdown()` only when the process is about to exit, because a tracker that has been shut down drops later events. Set `flushAt` to 1 if every event must be sent immediately.
+
+## Batching and outages
+
+A flush sends at most 500 events per request, and a larger backlog is split into several requests that each carry their own `batch_id`, so a large flush does not exceed the API's per-minute event limit. After a transient failure (a network error, `408`, `429`, or `5xx` once the retries are used up) the tracker stops sending, puts the unsent events back at the front of the queue, and does not flush on the event-count trigger again until one flush interval has passed. A permanent `4xx` response drops only the request it rejected. When the queue reaches `maxQueueSize` during a long outage, new events are dropped until the queue has room again, so the oldest events are the ones kept. The tracker reads at most 64 KiB of any response body, and a custom `httpClient` must implement `send`, which every `http.Client` does, because the tracker no longer calls `post` on it.
 
 ## License
 

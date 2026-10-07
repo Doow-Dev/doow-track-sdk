@@ -35,7 +35,7 @@ export default function RootLayout({ children }) {
   return (
     <html>
       <body>
-        <DoowProvider apiKey={process.env.NEXT_PUBLIC_DOOW_API_KEY!}>
+        <DoowProvider apiKey={process.env.NEXT_PUBLIC_DOOW_TRACK_API_KEY!}>
           {children}
         </DoowProvider>
       </body>
@@ -76,7 +76,7 @@ export function FeatureButton() {
 // lib/doow.ts
 import { initServerTracker } from '@doow/track-nextjs/server';
 
-export const tracker = initServerTracker(process.env.DOOW_API_KEY!);
+export const tracker = initServerTracker(process.env.DOOW_TRACK_API_KEY!);
 ```
 
 ### Server Actions
@@ -124,7 +124,7 @@ export async function POST(request: Request) {
 // middleware.ts
 import { ServerTracker } from '@doow/track-nextjs/server';
 
-const tracker = new ServerTracker(process.env.DOOW_API_KEY!);
+const tracker = new ServerTracker(process.env.DOOW_TRACK_API_KEY!);
 
 export async function middleware(request: NextRequest) {
   await tracker.track({
@@ -139,6 +139,16 @@ export async function middleware(request: NextRequest) {
 ```
 
 ---
+
+## Short-lived processes
+
+`ServerTracker.track` and `ServerTracker.trackBatch` send their request immediately and have no queue, so on a serverless route `await` the call before the handler returns. The client tracker queues events in the browser and sends them on its flush interval and when the page is hidden, so it needs no extra handling.
+
+## Batching and outages
+
+The client tracker sends at most 500 events per request, and a larger backlog is split into several requests that each carry their own `batch_id`, so a large flush does not exceed the API's per-minute event limit. After a transient failure (a network error, `408`, `429`, or `5xx` once the retries are used up) it stops sending, puts the unsent events back at the front of the queue, and does not flush on the event-count trigger again until one flush interval has passed. A permanent `4xx` response drops only the request it rejected. When the queue reaches `maxQueueSize` during a long outage, new events are dropped until the queue has room again, so the oldest events are the ones kept.
+
+`ServerTracker.trackBatch` has no queue and does not split anything: it sends exactly the events you pass as one request, so pass at most 500 events per call. The API rejects a request of more than 1,000 events with a non-retryable `413`.
 
 ## License
 

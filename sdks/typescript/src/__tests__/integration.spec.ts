@@ -408,8 +408,10 @@ describe('S85: Integration — SDK → HTTP pipeline', () => {
           capturedBatch = JSON.parse(payload.body.toString()) as BatchPayload;
           const rejectedId = capturedBatch.events[0]?.event_id ?? 'unknown';
           const body = JSON.stringify({
-            accepted: capturedBatch.events.slice(1).map((e) => e.event_id),
-            rejected: [{ event_id: rejectedId, reason: 'quota_exceeded' }],
+            accepted: capturedBatch.events.length - 1,
+            rejected: 1,
+            batch_id: capturedBatch.batch_id,
+            rejections: [{ event_id: rejectedId, reason: 'quota_exceeded' }],
           });
           return { status: 207, headers: {}, body };
         },

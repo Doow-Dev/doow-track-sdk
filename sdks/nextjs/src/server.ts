@@ -1,17 +1,21 @@
 import type { TrackEvent, ServerTrackerOptions } from './types';
+import {
+  NonRetryableError,
+  generateUUID,
+  isTransientStatus,
+  notify,
+  parseRetryAfterMs,
+  readBoundedText,
+  readPartialAccept,
+  sanitizeText,
+  toWireBatch,
+  type QueuedEvent,
+} from './wire';
 
-function generateUUID(): string {
-  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
-    return crypto.randomUUID();
-  }
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-    const r = (Math.random() * 16) | 0;
-    const v = c === 'x' ? r : (r & 0x3) | 0x8;
-    return v.toString(16);
-  });
-}
-
-const DEFAULT_OPTIONS: Required<Omit<ServerTrackerOptions, 'debug'>> & { debug: boolean } = {
+const DEFAULT_OPTIONS: Required<Omit<ServerTrackerOptions, 'debug' | 'onError'>> & {
+  debug: boolean;
+  onError?: (error: Error) => void;
+} = {
   endpoint: 'https://api.doow.co',
   debug: false,
   timeoutMs: 10000,
@@ -37,97 +41,63 @@ export class ServerTracker {
   }
 
   async track(event: TrackEvent): Promise<void> {
-    const enrichedEvent = {
-      event_id: generateUUID(),
-      metric: event.metric,
-      quantity: event.quantity,
-      license_id: event.licenseId,
-      unit: event.unit,
-      attribution: event.attribution,
-      timestamp: event.timestamp || new Date().toISOString(),
-    };
-
-    this.log(`Tracking: ${event.metric}`);
-
-    for (let attempt = 0; attempt <= this.options.retryCount; attempt++) {
-      try {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), this.options.timeoutMs);
-
-        const response = await fetch(`${this.options.endpoint}/telemetry/events`, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${this.apiKey}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ events: [enrichedEvent] }),
-          signal: controller.signal,
-        });
-
-        clearTimeout(timeout);
-
-        if (response.ok) {
-          this.log('Event sent successfully');
-          return;
-        }
-
-        if (response.status === 429 || response.status >= 500) {
-          await this.sleep(100 * Math.pow(2, attempt));
-          continue;
-        }
-
-        throw new Error(`HTTP ${response.status}: ${await response.text()}`);
-      } catch (error) {
-        if (attempt === this.options.retryCount) throw error;
-        await this.sleep(100 * Math.pow(2, attempt));
-      }
-    }
+    return this.trackBatch([event]);
   }
 
   async trackBatch(events: TrackEvent[]): Promise<void> {
-    const enrichedEvents = events.map((event) => ({
-      event_id: generateUUID(),
-      metric: event.metric,
-      quantity: event.quantity,
-      license_id: event.licenseId,
-      unit: event.unit,
-      attribution: event.attribution,
+    const queued: QueuedEvent[] = events.map((event) => ({
+      ...event,
+      eventId: generateUUID(),
       timestamp: event.timestamp || new Date().toISOString(),
     }));
+    const batchId = generateUUID();
+    const body = JSON.stringify(toWireBatch(batchId, queued));
 
-    this.log(`Tracking batch: ${events.length} events`);
+    this.log(`Tracking batch ${batchId}: ${queued.length} events`);
 
+    let retryAfterMs: number | undefined;
     for (let attempt = 0; attempt <= this.options.retryCount; attempt++) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), this.options.timeoutMs);
       try {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), this.options.timeoutMs);
-
         const response = await fetch(`${this.options.endpoint}/telemetry/events`, {
           method: 'POST',
           headers: {
-            'Authorization': `Bearer ${this.apiKey}`,
+            Authorization: `Bearer ${this.apiKey}`,
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({ events: enrichedEvents }),
+          body,
           signal: controller.signal,
         });
 
-        clearTimeout(timeout);
+        if (response.status === 207) {
+          const partial = await readPartialAccept(response, batchId);
+          notify(this.options.onError, partial);
+          this.log(partial.message);
+          return;
+        }
 
         if (response.ok) {
           this.log('Batch sent successfully');
           return;
         }
 
-        if (response.status === 429 || response.status >= 500) {
-          await this.sleep(100 * Math.pow(2, attempt));
-          continue;
+        if (isTransientStatus(response.status)) {
+          retryAfterMs =
+            response.status === 429 || response.status === 503
+              ? parseRetryAfterMs(response.headers.get('Retry-After'))
+              : undefined;
+          throw new Error(`HTTP ${response.status}`);
         }
 
-        throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+        throw new NonRetryableError(`HTTP ${response.status}: ${sanitizeText(await readBoundedText(response))}`);
       } catch (error) {
-        if (attempt === this.options.retryCount) throw error;
-        await this.sleep(100 * Math.pow(2, attempt));
+        const retryable = !(error instanceof NonRetryableError);
+        if (!retryable || attempt === this.options.retryCount) throw error;
+        await this.sleep(retryAfterMs ?? 100 * Math.pow(2, attempt));
+        retryAfterMs = undefined;
+      } finally {
+        clearTimeout(timeout);
       }
     }
   }

@@ -29,7 +29,7 @@ public class TrackEvent {
     private String sourceSystem;
 
     @JsonProperty("metric_tuple_hint")
-    private String metricTupleHint;
+    private MetricTupleHint metricTupleHint;
 
     @JsonProperty("attribution")
     private Map<String, Object> attribution;
@@ -66,8 +66,8 @@ public class TrackEvent {
     public String getSourceSystem() { return sourceSystem; }
     public void setSourceSystem(String sourceSystem) { this.sourceSystem = sourceSystem; }
 
-    public String getMetricTupleHint() { return metricTupleHint; }
-    public void setMetricTupleHint(String metricTupleHint) { this.metricTupleHint = metricTupleHint; }
+    public MetricTupleHint getMetricTupleHint() { return metricTupleHint; }
+    public void setMetricTupleHint(MetricTupleHint metricTupleHint) { this.metricTupleHint = metricTupleHint; }
 
     public Map<String, Object> getAttribution() { return attribution; }
     public void setAttribution(Map<String, Object> attribution) { this.attribution = attribution; }
@@ -87,7 +87,7 @@ public class TrackEvent {
         public Builder kind(EventKind kind) { event.kind = kind; return this; }
         public Builder timestamp(Instant timestamp) { event.timestamp = timestamp; return this; }
         public Builder sourceSystem(String sourceSystem) { event.sourceSystem = sourceSystem; return this; }
-        public Builder metricTupleHint(String hint) { event.metricTupleHint = hint; return this; }
+        public Builder metricTupleHint(MetricTupleHint hint) { event.metricTupleHint = hint; return this; }
         public Builder attribution(Map<String, Object> attribution) { event.attribution = attribution; return this; }
         public Builder metadata(Map<String, Object> metadata) { event.metadata = metadata; return this; }
 

@@ -1,8 +1,8 @@
 # Doow Track Go SDK
 
-[![Go Version](https://img.shields.io/badge/Go-1.21+-00ADD8?style=flat&logo=go)](https://go.dev)
+[![Go Version](https://img.shields.io/badge/Go-1.22+-00ADD8?style=flat&logo=go)](https://go.dev)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Go Reference](https://pkg.go.dev/badge/github.com/Doow-Dev/doow-track-go.svg)](https://pkg.go.dev/github.com/Doow-Dev/doow-track-go)
+[![Go Reference](https://pkg.go.dev/badge/github.com/Doow-Dev/doow-track-sdk/sdks/go.svg)](https://pkg.go.dev/github.com/Doow-Dev/doow-track-sdk/sdks/go)
 
 Official Go SDK for [Doow](https://doow.co) usage telemetry and management. Track SaaS usage, manage contracts, and monitor expenses with a simple, production-ready SDK.
 
@@ -24,7 +24,7 @@ Official Go SDK for [Doow](https://doow.co) usage telemetry and management. Trac
 ## Installation
 
 ```bash
-go get github.com/Doow-Dev/doow-track-go
+go get github.com/Doow-Dev/doow-track-sdk/sdks/go
 ```
 
 ---
@@ -38,7 +38,7 @@ package main
 
 import (
     "time"
-    doow "github.com/Doow-Dev/doow-track-go"
+    doow "github.com/Doow-Dev/doow-track-sdk/sdks/go"
 )
 
 func main() {
@@ -80,7 +80,7 @@ package main
 import (
     "context"
     "fmt"
-    doow "github.com/Doow-Dev/doow-track-go"
+    doow "github.com/Doow-Dev/doow-track-sdk/sdks/go"
 )
 
 func main() {
@@ -215,7 +215,7 @@ _ = mgmt.Apps.Delete(ctx, "app_id")
 
 ```go
 // List contracts for an app
-contracts, _ := mgmt.Contracts.List(ctx, appID, nil)
+contracts, _ := mgmt.Contracts.ListByApp(ctx, appID, nil)
 
 // Create with licenses
 contract, _ := mgmt.Contracts.Create(ctx, appID, doow.CreateContractInput{
@@ -236,7 +236,7 @@ _ = mgmt.Contracts.Delete(ctx, contractID)
 
 ```go
 // List licenses for a contract
-licenses, _ := mgmt.Licenses.List(ctx, contractID, nil)
+licenses, _ := mgmt.Licenses.ListByContract(ctx, contractID, nil)
 
 // CRUD operations
 license, _ := mgmt.Licenses.Get(ctx, licenseID)
@@ -248,7 +248,7 @@ _ = mgmt.Licenses.Delete(ctx, licenseID)
 
 ```go
 // List metrics for a license
-metrics, _ := mgmt.Metrics.List(ctx, licenseID, nil)
+metrics, _ := mgmt.Metrics.ListByLicense(ctx, licenseID, nil)
 
 // Create
 metric, _ := mgmt.Metrics.Create(ctx, licenseID, doow.CreateMetricInput{
@@ -317,6 +317,14 @@ if err != nil {
 ```
 
 ---
+
+## Short-lived processes
+
+A Lambda handler or command-line program that exits right after it handles a request can lose events that are still queued. Call `Flush()` before each handler returns and `Shutdown()` only when the process is about to exit, because later `Track` calls are dropped after `Shutdown()`. Set `FlushAt` to 1 if every event must be sent immediately.
+
+## Batching and outages
+
+A flush sends at most 500 events per request, and a larger backlog is split into several requests that each carry their own `batch_id`, so a large flush does not exceed the API's per-minute event limit. After a transient failure (a network error, `408`, `429`, or `5xx` once the retries are used up) the tracker stops sending, puts the unsent events back at the front of the queue, and does not flush on the event-count trigger again until one flush interval has passed. A permanent `4xx` response drops only the request it rejected. When the queue reaches `MaxQueueSize`, the oldest event is dropped to make room for each new one, so the newest events are the ones kept.
 
 ## License
 
