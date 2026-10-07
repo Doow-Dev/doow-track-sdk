@@ -55,7 +55,7 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for commit conventions and release proc
 
 ## Releasing
 
-A release is a git tag named `<sdk>-vX.Y.Z`, where `<sdk>` is the folder name under `sdks/` and `X.Y.Z` is the version in that SDK's package file. Bump the version and merge it before you tag. Two SDKs differ. Go's module lives in a subdirectory of this repository, so it follows Go's own convention and its tags are `sdks/go/vX.Y.Z`. Swift also needs a bare `vX.Y.Z` tag on every release, because Swift Package Manager resolves only plain semver and ignores the prefixed form; that bare tag series is reserved for Swift and means nothing for the other SDKs.
+A release is a git tag named `<sdk>-vX.Y.Z`, where `<sdk>` is the folder name under `sdks/` and `X.Y.Z` is the version in that SDK's package file. Bump the version and merge it before you tag. Two things differ. Go's module lives in a subdirectory of this repository, so it follows Go's own convention and its tags are `sdks/go/vX.Y.Z`. Swift and PHP also need a bare `vX.Y.Z` tag on every release, because Swift Package Manager and Packagist both read versions from plain semver on the repository and ignore the prefixed form. That bare tag series exists for those two ecosystems and means nothing for the others.
 
 ```bash
 # Release TypeScript SDK 1.0.0
