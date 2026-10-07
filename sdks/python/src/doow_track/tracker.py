@@ -103,7 +103,7 @@ def _build_payload(batch_id: str, events: list[SerializedEvent]) -> dict:
         measurement: dict[str, Any] = {"metric_name": e.metric, "quantity": e.quantity}
         if hint:
             measurement["metric_tuple_hint"] = hint
-        wire_events.append({
+        wire_event: dict[str, Any] = {
             "event_id": e.event_id,
             "license_id": e.license_id,
             "occurred_at": e.timestamp,
@@ -112,7 +112,10 @@ def _build_payload(batch_id: str, events: list[SerializedEvent]) -> dict:
             "attribution": e.attribution,
             "metadata": e.metadata,
             "measurements": [measurement],
-        })
+        }
+        if e.unit:
+            wire_event["unit"] = e.unit
+        wire_events.append(wire_event)
     return {"batch_id": batch_id, "sdk_version": SDK_VERSION, "events": wire_events}
 
 @dataclass

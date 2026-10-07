@@ -67,6 +67,33 @@ def test_202_batch_has_envelope_and_object_tuple_hint(httpx_mock):
     assert errors == []
 
 
+def test_a_declared_unit_is_sent_at_event_level(httpx_mock):
+    httpx_mock.add_response(status_code=202, json={"accepted": 1, "rejected": 0})
+    errors: list = []
+    tracker = Tracker("dk_test", _options(errors))
+    tracker.track(
+        TrackEvent(metric="storage", quantity=5, license_id="lic_1", unit="GB")
+    )
+    tracker.flush()
+    tracker._shutdown.set()
+
+    event = json.loads(httpx_mock.get_requests()[0].content)["events"][0]
+    assert event["unit"] == "GB"
+    assert errors == []
+
+
+def test_an_event_without_a_unit_sends_no_unit_key(httpx_mock):
+    httpx_mock.add_response(status_code=202, json={"accepted": 1, "rejected": 0})
+    errors: list = []
+    tracker = Tracker("dk_test", _options(errors))
+    tracker.track(TrackEvent(metric="api_calls", quantity=1, license_id="lic_1"))
+    tracker.flush()
+    tracker._shutdown.set()
+
+    event = json.loads(httpx_mock.get_requests()[0].content)["events"][0]
+    assert "unit" not in event
+
+
 def test_207_reports_rejections_and_is_not_retried(httpx_mock):
     httpx_mock.add_response(status_code=207, json=PARTIAL_BODY)
     errors: list = []
