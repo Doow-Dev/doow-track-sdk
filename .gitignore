@@ -4,3 +4,7 @@ coverage/
 *.tsbuildinfo
 .yarn/cache
 .yarn/install-state.gz
+
+# Swift Package Manager, resolved from the root Package.swift
+.build/
+.swiftpm/

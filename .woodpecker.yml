@@ -145,13 +145,19 @@ steps:
         path: "sdks/php/**"
 
   # --- Swift SDK ---
+  # Runs from the repository root so the root Package.swift, which is the manifest a consumer
+  # actually resolves, is the one under test. The previous form also swallowed failures with
+  # `|| true`, so a broken Swift SDK could never fail CI.
   - name: ci-swift
     image: swift:5.9
     commands:
-      - cd sdks/swift && swift build && swift test || true
+      - swift build
+      - swift test
     when:
       - event: [push, pull_request]
-        path: "sdks/swift/**"
+        path:
+          - "sdks/swift/**"
+          - "Package.swift"
 
 # ============================================================================
 # PUBLISH — Deploy to registries on tag

@@ -25,8 +25,14 @@ Official Swift SDK for [Doow](https://doow.co) usage telemetry and management.
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/Doow-Dev/doow-track-swift.git", from: "0.1.0")
+    .package(url: "https://github.com/Doow-Dev/doow-track-sdk.git", from: "0.1.0")
 ]
+```
+
+The package lives in a monorepo, so add the product by repository when you depend on it from a target:
+
+```swift
+.target(name: "MyApp", dependencies: [.product(name: "DoowTrack", package: "doow-track-sdk")])
 ```
 
 ---
