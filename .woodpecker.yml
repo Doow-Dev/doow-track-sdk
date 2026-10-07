@@ -169,6 +169,30 @@ steps:
   # Woodpecker publishes TypeScript. The image step sets context to the repo root because the
   # Dockerfile copies sdks/typescript/dist/sidecar.cjs, which only exists after a build, so the
   # bundle is built first. npm publishes last: a published npm version can never be reused.
+  # The first step stops the pipeline before anything is published when the tag is not a plain
+  # X.Y.Z version (a prerelease would take the latest tags) or does not match the package.
+  - name: verify-typescript-version
+    image: node:22
+    commands:
+      - |
+        node -e "
+        const tag = process.env.CI_COMMIT_TAG.replace('typescript-v', '');
+        const version = require('./sdks/typescript/package.json').version;
+        const parts = tag.split('.');
+        const plain = parts.length === 3 && parts.every((part) => String(Number(part)) === part);
+        if (!plain) {
+          console.error('Tag version ' + tag + ' must be plain X.Y.Z, because a prerelease would take the latest tags.');
+          process.exit(1);
+        }
+        if (tag !== version) {
+          console.error('Tag version ' + tag + ' does not match the sdks/typescript/package.json version ' + version + '.');
+          process.exit(1);
+        }
+        "
+    when:
+      - event: tag
+        ref: refs/tags/typescript-v*
+
   - name: build-typescript-sidecar
     image: node:22
     commands:
