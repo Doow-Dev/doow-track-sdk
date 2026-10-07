@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.1.1] — 2026-10-07
+
 ### Batch size
 
 - A `408` request timeout is retried like `429` and `5xx`, an unreadable error body no longer turns a permanent `4xx` into a retry, and an interrupted flush requeues the chunks it did not send. A shutdown during an outage reports how many events it dropped.
