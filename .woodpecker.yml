@@ -225,6 +225,57 @@ steps:
       - event: tag
         ref: refs/tags/typescript-v*
 
+  # --- TypeScript CLI binaries → GitHub Release ---
+  # Ported from the retired GitHub Actions workflow, which needed five native runners because it
+  # smoke-tested each binary on its own platform. pkg cross-compiles every target from Linux, so
+  # one agent builds all five, at the cost of only being able to execute the Linux x64 one. All
+  # five wrap the same cli.cjs, so a broken bundle still fails that smoke test.
+  #
+  # The build step is load-bearing: the version is baked into the bundle at rollup time, so
+  # packaging a stale dist/ ships the previous version under the new tag.
+  - name: publish-typescript-cli
+    image: node:24
+    commands:
+      - |
+        set -e
+        npm ci
+        npm run build
+        VERSION=$(node -p "require('./sdks/typescript/package.json').version")
+        mkdir -p release-assets
+        for pair in linux-x64:node24-linux-x64 linux-arm64:node24-linux-arm64 darwin-x64:node24-macos-x64 darwin-arm64:node24-macos-arm64 windows-x64.exe:node24-win-x64; do
+          TARGET="${pair%%:*}"
+          PKG_TARGET="${pair#*:}"
+          npx --no-install pkg sdks/typescript/dist/cli.cjs --target "$PKG_TARGET" --output "release-assets/doow-track-$TARGET"
+          case "$TARGET" in *.exe) ;; *) chmod +x "release-assets/doow-track-$TARGET" ;; esac
+          ( cd release-assets && sha256sum "doow-track-$TARGET" > "doow-track-$TARGET.sha256" )
+        done
+
+        cd release-assets
+        sha256sum -c doow-track-linux-x64.sha256
+        test "$(./doow-track-linux-x64 --version)" = "doow-track v$VERSION"
+        ./doow-track-linux-x64 --help | grep -q 'Usage: doow-track'
+        printf '{"metric":"release_smoke","quantity":1,"license_id":"lic_smoke"}\n' | env DOOW_TRACK_DISABLED=true ./doow-track-linux-x64 --api-key dk_smoke
+
+        RELEASE_ID=$(curl -fsS -X POST \
+          -H "Authorization: Bearer $GITHUB_TOKEN" \
+          -H "Accept: application/vnd.github+json" \
+          "https://api.github.com/repos/Doow-Dev/doow-track-sdk/releases" \
+          -d "{\"tag_name\":\"$CI_COMMIT_TAG\",\"name\":\"@doow/track v$VERSION\"}" \
+          | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>console.log(JSON.parse(s).id))")
+        for asset in doow-track-*; do
+          curl -fsS -X POST \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "Content-Type: application/octet-stream" \
+            --data-binary "@$asset" \
+            "https://uploads.github.com/repos/Doow-Dev/doow-track-sdk/releases/$RELEASE_ID/assets?name=$asset"
+        done
+    environment:
+      GITHUB_TOKEN:
+        from_secret: github_token
+    when:
+      - event: tag
+        ref: refs/tags/typescript-v*
+
   - name: publish-typescript
     image: node:22
     commands:
