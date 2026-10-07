@@ -320,22 +320,22 @@ steps:
         ref: refs/tags/java-v*
 
   # --- Kotlin → Maven Central (Central Portal) ---
-  # The Vanniktech plugin reads its credentials from ORG_GRADLE_PROJECT_* environment variables,
-  # and maven_username/maven_password must be a Central Portal user token rather than an account
-  # login. publishAndReleaseToMavenCentral both uploads and releases, matching the autoPublish
-  # setting the Java POM uses.
+  # The Central Portal Publisher API takes a user token rather than an account login, and the
+  # build base64-encodes it from these two values. publishingType is AUTOMATIC, matching the
+  # autoPublish setting the Java POM uses. Since plugin 1.3.0 the portal task stages and uploads
+  # by itself, so it does not need a preceding `gradle publish`.
   - name: publish-kotlin
     image: gradle:8-jdk17
     commands:
-      - cd sdks/kotlin && gradle publishAndReleaseToMavenCentral
+      - cd sdks/kotlin && gradle publishToMavenCentralPortal
     environment:
-      ORG_GRADLE_PROJECT_mavenCentralUsername:
+      MAVEN_USERNAME:
         from_secret: maven_username
-      ORG_GRADLE_PROJECT_mavenCentralPassword:
+      MAVEN_PASSWORD:
         from_secret: maven_password
-      ORG_GRADLE_PROJECT_signingInMemoryKey:
+      MAVEN_SIGNING_KEY:
         from_secret: maven_signing_key
-      ORG_GRADLE_PROJECT_signingInMemoryKeyPassword:
+      MAVEN_SIGNING_PASSWORD:
         from_secret: maven_signing_password
     when:
       - event: tag

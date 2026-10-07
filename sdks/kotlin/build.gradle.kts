@@ -1,8 +1,12 @@
+import java.util.Base64
+
 plugins {
     kotlin("jvm") version "1.9.20"
     kotlin("plugin.serialization") version "1.9.20"
     `java-library`
-    id("com.vanniktech.maven.publish") version "0.30.0"
+    `maven-publish`
+    signing
+    id("tech.yanand.maven-central-publish") version "1.3.0"
 }
 
 group = "co.doow"
@@ -31,37 +35,59 @@ kotlin {
     jvmToolchain(17)
 }
 
-// Publishes to the Sonatype Central Portal. The plugin supplies the sources and javadoc jars that
-// Central requires, and signs every artifact. Credentials and the signing key arrive as
-// ORG_GRADLE_PROJECT_* environment variables from CI; without them the configuration still
-// resolves so that a plain `gradle build` works on a developer machine.
-mavenPublishing {
-    publishToMavenCentral()
-    signAllPublications()
+// Maven Central requires sources and javadoc jars alongside the main artifact.
+java {
+    withSourcesJar()
+    withJavadocJar()
+}
 
-    coordinates("co.doow", "doow-track-kotlin", version.toString())
-
-    pom {
-        name.set("Doow Track Kotlin SDK")
-        description.set("Official Kotlin SDK for Doow usage telemetry and management")
-        url.set("https://github.com/Doow-Dev/doow-track-sdk")
-        licenses {
-            license {
-                name.set("MIT License")
-                url.set("https://opensource.org/licenses/MIT")
+publishing {
+    publications {
+        create<MavenPublication>("mavenJava") {
+            from(components["java"])
+            pom {
+                name.set("Doow Track Kotlin SDK")
+                description.set("Official Kotlin SDK for Doow usage telemetry and management")
+                url.set("https://github.com/Doow-Dev/doow-track-sdk")
+                licenses {
+                    license {
+                        name.set("MIT License")
+                        url.set("https://opensource.org/licenses/MIT")
+                    }
+                }
+                developers {
+                    developer {
+                        id.set("doow")
+                        name.set("Doow")
+                        url.set("https://github.com/Doow-Dev")
+                    }
+                }
+                scm {
+                    url.set("https://github.com/Doow-Dev/doow-track-sdk")
+                    connection.set("scm:git:git://github.com/Doow-Dev/doow-track-sdk.git")
+                    developerConnection.set("scm:git:ssh://git@github.com/Doow-Dev/doow-track-sdk.git")
+                }
             }
-        }
-        developers {
-            developer {
-                id.set("doow")
-                name.set("Doow")
-                url.set("https://github.com/Doow-Dev")
-            }
-        }
-        scm {
-            url.set("https://github.com/Doow-Dev/doow-track-sdk")
-            connection.set("scm:git:git://github.com/Doow-Dev/doow-track-sdk.git")
-            developerConnection.set("scm:git:ssh://git@github.com/Doow-Dev/doow-track-sdk.git")
         }
     }
+}
+
+// Signing is skipped when no key is present so a plain `gradle build` still works on a machine
+// without the release key. CI always supplies one.
+val signingKey: String? = System.getenv("MAVEN_SIGNING_KEY")
+signing {
+    if (!signingKey.isNullOrBlank()) {
+        useInMemoryPgpKeys(signingKey, System.getenv("MAVEN_SIGNING_PASSWORD"))
+        sign(publishing.publications["mavenJava"])
+    }
+}
+
+// The Central Portal Publisher API takes a Base64-encoded "username:password" pair, where the
+// credentials are a Portal user token rather than an account login.
+mavenCentral {
+    val user = System.getenv("MAVEN_USERNAME").orEmpty()
+    val password = System.getenv("MAVEN_PASSWORD").orEmpty()
+    authToken = Base64.getEncoder().encodeToString("$user:$password".toByteArray())
+    publishingType = "AUTOMATIC"
+    maxWait = 600
 }
