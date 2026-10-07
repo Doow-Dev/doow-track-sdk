@@ -100,6 +100,33 @@ Every other attribute is kept as attribution metadata on the event, except the s
 | Gauge | Accepted. Each data point is treated as a quantity to add, not as a level, so only send a gauge for values that you want summed |
 | Histogram, ExponentialHistogram, Summary | Not accepted. These metrics are skipped and the rest of the request is still processed |
 
+## Units
+
+An OTLP metric carries a `unit`, written as a UCUM code such as `By` for bytes, `GBy` for gigabytes, `s` for seconds, or `{request}` for a count. Doow records it on the measurement exactly as the metric sends it, after removing control characters and cutting it to 64 characters, and it ignores an empty unit. It does not convert values or compare the unit with the unit of the Doow metric, so send each data point in the unit the Doow metric is defined with.
+
+For example, a Doow metric `data_transfer_gb` that is defined in GB should receive data points that are already in gigabytes, with the unit set to match:
+
+```json
+{
+  "name": "data_transfer_gb",
+  "unit": "GBy",
+  "sum": {
+    "dataPoints": [{
+      "asDouble": 2.5,
+      "startTimeUnixNano": "1700000000000000000",
+      "timeUnixNano": "1700000060000000000",
+      "attributes": [
+        {"key": "license_id", "value": {"stringValue": "lic_test_123"}}
+      ]
+    }],
+    "aggregationTemporality": 1,
+    "isMonotonic": true
+  }
+}
+```
+
+Doow records 2.5 against `data_transfer_gb` and stores the unit `GBy`. If your instrument reports bytes (`By`), convert to gigabytes in the collector or the application first, because otherwise Doow records the byte count as a number of GB. See [Units](../README.md#units) for the same rule for SDK events.
+
 ## Temporality
 
 Delta temporality (`aggregationTemporality: 1`) is the simplest choice, because each data point is used as the quantity for its interval.

@@ -59,6 +59,16 @@ All options can be overridden via environment variables. Env vars take precedenc
 | `DOOW_TRACK_FLUSH_INTERVAL` | `flushInterval` | Milliseconds, e.g. `5000` |
 | `DOOW_TRACK_ATTRIBUTION` | `attribution` | JSON string, e.g. `{"env":"prod"}` |
 
+## Units
+
+`quantity` must be in the unit the metric is defined with in Doow, so convert before you send. The optional `unit` records the unit your code used, and Doow stores it as sent without converting it or comparing it with the metric's unit. For a metric `data_transfer_gb` defined in GB, send `2.5` with `GB`, not the number of bytes:
+
+```ts
+meter.track({ metric: 'data_transfer_gb', quantity: 2.5, unit: 'GB', license_id: 'lic_...' });
+```
+
+Sending `2500000000` with `bytes` to the same metric would record 2.5 billion GB. The CLI, the daemon, and the sidecar pass `unit` through in the same way, and [Units](../../README.md#units) describes how Doow reads the field.
+
 ## Serverless guide
 
 Long-lived Node.js processes use the timer-based auto-flush. In serverless environments (Lambda, Vercel, Azure Functions) the process exits after each invocation, so you need guaranteed flush before return.
@@ -144,8 +154,11 @@ See the [Sidecar guide](../../docs/sidecar.md) for every environment variable, t
 
 ```json
 {"metric":"api_calls","quantity":1,"license_id":"lic_..."}
-{"metric":"tokens","quantity":512,"license_id":"lic_...","unit":"tokens"}
+{"metric":"tokens_generated","quantity":1500,"unit":"tokens","license_id":"lic_..."}
+{"metric":"data_transfer_gb","quantity":2.5,"unit":"GB","license_id":"lic_..."}
 ```
+
+The unit is the one the Doow metric is defined with, and `quantity` is already in it, as [Units](#units) explains.
 
 ## CLI usage
 

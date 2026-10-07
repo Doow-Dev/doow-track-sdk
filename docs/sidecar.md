@@ -140,7 +140,7 @@ Each line is a JSON object with these fields. Only the first three are required.
 | `metric` | string | The metric being measured, for example `api_calls` |
 | `quantity` | number | The amount measured |
 | `license_id` | string | The license the event belongs to |
-| `unit` | string | Optional unit, for example `tokens` |
+| `unit` | string | Optional. The unit your `quantity` is in, for example `GB`. Doow stores it as sent and does not convert it, so send `quantity` in the unit the metric is defined with. See [Units](../README.md#units) |
 | `kind` | string | `USAGE` (default) or `ADJUSTMENT` |
 | `timestamp` | string | ISO 8601 time of the event. Defaults to the time the sidecar receives it |
 | `source_system` | string | Optional source name. Defaults to `sdk` |
@@ -150,8 +150,11 @@ Each line is a JSON object with these fields. Only the first three are required.
 
 ```json
 {"metric":"api_calls","quantity":1,"license_id":"lic_abc123"}
-{"metric":"tokens","quantity":512,"license_id":"lic_abc123","unit":"tokens","attribution":{"model":"gpt-4"}}
+{"metric":"tokens_generated","quantity":1500,"unit":"tokens","license_id":"lic_abc123","attribution":{"model":"gpt-4"}}
+{"metric":"data_transfer_gb","quantity":2.5,"unit":"GB","license_id":"lic_abc123"}
 ```
+
+The first line has no unit, which is allowed. The second records 1,500 against `tokens_generated`, a metric defined in tokens. The third records 2.5 against `data_transfer_gb`, a metric defined in GB, so the value is sent as 2.5 and not as a number of bytes, because Doow does not convert quantities. See [Units](../README.md#units) for what happens when the unit and the metric disagree.
 
 ## Health check
 

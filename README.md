@@ -25,6 +25,30 @@ Official SDKs for Doow usage telemetry across all platforms.
 
 See individual SDK READMEs in `sdks/<language>/README.md` for installation instructions.
 
+## Units
+
+A metric in Doow can have a unit, such as `GB`, `hours`, `tokens`, or `API calls`, which you set on the metric when you create it (the management API calls it `usage_custom_unit_label`). Send `quantity` already converted to the metric's unit, because Doow records the number you send as it is and does not convert it.
+
+The optional `unit` field records the unit your code used for `quantity`. Doow stores it with the measurement exactly as you send it, after removing control characters, trimming whitespace, and cutting it to 64 characters, and it does not convert it or compare it with the metric's unit, so set it to the unit the metric is defined with.
+
+**Example 1: a count.** The metric `tokens_generated` is defined in tokens, and one request produced 1,500 tokens.
+
+```json
+{"metric":"tokens_generated","quantity":1500,"unit":"tokens","license_id":"lic_abc123"}
+```
+
+Doow records 1,500 against `tokens_generated`, and the stored unit is `tokens`.
+
+**Example 2: a size.** The metric `data_transfer_gb` is defined in GB, and one export moved 2.5 GB. Send `2.5`, not the number of bytes.
+
+```json
+{"metric":"data_transfer_gb","quantity":2.5,"unit":"GB","license_id":"lic_abc123"}
+```
+
+Sending `"quantity":2500000000` with `"unit":"bytes"` to the same metric would record 2.5 billion GB. Doow keeps the `bytes` unit with the measurement but does not notice that it differs from the metric's unit, so convert before you send.
+
+The same rule applies to [OTLP](docs/otlp.md#units), the [daemon](docs/daemon.md#event-format), and the [sidecar](docs/sidecar.md#event-format), which all pass `unit` through unchanged.
+
 ## Batch size
 
 A batch may contain at most 1,000 events, which is the per-minute event limit for an organization. The API rejects a larger batch with a non-retryable `413` and `error: batch_too_large`, because it can never fit under the limit. Every SDK that queues events sends at most 500 events per request and splits a larger flush into several requests, each with its own `batch_id`, so you do not need to split batches yourself. The one exception is the Next.js `ServerTracker.trackBatch`, which sends exactly the events you pass as a single request. If you call the HTTP API directly, split batches client-side.
