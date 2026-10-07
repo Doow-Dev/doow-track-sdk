@@ -64,12 +64,13 @@ struct WireEvent: Encodable {
     let occurredAt: Date
     let sourceSystem: String
     let kind: EventKind
+    let unit: String?
     let attribution: [String: AnyCodable]?
     let metadata: [String: AnyCodable]?
     let measurements: [WireMeasurement]
 
     enum CodingKeys: String, CodingKey {
-        case kind, attribution, metadata, measurements
+        case kind, unit, attribution, metadata, measurements
         case eventId = "event_id"
         case licenseId = "license_id"
         case occurredAt = "occurred_at"
@@ -320,6 +321,7 @@ public class Tracker {
                     occurredAt: e.timestamp ?? Date(),
                     sourceSystem: e.sourceSystem.flatMap { $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : $0 } ?? "sdk",
                     kind: e.kind,
+                    unit: e.unit,
                     attribution: e.attribution,
                     metadata: e.metadata,
                     measurements: [
