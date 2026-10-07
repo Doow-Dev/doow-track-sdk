@@ -2,11 +2,11 @@ plugins {
     kotlin("jvm") version "1.9.20"
     kotlin("plugin.serialization") version "1.9.20"
     `java-library`
-    `maven-publish`
+    id("com.vanniktech.maven.publish") version "0.37.0"
 }
 
 group = "co.doow"
-version = "0.1.0"
+version = "0.1.1"
 
 repositories {
     mavenCentral()
@@ -31,21 +31,37 @@ kotlin {
     jvmToolchain(17)
 }
 
-publishing {
-    publications {
-        create<MavenPublication>("maven") {
-            from(components["java"])
-            pom {
-                name.set("Doow Track Kotlin SDK")
-                description.set("Official Kotlin SDK for Doow usage telemetry and management")
-                url.set("https://github.com/Doow-Dev/doow-track-sdk")
-                licenses {
-                    license {
-                        name.set("MIT License")
-                        url.set("https://opensource.org/licenses/MIT")
-                    }
-                }
+// Publishes to the Sonatype Central Portal. The plugin supplies the sources and javadoc jars that
+// Central requires, and signs every artifact. Credentials and the signing key arrive as
+// ORG_GRADLE_PROJECT_* environment variables from CI; without them the configuration still
+// resolves so that a plain `gradle build` works on a developer machine.
+mavenPublishing {
+    publishToMavenCentral(true)
+    signAllPublications()
+
+    coordinates("co.doow", "doow-track-kotlin", version.toString())
+
+    pom {
+        name.set("Doow Track Kotlin SDK")
+        description.set("Official Kotlin SDK for Doow usage telemetry and management")
+        url.set("https://github.com/Doow-Dev/doow-track-sdk")
+        licenses {
+            license {
+                name.set("MIT License")
+                url.set("https://opensource.org/licenses/MIT")
             }
+        }
+        developers {
+            developer {
+                id.set("doow")
+                name.set("Doow")
+                url.set("https://github.com/Doow-Dev")
+            }
+        }
+        scm {
+            url.set("https://github.com/Doow-Dev/doow-track-sdk")
+            connection.set("scm:git:git://github.com/Doow-Dev/doow-track-sdk.git")
+            developerConnection.set("scm:git:ssh://git@github.com/Doow-Dev/doow-track-sdk.git")
         }
     }
 }

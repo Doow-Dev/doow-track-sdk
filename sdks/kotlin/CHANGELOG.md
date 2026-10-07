@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## [0.1.1] — 2026-10-07
+
+This is the first release published to Maven Central. Earlier versions were never uploaded, so `co.doow:doow-track-kotlin` did not previously resolve.
+
 ### Batch size
 
 - A `408` request timeout is retried like `429` and `5xx`, a chunk that cannot be serialized is dropped on its own, an unreadable error body no longer turns a permanent `4xx` into a retry, and an interrupted flush requeues the chunks it did not send. A shutdown during an outage reports how many events it dropped.
