@@ -106,10 +106,12 @@ steps:
         path: "sdks/java/**"
 
   # --- Kotlin SDK ---
+  # No `|| true` here: the mask hid real failures. The build skips signing when no key is
+  # present, so this runs on a plain push without any release secret.
   - name: ci-kotlin
     image: gradle:8-jdk17
     commands:
-      - cd sdks/kotlin && gradle build || true
+      - cd sdks/kotlin && gradle build
     when:
       - event: [push, pull_request]
         path: "sdks/kotlin/**"
