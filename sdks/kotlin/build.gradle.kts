@@ -2,7 +2,7 @@ plugins {
     kotlin("jvm") version "1.9.20"
     kotlin("plugin.serialization") version "1.9.20"
     `java-library`
-    id("com.vanniktech.maven.publish") version "0.37.0"
+    id("com.vanniktech.maven.publish") version "0.30.0"
 }
 
 group = "co.doow"
@@ -36,7 +36,7 @@ kotlin {
 // ORG_GRADLE_PROJECT_* environment variables from CI; without them the configuration still
 // resolves so that a plain `gradle build` works on a developer machine.
 mavenPublishing {
-    publishToMavenCentral(true)
+    publishToMavenCentral()
     signAllPublications()
 
     coordinates("co.doow", "doow-track-kotlin", version.toString())
