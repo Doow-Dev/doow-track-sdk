@@ -41,6 +41,16 @@ A function or script that exits right after it handles a request can lose events
 
 The `doow-track` executable is also released for Linux x64/arm64, macOS x64/arm64, and Windows Server x64. It accepts newline-delimited JSON events, so applications in any supported language can use it without installing Node.js or a language SDK on the server. See the [daemon guide](docs/daemon.md) for downloads, configuration, and service setup.
 
+## Sidecar image
+
+The same input is available as a container image, for platforms where installing an executable is awkward:
+
+```sh
+docker pull ghcr.io/doow-dev/doow-track-sidecar:0.1.13
+```
+
+The image is private, so pull it from an environment authenticated to GHCR with package read access. Each release publishes three tags: the full version, `0`, and `latest`. Pin the full version in production, because the input contract changes between releases: 0.1.12 moved the container to a non-root user on Node 22 and began enforcing the 1 MiB line limit on file input, so a floating tag changes how a running deployment behaves without anyone upgrading it. The [sidecar guide](docs/sidecar.md) covers Compose and Kubernetes, the input modes, and the health check.
+
 ## Guides for any language
 
 These guides do not depend on a particular SDK:

@@ -125,7 +125,7 @@ services:
       - DOOW_SIDECAR_PORT=9091
 
   doow-sidecar:
-    image: ghcr.io/doow-dev/doow-track-sidecar:latest
+    image: ghcr.io/doow-dev/doow-track-sidecar:0.1.13   # pin the full version; the input contract changes between releases
     environment:
       - DOOW_TRACK_API_KEY=dk_your_api_key
       - DOOW_TRACK_ENDPOINT=https://api.doow.co

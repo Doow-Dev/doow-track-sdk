@@ -138,6 +138,30 @@ Values are resolved in this order, and the first match wins:
 
 Each line must be one JSON object. A malformed line is written to stderr and skipped. The TCP listener has no authentication, so bind it to a private network or restrict it with a firewall rule.
 
+## Event format
+
+Each line is a JSON object with these fields, the same ones the sidecar takes. Only the first three are required.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `metric` | string | The metric being measured, for example `api_calls` |
+| `quantity` | number | The amount measured |
+| `license_id` | string | The license the event belongs to |
+| `unit` | string | Optional unit, for example `tokens` |
+| `kind` | string | `USAGE` (default) or `ADJUSTMENT` |
+| `timestamp` | string | ISO 8601 time of the event. Defaults to the time the daemon receives it |
+| `source_system` | string | Optional source name. Defaults to `sdk` |
+| `metric_tuple_hint` | object | Optional `{ "app_name", "license_name", "metric_name" }` used to resolve the metric on ingest |
+| `attribution` | object | Optional string, number, or boolean values merged with `DOOW_TRACK_ATTRIBUTION` |
+| `metadata` | object | Optional free-form fields |
+
+```json
+{"metric":"api_calls","quantity":1,"license_id":"lic_abc123"}
+{"metric":"tokens","quantity":512,"license_id":"lic_abc123","unit":"tokens","attribution":{"model":"gpt-4"}}
+```
+
+Do not send the wire envelope yourself. The daemon builds the `event_id`, `occurred_at`, `source_system`, and `measurements` that the ingest API requires from these fields.
+
 ## Linux systemd unit file
 
 Create the service account and install the executable first:
