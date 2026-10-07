@@ -1,3 +1,3 @@
-module github.com/Doow-Dev/doow-track-go
+module github.com/Doow-Dev/doow-track-sdk/sdks/go
 
 go 1.26.5

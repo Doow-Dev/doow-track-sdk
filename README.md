@@ -10,7 +10,7 @@ Official SDKs for Doow usage telemetry across all platforms.
 | React | `@doow/track-react` | npm |
 | Next.js | `@doow/track-nextjs` | npm |
 | React Native | `@doow/track-react-native` | npm |
-| Go | `github.com/Doow-Dev/doow-track-go` | pkg.go.dev |
+| Go | `github.com/Doow-Dev/doow-track-sdk/sdks/go` | pkg.go.dev |
 | Python | `doow-track` | PyPI |
 | Rust | `doow-track` | crates.io |
 | .NET | `DoowTrack` | NuGet |
@@ -55,7 +55,7 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for commit conventions and release proc
 
 ## Releasing
 
-A release is a git tag named `<sdk>-vX.Y.Z`, where `<sdk>` is the folder name under `sdks/` and `X.Y.Z` is the version in that SDK's package file. Bump the version and merge it before you tag.
+A release is a git tag named `<sdk>-vX.Y.Z`, where `<sdk>` is the folder name under `sdks/` and `X.Y.Z` is the version in that SDK's package file. Bump the version and merge it before you tag. The one exception is Go, whose module lives in a subdirectory of this repository and therefore follows Go's own convention: its tags are `sdks/go/vX.Y.Z`.
 
 ```bash
 # Release TypeScript SDK 1.0.0

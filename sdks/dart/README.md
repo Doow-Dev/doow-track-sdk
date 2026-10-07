@@ -32,7 +32,9 @@ Or from Git:
 dependencies:
   doow_track:
     git:
-      url: https://github.com/Doow-Dev/doow-track-dart.git
+      url: https://github.com/Doow-Dev/doow-track-sdk.git
+      path: sdks/dart
+      ref: dart-v0.1.0
 ```
 
 ---

@@ -2,7 +2,7 @@
 
 [![Go Version](https://img.shields.io/badge/Go-1.26+-00ADD8?style=flat&logo=go)](https://go.dev)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Go Reference](https://pkg.go.dev/badge/github.com/Doow-Dev/doow-track-go.svg)](https://pkg.go.dev/github.com/Doow-Dev/doow-track-go)
+[![Go Reference](https://pkg.go.dev/badge/github.com/Doow-Dev/doow-track-sdk/sdks/go.svg)](https://pkg.go.dev/github.com/Doow-Dev/doow-track-sdk/sdks/go)
 
 Official Go SDK for [Doow](https://doow.co) usage telemetry and management. Track SaaS usage, manage contracts, and monitor expenses with a simple, production-ready SDK.
 
@@ -24,7 +24,7 @@ Official Go SDK for [Doow](https://doow.co) usage telemetry and management. Trac
 ## Installation
 
 ```bash
-go get github.com/Doow-Dev/doow-track-go
+go get github.com/Doow-Dev/doow-track-sdk/sdks/go
 ```
 
 ---
@@ -38,7 +38,7 @@ package main
 
 import (
     "time"
-    doow "github.com/Doow-Dev/doow-track-go"
+    doow "github.com/Doow-Dev/doow-track-sdk/sdks/go"
 )
 
 func main() {
@@ -80,7 +80,7 @@ package main
 import (
     "context"
     "fmt"
-    doow "github.com/Doow-Dev/doow-track-go"
+    doow "github.com/Doow-Dev/doow-track-sdk/sdks/go"
 )
 
 func main() {
