@@ -10,9 +10,9 @@ All commits must follow the [Conventional Commits](https://www.conventionalcommi
 
 ### Types
 
-- `fix` - Bug fix (triggers patch release: 0.0.X)
-- `feat` - New feature (triggers minor release: 0.X.0)
-- `chore` - Maintenance tasks (no release)
+- `fix` - Bug fix
+- `feat` - New feature
+- `chore` - Maintenance tasks
 - `docs` - Documentation only
 - `refactor` - Code change that neither fixes a bug nor adds a feature
 - `test` - Adding or updating tests
@@ -52,4 +52,4 @@ Whoever cuts the next release should treat this as a major version bump.
 
 ## Releasing
 
-Commit messages do not trigger or version a release. A release is a git tag named `<sdk>-vX.Y.Z`, as described in the Releasing section of the [README](./README.md). Bump the version in the SDK's package file and merge it first. The TypeScript workflow rejects a tag that does not match that version.
+Commit messages do not trigger or version a release. A release is a git tag named `<sdk>-vX.Y.Z`, as described in the Releasing section of the [README](./README.md). Bump the version in the SDK's package file and merge it first. The TypeScript pipelines reject a tag that is not plain `X.Y.Z` or that does not match that version.

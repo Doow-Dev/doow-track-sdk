@@ -8,7 +8,8 @@
 // Version resolution matters here: SPM derives the package version from the tags on this
 // repository, and it only recognises plain semver, stripping a leading lowercase "v". The
 // per-SDK tags every other SDK uses (<sdk>-vX.Y.Z) are invisible to it, so a Swift release must
-// also carry a bare vX.Y.Z tag. That tag is reserved for Swift.
+// also carry a bare vX.Y.Z tag. Packagist reads the same bare tags for the PHP package, so Swift
+// and PHP share one version line and each release of either needs a version nobody has used.
 import PackageDescription
 
 let package = Package(

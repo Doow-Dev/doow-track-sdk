@@ -55,7 +55,7 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for commit conventions and release proc
 
 ## Releasing
 
-A release is a git tag named `<sdk>-vX.Y.Z`, where `<sdk>` is the folder name under `sdks/` and `X.Y.Z` is the version in that SDK's package file. Bump the version and merge it before you tag. Two things differ. Go's module lives in a subdirectory of this repository, so it follows Go's own convention and its tags are `sdks/go/vX.Y.Z`. Swift and PHP also need a bare `vX.Y.Z` tag on every release, because Swift Package Manager and Packagist both read versions from plain semver on the repository and ignore the prefixed form. That bare tag series exists for those two ecosystems and means nothing for the others.
+A release is a git tag named `<sdk>-vX.Y.Z`, where `<sdk>` is the folder name under `sdks/` and `X.Y.Z` is the version in that SDK's package file. Bump the version and merge it before you tag. Two things differ. Go's module lives in a subdirectory of this repository, so it follows Go's own convention and its tags are `sdks/go/vX.Y.Z`. Swift and PHP also need a bare `vX.Y.Z` tag on every release, because Swift Package Manager and Packagist both read versions from plain semver on the repository and ignore the prefixed form. That bare tag series exists for those two ecosystems and means nothing for the others. Because both read the same tags, Swift and PHP share one version line, so a release of either needs a version that neither has used, and the other package then moves to that version too.
 
 ```bash
 # Release TypeScript SDK 1.0.0
@@ -63,10 +63,10 @@ git tag typescript-v1.0.0
 git push origin typescript-v1.0.0
 ```
 
-Two pipelines act on a tag, and each SDK has exactly one publisher:
+Two pipelines act on a tag, and every registry has exactly one publisher:
 
-- The Woodpecker pipeline in `.woodpecker.yml` publishes every SDK except TypeScript to its registry.
-- The GitHub Actions workflow `.github/workflows/doow-track-sdk-publish.yml` publishes TypeScript. It rejects a tag that is not plain `X.Y.Z` or that differs from the version in `sdks/typescript/package.json`. It then runs the TypeScript tests, builds and smoke tests the five CLI executables and the sidecar image, publishes the sidecar image `ghcr.io/doow-dev/doow-track-sidecar` with the tags `X.Y.Z`, `X`, and `latest`, creates a GitHub release that carries the five CLI executables and their checksums, and publishes the npm package last, because an npm version can never be reused.
+- The Woodpecker pipeline in `.woodpecker.yml` publishes every SDK to its registry. For TypeScript it first rejects a tag that is not plain `X.Y.Z` or that differs from the version in `sdks/typescript/package.json`. It then builds the sidecar bundle, pushes the sidecar image `ghcr.io/doow-dev/doow-track-sidecar` tagged with the version and `latest`, and publishes the npm package last, because an npm version can never be reused.
+- The GitHub Actions workflow `.github/workflows/doow-track-sdk-publish.yml` publishes nothing to a registry. On a `typescript-vX.Y.Z` tag it runs the same version check and the TypeScript tests, builds and smoke tests the five CLI executables and the sidecar image, and creates a GitHub release that carries the executables and their checksums.
 
 ## License
 
