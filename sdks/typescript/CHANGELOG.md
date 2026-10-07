@@ -9,6 +9,12 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## [0.1.13] — 2026-10-07
+
+### Changed
+
+- The package metadata now points at `https://github.com/Doow-Dev/doow-track-sdk`, where all fourteen SDKs live, instead of the retired `doow-track` repository that this package advertised since before the SDKs were consolidated.
+
 ## [0.1.12] — 2026-10-06
 
 ### Behavior changes
