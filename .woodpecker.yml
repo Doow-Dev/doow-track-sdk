@@ -374,10 +374,13 @@ steps:
 
   # --- Swift → SPM (auto via tag, just run tests) ---
   - name: publish-swift
-    image: swift:5.9
+    image: swift:6.0
     commands:
-      - cd sdks/swift && swift build && swift test || true
+      - swift build
+      - swift test
       - echo "Swift package available automatically via tag for SPM"
     when:
       - event: tag
         ref: refs/tags/swift-v*
+      - event: tag
+        ref: refs/tags/v*
