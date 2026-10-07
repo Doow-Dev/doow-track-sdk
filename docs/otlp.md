@@ -90,7 +90,7 @@ Doow reads these attributes from each data point and from its resource. A data p
 | `app_name` | no | The application the metric belongs to. Defaults to `unknown` |
 | `license_name` | no | The license plan name. Defaults to `unknown` |
 
-Every other attribute is kept as attribution metadata on the event.
+Every other attribute is kept as attribution metadata on the event, except the structural keys that are consumed as first-class fields (`metric_name`, `metric_tuple_id`, `route`, `source_mechanism`, `kind`, `status`, `occurred_at`, and the period bounds). Those are not repeated in the attribution.
 
 ## Supported metric types
 

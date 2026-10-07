@@ -15,7 +15,7 @@ Official React SDK for [Doow](https://doow.co) usage telemetry.
 | **Batching** | Events queued and sent in configurable batches |
 | **Compression** | Automatic gzip via CompressionStream |
 | **Lifecycle** | Auto-flush on beforeunload/visibilitychange |
-| **Beacon** | Reliable delivery with sendBeacon fallback |
+| **Keepalive delivery** | The unload flush uses `fetch` with `keepalive`, so it survives page teardown |
 
 ---
 

@@ -15,7 +15,7 @@ Official Ruby SDK for [Doow](https://doow.co) usage telemetry and management.
 | **Compression** | Automatic gzip for payloads >1KB |
 | **Retries** | Exponential backoff with configurable retry count |
 | **Type Safety** | Struct-based models |
-| **Sidecar** | Executable for stdin/file/tcp input modes |
+| **Sidecar** | Use the language-agnostic sidecar for stdin/file/tcp input. Not shipped with this package; see [Sidecar guide](../../docs/sidecar.md) |
 
 ---
 

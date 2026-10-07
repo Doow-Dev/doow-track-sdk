@@ -162,8 +162,8 @@ tracker = Tracker("dk_your_api_key", TrackerOptions(
 | `DOOW_TRACK_ENDPOINT` | Custom API endpoint | `https://api.doow.co` |
 | `DOOW_TRACK_DISABLED` | Set `true` to disable tracking | `false` |
 | `DOOW_TRACK_DEBUG` | Set `true` for debug logs | `false` |
-| `DOOW_TRACK_FLUSH_AT` | Events before flush | `20` |
-| `DOOW_TRACK_FLUSH_INTERVAL` | Milliseconds between flushes | `10000` |
+| `DOOW_TRACK_FLUSH_AT` | Events before flush (synchronous `Tracker` only) | `20` |
+| `DOOW_TRACK_FLUSH_INTERVAL` | Milliseconds between flushes (synchronous `Tracker` only) | `10000` |
 
 ---
 

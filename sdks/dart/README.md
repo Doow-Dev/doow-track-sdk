@@ -11,11 +11,11 @@ Official Dart/Flutter SDK for [Doow](https://doow.co) usage telemetry and manage
 | Feature | Description |
 |---------|-------------|
 | **Dart 3.0+** | Null-safe, async/await support |
-| **Flutter** | Works on iOS, Android, Web, Desktop |
+| **Flutter** | Works on iOS, Android, and desktop (Web is not supported) |
 | **Batching** | Events queued and sent in configurable batches |
 | **Compression** | Automatic gzip for payloads >1KB |
 | **Retries** | Exponential backoff with configurable retry count |
-| **Sidecar** | CLI for stdin/file/tcp input modes |
+| **Sidecar** | Use the language-agnostic sidecar for stdin/file/tcp input. Not shipped with this package; see [Sidecar guide](../../docs/sidecar.md) |
 
 ---
 
@@ -141,7 +141,7 @@ class _MyAppState extends State<MyApp> {
   void initState() {
     super.initState();
     tracker = Tracker(
-      const String.fromEnvironment('DOOW_API_KEY'),
+      const String.fromEnvironment('DOOW_TRACK_API_KEY'),
       TrackerOptions(debug: kDebugMode),
     );
   }

@@ -10,7 +10,7 @@ Official Java SDK for [Doow](https://doow.co) usage telemetry and management.
 
 | Feature | Description |
 |---------|-------------|
-| **Java 17+** | Modern Java with records and var |
+| **Java 17+** | Requires Java 17 or newer, no preview features |
 | **Batching** | Events queued and sent in configurable batches |
 | **Compression** | Automatic gzip for payloads >1KB |
 | **Retries** | Exponential backoff with configurable retry count |

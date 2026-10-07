@@ -68,12 +68,12 @@ Long-lived Node.js processes use the timer-based auto-flush. In serverless envir
 ```ts
 import { DoowTracker } from '@doow/track';
 
-const meter = new DoowTracker(process.env.DOOW_API_KEY!);
+const meter = new DoowTracker(process.env.DOOW_TRACK_API_KEY!);
 
 export const handler = meter.withLambda(async (event, context) => {
   meter.track({ metric: 'api_calls', quantity: 1, license_id: 'lic_...' });
   return { statusCode: 200, body: 'ok' };
-  // shutdown() is called automatically in a finally block
+  // flush() is called automatically in a finally block
 });
 ```
 
@@ -83,7 +83,7 @@ export const handler = meter.withLambda(async (event, context) => {
 import { DoowTracker } from '@doow/track';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
-const meter = new DoowTracker(process.env.DOOW_API_KEY!);
+const meter = new DoowTracker(process.env.DOOW_TRACK_API_KEY!);
 
 export default meter.withVercel(async (req: VercelRequest, res: VercelResponse) => {
   meter.track({ metric: 'requests', quantity: 1, license_id: 'lic_...' });
@@ -97,7 +97,7 @@ export default meter.withVercel(async (req: VercelRequest, res: VercelResponse) 
 import { DoowTracker } from '@doow/track';
 import type { Context } from '@azure/functions';
 
-const meter = new DoowTracker(process.env.DOOW_API_KEY!);
+const meter = new DoowTracker(process.env.DOOW_TRACK_API_KEY!);
 
 export default meter.withAzureFunction(async (context: Context, req: unknown) => {
   meter.track({ metric: 'executions', quantity: 1, license_id: 'lic_...' });
@@ -181,7 +181,7 @@ Config file (`doow-track.json`):
 | Flag | Description |
 |------|-------------|
 | `--config <path>` | Path to JSON config file |
-| `--api-key <key>` | API key (overrides config and env) |
+| `--api-key <key>` | API key (overrides the config file; `DOOW_TRACK_API_KEY` still wins) |
 | `--pidfile <path>` | Write PID to file (daemon mode) |
 | `--version` | Print SDK version and exit |
 | `--help` | Print usage and exit |
@@ -202,7 +202,7 @@ Failed batches are written as atomic JSON files (write-then-rename) and replayed
 
 ## Batching and outages
 
-A flush sends at most 500 events per request, and a larger backlog is split into several requests that each carry their own `batch_id`, so a large flush does not exceed the API's per-minute event limit. A `413` halves the request size until the server accepts it. When the retries for a batch are used up (a network error, `408`, `429`, or `5xx`), the batch goes to the offline store if one is configured, and a permanent `4xx` response drops only the request it rejected. When the queue reaches `maxQueueSize`, the oldest event is dropped to make room for each new one, so the newest events are the ones kept.
+A flush sends at most 500 events per request, and a larger backlog is split into several requests that each carry their own `batch_id`, so a large flush does not exceed the API's per-minute event limit. A `413` halves the request size until the server accepts it. When the retries for a batch are used up, a network error, `408`, or `5xx` sends the batch to the offline store if one is configured, while a `429` leaves the batch queued in memory for the next flush and is written back to the store only if it came from there. A permanent `4xx` response drops only the request it rejected. When the queue reaches `maxQueueSize`, the oldest event is dropped to make room for each new one, so the newest events are the ones kept.
 
 ## Error handling
 

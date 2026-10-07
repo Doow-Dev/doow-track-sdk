@@ -35,7 +35,7 @@ export default function RootLayout({ children }) {
   return (
     <html>
       <body>
-        <DoowProvider apiKey={process.env.NEXT_PUBLIC_DOOW_API_KEY!}>
+        <DoowProvider apiKey={process.env.NEXT_PUBLIC_DOOW_TRACK_API_KEY!}>
           {children}
         </DoowProvider>
       </body>
@@ -76,7 +76,7 @@ export function FeatureButton() {
 // lib/doow.ts
 import { initServerTracker } from '@doow/track-nextjs/server';
 
-export const tracker = initServerTracker(process.env.DOOW_API_KEY!);
+export const tracker = initServerTracker(process.env.DOOW_TRACK_API_KEY!);
 ```
 
 ### Server Actions
@@ -124,7 +124,7 @@ export async function POST(request: Request) {
 // middleware.ts
 import { ServerTracker } from '@doow/track-nextjs/server';
 
-const tracker = new ServerTracker(process.env.DOOW_API_KEY!);
+const tracker = new ServerTracker(process.env.DOOW_TRACK_API_KEY!);
 
 export async function middleware(request: NextRequest) {
   await tracker.track({

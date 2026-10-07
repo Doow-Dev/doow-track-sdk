@@ -10,13 +10,13 @@ Official SDKs for Doow usage telemetry across all platforms.
 | React | `@doow/track-react` | npm |
 | Next.js | `@doow/track-nextjs` | npm |
 | React Native | `@doow/track-react-native` | npm |
-| Go | `github.com/Doow-Dev/doow-track-sdk/sdks/go` | pkg.go.dev |
+| Go | `github.com/Doow-Dev/doow-track-go` | pkg.go.dev |
 | Python | `doow-track` | PyPI |
 | Rust | `doow-track` | crates.io |
 | .NET | `DoowTrack` | NuGet |
-| Java | `co.doow:track` | Maven Central |
-| Kotlin | `co.doow:track-kotlin` | Maven Central |
-| Ruby | `doow-track` | RubyGems |
+| Java | `co.doow:doow-track` | Maven Central |
+| Kotlin | `co.doow:doow-track-kotlin` | Maven Central |
+| Ruby | `doow_track` | RubyGems |
 | Dart | `doow_track` | pub.dev |
 | PHP | `doow/track` | Packagist |
 | Swift | `DoowTrack` | Swift Package Manager |

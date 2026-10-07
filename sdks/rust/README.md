@@ -15,7 +15,7 @@ Official Rust SDK for [Doow](https://doow.co) usage telemetry and management.
 | **Compression** | Automatic gzip for payloads >1KB |
 | **Retries** | Exponential backoff with configurable retry count |
 | **Type Safety** | Full Rust type definitions |
-| **Sidecar** | Binary for stdin/file/tcp input modes |
+| **Sidecar** | Use the language-agnostic sidecar for stdin/file/tcp input. Not shipped with this package; see [Sidecar guide](../../docs/sidecar.md) |
 
 ---
 
@@ -127,6 +127,7 @@ let options = TrackerOptions {
     attribution: [
         ("service".to_string(), serde_json::json!("api-gateway")),
     ].into_iter().collect(),
+    on_error: None,
 };
 
 let tracker = Tracker::new("dk_your_api_key", Some(options));

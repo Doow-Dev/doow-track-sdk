@@ -15,7 +15,7 @@ Official .NET SDK for [Doow](https://doow.co) usage telemetry and management.
 | **Compression** | Automatic gzip for payloads >1KB |
 | **Retries** | Exponential backoff with configurable retry count |
 | **Type Safety** | Full type definitions with enums and records |
-| **Sidecar** | CLI tool for stdin/file/tcp input modes |
+| **Sidecar** | Use the language-agnostic sidecar for stdin/file/tcp input. Not shipped with this package; see [Sidecar guide](../../docs/sidecar.md) |
 
 ---
 
@@ -122,9 +122,6 @@ var tracker = new Tracker("dk_your_api_key", new TrackerOptions
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `DOOW_TRACK_API_KEY` | API key (overrides constructor) | — |
-| `DOOW_TRACK_ENDPOINT` | Custom API endpoint | `https://api.doow.co` |
-| `DOOW_TRACK_DISABLED` | Set `true` to disable tracking | `false` |
-| `DOOW_TRACK_DEBUG` | Set `true` for debug logs | `false` |
 
 ---
 

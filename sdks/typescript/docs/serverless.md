@@ -10,7 +10,7 @@ Long-lived Node.js processes use timer-based auto-flush. In serverless environme
 ```ts
 import { DoowTracker } from '@doow/track';
 
-const meter = new DoowTracker(process.env.DOOW_API_KEY!);
+const meter = new DoowTracker(process.env.DOOW_TRACK_API_KEY!);
 
 export const handler = meter.withLambda(async (event, context) => {
   meter.track({ metric: 'api_calls', quantity: 1, license_id: 'lic_...' });
@@ -36,7 +36,7 @@ If you use Lambda layers, install `@doow/track` in the layer and import normally
 import { DoowTracker } from '@doow/track';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
-const meter = new DoowTracker(process.env.DOOW_API_KEY!);
+const meter = new DoowTracker(process.env.DOOW_TRACK_API_KEY!);
 
 export default meter.withVercel(async (req: VercelRequest, res: VercelResponse) => {
   meter.track({ metric: 'requests', quantity: 1, license_id: 'lic_...' });
@@ -50,7 +50,7 @@ export default meter.withVercel(async (req: VercelRequest, res: VercelResponse) 
 import { DoowTracker } from '@doow/track';
 import type { Context } from '@azure/functions';
 
-const meter = new DoowTracker(process.env.DOOW_API_KEY!);
+const meter = new DoowTracker(process.env.DOOW_TRACK_API_KEY!);
 
 export default meter.withAzureFunction(async (context: Context, req: unknown) => {
   meter.track({ metric: 'executions', quantity: 1, license_id: 'lic_...' });
@@ -63,7 +63,7 @@ export default meter.withAzureFunction(async (context: Context, req: unknown) =>
 For platforms not listed above, call `flush()` before the handler returns. Do not call `shutdown()` per request: it stops the tracker, and events tracked by later invocations of the same warm instance are dropped.
 
 ```ts
-const meter = new DoowTracker(process.env.DOOW_API_KEY!, { flushAt: 1 });
+const meter = new DoowTracker(process.env.DOOW_TRACK_API_KEY!, { flushAt: 1 });
 
 export async function handler(req: Request): Promise<Response> {
   try {

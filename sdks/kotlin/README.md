@@ -14,7 +14,7 @@ Official Kotlin SDK for [Doow](https://doow.co) usage telemetry and management.
 | **Compression** | Automatic gzip for payloads >1KB |
 | **Retries** | Exponential backoff with configurable retry count |
 | **Type Safety** | kotlinx.serialization with data classes |
-| **Sidecar** | JAR for stdin/file/tcp input modes |
+| **Sidecar** | Use the language-agnostic sidecar for stdin/file/tcp input. Not shipped with this package; see [Sidecar guide](../../docs/sidecar.md) |
 
 ---
 
@@ -24,14 +24,14 @@ Official Kotlin SDK for [Doow](https://doow.co) usage telemetry and management.
 
 ```kotlin
 dependencies {
-    implementation("co.doow:doow-track:0.1.0")
+    implementation("co.doow:doow-track-kotlin:0.1.0")
 }
 ```
 
 ### Gradle (Groovy)
 
 ```groovy
-implementation 'co.doow:doow-track:0.1.0'
+implementation 'co.doow:doow-track-kotlin:0.1.0'
 ```
 
 ---
