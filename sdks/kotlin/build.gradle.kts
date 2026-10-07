@@ -38,7 +38,7 @@ publishing {
             pom {
                 name.set("Doow Track Kotlin SDK")
                 description.set("Official Kotlin SDK for Doow usage telemetry and management")
-                url.set("https://github.com/Doow-Dev/doow-track-kotlin")
+                url.set("https://github.com/Doow-Dev/doow-track-sdk")
                 licenses {
                     license {
                         name.set("MIT License")

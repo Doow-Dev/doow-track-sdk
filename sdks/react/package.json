@@ -43,6 +43,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Doow-Dev/doow-track-react.git"
+    "url": "https://github.com/Doow-Dev/doow-track-sdk.git",
+    "directory": "sdks/react"
   }
 }

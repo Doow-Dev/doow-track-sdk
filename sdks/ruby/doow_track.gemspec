@@ -6,7 +6,7 @@ Gem::Specification.new do |spec|
 
   spec.summary       = "Official Ruby SDK for Doow usage telemetry and management"
   spec.description   = "Track usage events and manage apps, contracts, licenses, and metrics with the Doow API"
-  spec.homepage      = "https://github.com/Doow-Dev/doow-track-ruby"
+  spec.homepage      = "https://github.com/Doow-Dev/doow-track-sdk"
   spec.license       = "MIT"
   spec.required_ruby_version = ">= 3.0.0"
 

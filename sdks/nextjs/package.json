@@ -51,6 +51,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Doow-Dev/doow-track-nextjs.git"
+    "url": "https://github.com/Doow-Dev/doow-track-sdk.git",
+    "directory": "sdks/nextjs"
   }
 }

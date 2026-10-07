@@ -11,7 +11,7 @@
 
     <name>Doow Track Java SDK</name>
     <description>Official Java SDK for Doow usage telemetry and management</description>
-    <url>https://github.com/Doow-Dev/doow-track-java</url>
+    <url>https://github.com/Doow-Dev/doow-track-sdk</url>
 
     <licenses>
         <license>
@@ -29,9 +29,9 @@
     </developers>
 
     <scm>
-        <connection>scm:git:git://github.com/Doow-Dev/doow-track-java.git</connection>
-        <developerConnection>scm:git:ssh://github.com:Doow-Dev/doow-track-java.git</developerConnection>
-        <url>https://github.com/Doow-Dev/doow-track-java</url>
+        <connection>scm:git:git://github.com/Doow-Dev/doow-track-sdk.git</connection>
+        <developerConnection>scm:git:ssh://github.com:Doow-Dev/doow-track-sdk.git</developerConnection>
+        <url>https://github.com/Doow-Dev/doow-track-sdk</url>
     </scm>
 
     <properties>

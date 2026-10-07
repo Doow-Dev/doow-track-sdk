@@ -6,7 +6,7 @@
   "author": "Doow",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Doow-Dev/doow-track.git",
+    "url": "https://github.com/Doow-Dev/doow-track-sdk.git",
     "directory": "sdks/typescript"
   },
   "main": "./dist/cjs/index.js",

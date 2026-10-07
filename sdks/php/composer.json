@@ -10,7 +10,7 @@
         }
     ],
     "keywords": ["doow", "telemetry", "usage", "billing", "saas", "metering"],
-    "homepage": "https://github.com/Doow-Dev/doow-track-php",
+    "homepage": "https://github.com/Doow-Dev/doow-track-sdk",
     "require": {
         "php": ">=8.1",
         "ext-json": "*",

@@ -44,7 +44,7 @@ doow-track = "doow_track.cli.main:main"
 [project.urls]
 Homepage = "https://doow.co"
 Documentation = "https://docs.doow.co/sdks/python"
-Repository = "https://github.com/Doow-Dev/doow-track-python"
+Repository = "https://github.com/Doow-Dev/doow-track-sdk"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/doow_track"]
