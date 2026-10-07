@@ -1,8 +1,9 @@
 # Doow Track SDKs — Unified CI/CD Pipeline
 #
 # CI: On push/PR, tests only SDKs with changes
-# Publish: On tag (e.g., python-v0.2.0), publishes that SDK to its registry. TypeScript is the
-# exception and is published by GitHub Actions.
+# Publish: On tag (e.g., python-v0.2.0), publishes that SDK to its registry, TypeScript included.
+# Woodpecker publishes every SDK. The GitHub Actions workflow is legacy from before the migration
+# and has not run since May 2026, so nothing should be routed through it.
 
 when:
   - event: [push, pull_request, tag]
@@ -156,11 +157,54 @@ steps:
 # PUBLISH — Deploy to registries on tag
 # ============================================================================
 
-  # --- TypeScript: published by .github/workflows/doow-track-sdk-publish.yml ---
-  # A typescript-v* tag publishes the npm package, the sidecar image, and the CLI release from
-  # GitHub Actions. Do not add TypeScript publish steps here, or one tag would publish twice.
-  # The earlier steps built the sidecar image with the wrong Docker context, which produced
-  # the image tagged typescript-v0.1.11 that has no sidecar entry point.
+  # --- TypeScript → npm + sidecar image ---
+  # Woodpecker publishes TypeScript. The image step sets context to the repo root because the
+  # Dockerfile copies sdks/typescript/dist/sidecar.cjs, which only exists after a build, so the
+  # bundle is built first. npm publishes last: a published npm version can never be reused.
+  - name: build-typescript-sidecar
+    image: node:22
+    commands:
+      - npm ci
+      - npm run build --workspace @doow/track
+    when:
+      - event: tag
+        ref: refs/tags/typescript-v*
+
+  - name: publish-typescript-docker
+    image: woodpeckerci/plugin-docker-buildx
+    privileged: true
+    settings:
+      repo: ghcr.io/doow-dev/doow-track-sidecar
+      dockerfile: sdks/typescript/Dockerfile
+      context: .
+      registry: ghcr.io
+      platforms: linux/amd64,linux/arm64
+      build_args:
+        - SDK_VERSION=${CI_COMMIT_TAG##typescript-v}
+      tags:
+        - latest
+        - "0"
+        - ${CI_COMMIT_TAG##typescript-v}
+      username:
+        from_secret: ghcr_username
+      password:
+        from_secret: ghcr_token
+    when:
+      - event: tag
+        ref: refs/tags/typescript-v*
+
+  - name: publish-typescript
+    image: node:22
+    commands:
+      - rm -rf node_modules package-lock.json
+      - echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" > ~/.npmrc
+      - cd sdks/typescript && npm install && npm run build && npm test && npm publish --access public
+    environment:
+      NPM_TOKEN:
+        from_secret: npm_token
+    when:
+      - event: tag
+        ref: refs/tags/typescript-v*
 
   # --- React → npm ---
   - name: publish-react
