@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	SDKVersion           = "0.1.0"
+	SDKVersion           = "0.1.1"
 	defaultEndpoint      = "https://api.doow.co"
 	defaultFlushAt       = 20
 	defaultFlushInterval = 10 * time.Second

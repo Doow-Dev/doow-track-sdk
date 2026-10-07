@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.1.1] — 2026-10-07
+
 ### Batch size
 
 - A `408` request timeout is retried like `429` and `5xx`. Shutdown stores every remaining chunk when an offline store is set.
