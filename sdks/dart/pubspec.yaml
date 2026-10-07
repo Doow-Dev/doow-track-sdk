@@ -1,6 +1,6 @@
 name: doow_track
 description: Official Dart/Flutter SDK for Doow usage telemetry and management
-version: 0.1.0
+version: 0.1.1
 homepage: https://doow.co
 repository: https://github.com/Doow-Dev/doow-track-sdk
 

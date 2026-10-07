@@ -1,6 +1,6 @@
 Gem::Specification.new do |spec|
   spec.name          = "doow_track"
-  spec.version       = "0.1.0"
+  spec.version       = "0.1.1"
   spec.authors       = ["Doow"]
   spec.email         = ["dev@doow.co"]
 

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.1.1] — 2026-10-07
+
 ### Batch size
 
 - After a transient failure the remaining chunks are requeued instead of each spending a full retry budget, and count-triggered flushes pause until the next flush interval.

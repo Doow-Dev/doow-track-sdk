@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.1.1] — 2026-10-07
+
 ### Batch size
 
 - A `408` request timeout is retried like `429` and `5xx`, and a chunk that cannot be serialized is dropped on its own instead of aborting the flush.

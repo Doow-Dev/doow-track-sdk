@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.1.1] — 2026-10-07
+
 ### Batch size
 
 - A `408` request timeout is retried like `429` and `5xx`, and the chunk holding an event that cannot be serialized (up to 500 events) is reported and dropped instead of blocking the queue.
