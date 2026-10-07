@@ -63,10 +63,7 @@ git tag typescript-v1.0.0
 git push origin typescript-v1.0.0
 ```
 
-Two pipelines act on a tag, and every registry has exactly one publisher:
-
-- The Woodpecker pipeline in `.woodpecker.yml` publishes every SDK to its registry. For TypeScript it first rejects a tag that is not plain `X.Y.Z` or that differs from the version in `sdks/typescript/package.json`. It then builds the sidecar bundle, pushes the sidecar image `ghcr.io/doow-dev/doow-track-sidecar` tagged with the version and `latest`, and publishes the npm package last, because an npm version can never be reused.
-- The GitHub Actions workflow `.github/workflows/doow-track-sdk-publish.yml` publishes nothing to a registry. On a `typescript-vX.Y.Z` tag it runs the same version check and the TypeScript tests, builds and smoke tests the five CLI executables and the sidecar image, and creates a GitHub release that carries the executables and their checksums.
+One pipeline acts on a tag, and every registry has exactly one publisher. The Woodpecker pipeline in `.woodpecker.yml` publishes every SDK. For TypeScript it first rejects a tag that is not plain `X.Y.Z` or that differs from the version in `sdks/typescript/package.json`, then builds the sidecar bundle, pushes the sidecar image `ghcr.io/doow-dev/doow-track-sidecar` tagged with the version, `0`, and `latest`, builds the five CLI executables with their checksums and creates the GitHub release that carries them, and publishes the npm package last, because an npm version can never be reused. Because the build agent is Linux, only the Linux x64 executable can be run there, so it is the one smoke-tested; the other four are built and checksummed.
 
 ## License
 
