@@ -43,36 +43,36 @@ func generateUUID() string {
 
 // Tracker handles usage telemetry batching and submission
 type Tracker struct {
-	apiKey      string
-	endpoint    string
-	enabled     bool
-	attribution map[string]interface{}
-	debug       bool
-	flushAt     int
-	flushInterval time.Duration
-	maxPayloadBytes int
-	maxQueueSize    int
-	timeout         time.Duration
-	retryCount      int
-	disableCompression bool
+	apiKey               string
+	endpoint             string
+	enabled              bool
+	attribution          map[string]interface{}
+	debug                bool
+	flushAt              int
+	flushInterval        time.Duration
+	maxPayloadBytes      int
+	maxQueueSize         int
+	timeout              time.Duration
+	retryCount           int
+	disableCompression   bool
 	maxConcurrentFlushes int
-	shutdownTimeout time.Duration
-	onError         func(error)
-	beforeSend      func(SerializedEvent) *SerializedEvent
-	beforeFlush     func([]SerializedEvent) []SerializedEvent
-	offlineStore    OfflineStore
+	shutdownTimeout      time.Duration
+	onError              func(error)
+	beforeSend           func(SerializedEvent) *SerializedEvent
+	beforeFlush          func([]SerializedEvent) []SerializedEvent
+	offlineStore         OfflineStore
 
-	client     *http.Client
-	mu         sync.Mutex
-	buffer     []SerializedEvent
-	shutdown   chan struct{}
-	done       chan struct{}
-	flushSem   chan struct{}
-	rateLimit  *RateLimit
-	inflight   sync.WaitGroup
-	closed     atomic.Bool
-	closeOnce  sync.Once
-	holdUntil  atomic.Int64
+	client    *http.Client
+	mu        sync.Mutex
+	buffer    []SerializedEvent
+	shutdown  chan struct{}
+	done      chan struct{}
+	flushSem  chan struct{}
+	rateLimit *RateLimit
+	inflight  sync.WaitGroup
+	closed    atomic.Bool
+	closeOnce sync.Once
+	holdUntil atomic.Int64
 }
 
 var processStart = time.Now()
