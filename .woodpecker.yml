@@ -149,7 +149,7 @@ steps:
   # actually resolves, is the one under test. The previous form also swallowed failures with
   # `|| true`, so a broken Swift SDK could never fail CI.
   - name: ci-swift
-    image: swift:5.9
+    image: swift:6.0
     commands:
       - swift build
       - swift test
