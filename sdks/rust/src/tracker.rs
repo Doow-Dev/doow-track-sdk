@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, Mutex, RwLock};
 use uuid::Uuid;
 
-const SDK_VERSION: &str = "0.1.0";
+const SDK_VERSION: &str = env!("CARGO_PKG_VERSION");
 const DEFAULT_ENDPOINT: &str = "https://api.doow.co";
 const DEFAULT_FLUSH_AT: usize = 20;
 const DEFAULT_FLUSH_INTERVAL_MS: u64 = 10_000;
@@ -608,6 +608,13 @@ mod tests {
         assert_eq!(hint["metric_name"], "calls");
         assert_eq!(json["batch_id"], "b1");
         assert_eq!(json["events"][0]["source_system"], "sdk");
+    }
+
+    #[test]
+    fn the_payload_reports_the_crate_version() {
+        let json = serde_json::to_value(build_payload("b1", &[event("e1")])).unwrap();
+
+        assert_eq!(json["sdk_version"], env!("CARGO_PKG_VERSION"));
     }
 
     #[test]

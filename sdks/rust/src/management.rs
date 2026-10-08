@@ -6,7 +6,7 @@ use reqwest::Client;
 use serde::Deserialize;
 use std::time::Duration;
 
-const SDK_VERSION: &str = "0.1.0";
+const SDK_VERSION: &str = env!("CARGO_PKG_VERSION");
 const DEFAULT_ENDPOINT: &str = "https://api.doow.co";
 const DEFAULT_TIMEOUT_MS: u64 = 30_000;
 
