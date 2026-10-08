@@ -43,6 +43,8 @@ module DoowTrack
 
       @buffer = []
       @mutex = Mutex.new
+      @idle = ConditionVariable.new
+      @sending = 0
       @stopping = false
       @stop_mutex = Mutex.new
       @stop_signal = ConditionVariable.new
@@ -73,21 +75,8 @@ module DoowTrack
     end
 
     def flush
-      batch = nil
-      @mutex.synchronize do
-        return if @buffer.empty?
-        batch = @buffer.dup
-        @buffer.clear
-      end
-      return unless batch
-
-      batch.each_slice(MAX_BATCH_EVENTS).with_index do |chunk, index|
-        next unless send_batch(chunk) == :failed
-
-        requeue(batch.drop(index * MAX_BATCH_EVENTS))
-        @hold_until = monotonic_now + @options[:flush_interval]
-        break
-      end
+      flush_buffered
+      wait_until_idle
     end
 
     def shutdown
@@ -101,6 +90,50 @@ module DoowTrack
 
     private
 
+    # A count-triggered flush runs on its own thread and empties the buffer first, so without
+    # waiting here a short-lived process sees an empty buffer, exits, and kills that thread mid-request.
+    def wait_until_idle
+      deadline = monotonic_now + SHUTDOWN_JOIN_SECONDS
+      @mutex.synchronize do
+        while @sending.positive?
+          remaining = deadline - monotonic_now
+          break if remaining <= 0
+
+          @idle.wait(@mutex, remaining)
+        end
+      end
+    end
+
+    def flush_buffered
+      batch = nil
+      @mutex.synchronize do
+        return if @buffer.empty?
+
+        batch = @buffer.dup
+        @buffer.clear
+        @sending += 1
+      end
+
+      begin
+        send_in_chunks(batch)
+      ensure
+        @mutex.synchronize do
+          @sending -= 1
+          @idle.broadcast
+        end
+      end
+    end
+
+    def send_in_chunks(batch)
+      batch.each_slice(MAX_BATCH_EVENTS).with_index do |chunk, index|
+        next unless send_batch(chunk) == :failed
+
+        requeue(batch.drop(index * MAX_BATCH_EVENTS))
+        @hold_until = monotonic_now + @options[:flush_interval]
+        break
+      end
+    end
+
     def start_flusher
       return nil if @options[:flush_interval] <= 0
 
@@ -112,7 +145,7 @@ module DoowTrack
           break if @stopping
 
           begin
-            flush
+            flush_buffered
           rescue StandardError => e
             report(e)
           end
@@ -135,7 +168,7 @@ module DoowTrack
 
     def flush_async
       Thread.new do
-        flush
+        flush_buffered
       rescue StandardError => e
         report(e)
       end

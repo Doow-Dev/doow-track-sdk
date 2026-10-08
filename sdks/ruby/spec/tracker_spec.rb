@@ -397,4 +397,49 @@ RSpec.describe DoowTrack::Tracker do
     expect(waits.size).to eq(6)
     expect(waits.max).to eq(10)
   end
+
+  describe "a count-triggered flush that is already sending" do
+    let(:delivered) { [] }
+    let(:started) { Queue.new }
+    let(:release) { Queue.new }
+    let(:eager) do
+      described_class.new("dk_test", endpoint: endpoint, flush_interval: 0, flush_at: 1, retry_count: 0)
+    end
+
+    before do
+      allow(eager).to receive(:send_batch) do |batch|
+        started << true
+        release.pop
+        delivered << batch.size
+        :delivered
+      end
+    end
+
+    def release_soon
+      Thread.new do
+        Kernel.sleep(0.2)
+        release << true
+      end
+    end
+
+    it "makes flush wait for it" do
+      track_one(eager)
+      started.pop
+      release_soon
+
+      eager.flush
+
+      expect(delivered).to eq([1])
+    end
+
+    it "makes shutdown wait for it" do
+      track_one(eager)
+      started.pop
+      release_soon
+
+      eager.shutdown
+
+      expect(delivered).to eq([1])
+    end
+  end
 end
