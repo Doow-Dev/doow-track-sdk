@@ -2,9 +2,12 @@
 
 ## Unreleased
 
+## [0.1.2] — 2026-10-08
+
 ### Fixed
 
 - A `unit` set on an event is now sent at event level, where earlier releases accepted it and then dropped it before the request.
+- `DoowTrack::VERSION` and the `sdk_version` sent in each batch now match the gem version, where earlier releases reported `0.1.0`, and the gemspec reads its version from `DoowTrack::VERSION` so the two cannot drift.
 
 ## [0.1.1] — 2026-10-07
 

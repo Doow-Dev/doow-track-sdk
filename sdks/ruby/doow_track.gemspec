@@ -1,6 +1,8 @@
+require_relative "lib/doow_track/version"
+
 Gem::Specification.new do |spec|
   spec.name          = "doow_track"
-  spec.version       = "0.1.1"
+  spec.version       = DoowTrack::VERSION
   spec.authors       = ["Doow"]
   spec.email         = ["dev@doow.co"]
 
