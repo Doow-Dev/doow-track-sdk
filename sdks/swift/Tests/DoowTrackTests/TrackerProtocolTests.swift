@@ -121,6 +121,27 @@ final class TrackerProtocolTests {
         #expect(errors.isEmpty)
     }
 
+    @Test func declaredUnitIsSentAtEventLevel() throws {
+        let tracker = try makeTracker()
+        tracker.track(TrackEvent(metric: "storage", quantity: 5, licenseId: "lic_1", unit: "GB"))
+        tracker.flush()
+
+        let body = try json(StubURLProtocol.requests[0].body)
+        let event = try #require((body["events"] as? [[String: Any]])?.first)
+        #expect(event["unit"] as? String == "GB")
+        #expect(errors.isEmpty)
+    }
+
+    @Test func eventWithoutUnitSendsNoUnitKey() throws {
+        let tracker = try makeTracker()
+        track(tracker)
+        tracker.flush()
+
+        let body = try json(StubURLProtocol.requests[0].body)
+        let event = try #require((body["events"] as? [[String: Any]])?.first)
+        #expect(event["unit"] == nil)
+    }
+
     private func makeBacklogTracker() throws -> Tracker {
         try Tracker("dk_test", options: TrackerOptions(
             endpoint: "https://test.doow.co",

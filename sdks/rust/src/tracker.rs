@@ -95,6 +95,8 @@ pub(crate) struct WireEvent {
     source_system: String,
     kind: EventKind,
     #[serde(skip_serializing_if = "Option::is_none")]
+    unit: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     attribution: Option<HashMap<String, serde_json::Value>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     metadata: Option<HashMap<String, serde_json::Value>>,
@@ -172,6 +174,7 @@ pub(crate) fn build_payload(batch_id: &str, events: &[SerializedEvent]) -> Batch
                     .unwrap_or("sdk")
                     .to_string(),
                 kind: e.kind.clone(),
+                unit: e.unit.clone(),
                 attribution: e.attribution.clone(),
                 metadata: e.metadata.clone(),
                 measurements: vec![WireMeasurement {
@@ -605,6 +608,23 @@ mod tests {
         assert_eq!(hint["metric_name"], "calls");
         assert_eq!(json["batch_id"], "b1");
         assert_eq!(json["events"][0]["source_system"], "sdk");
+    }
+
+    #[test]
+    fn declared_unit_serializes_at_event_level() {
+        let mut declared = event("e1");
+        declared.unit = Some("GB".to_string());
+
+        let json = serde_json::to_value(build_payload("b1", &[declared])).unwrap();
+
+        assert_eq!(json["events"][0]["unit"], "GB");
+    }
+
+    #[test]
+    fn missing_unit_is_not_serialized() {
+        let json = serde_json::to_value(build_payload("b1", &[event("e1")])).unwrap();
+
+        assert!(json["events"][0].get("unit").is_none());
     }
 
     fn tracker_for(server: &MockServer, errors: Arc<StdMutex<Vec<String>>>) -> Tracker {

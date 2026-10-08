@@ -50,6 +50,22 @@ RSpec.describe DoowTrack::Tracker do
     expect(errors).to be_empty
   end
 
+  it "sends a declared unit at event level" do
+    stub_request(:post, url).to_return(status: 202)
+    track_one(tracker, unit: "GB")
+    tracker.flush
+
+    expect(a_request(:post, url).with { |r| body_of(r)["events"].first["unit"] == "GB" }).to have_been_made
+  end
+
+  it "sends no unit key when the event declares none" do
+    stub_request(:post, url).to_return(status: 202)
+    track_one(tracker)
+    tracker.flush
+
+    expect(a_request(:post, url).with { |r| !body_of(r)["events"].first.key?("unit") }).to have_been_made
+  end
+
   it "declares gzip only when the body is a real gzip stream" do
     stub_request(:post, url).to_return(status: 202)
     300.times { track_one(tracker) }

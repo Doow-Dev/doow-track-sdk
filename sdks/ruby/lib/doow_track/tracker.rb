@@ -227,6 +227,7 @@ module DoowTrack
           occurred_at: h[:timestamp],
           source_system: h[:source_system].to_s.strip.empty? ? "sdk" : h[:source_system],
           kind: h[:kind],
+          unit: h[:unit],
           attribution: h[:attribution],
           metadata: h[:metadata],
           measurements: [measurement]

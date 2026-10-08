@@ -70,9 +70,10 @@ steps:
   - name: ci-python
     image: python:3.11-slim
     commands:
-      - cd sdks/python && pip install -e ".[dev]" || pip install -e .
-      - cd sdks/python && ruff check src/ || true
-      - cd sdks/python && pytest tests/ -v || true
+      - cd sdks/python
+      - pip install -e ".[dev]"
+      - ruff check src/ || true
+      - pytest tests/ -v
     when:
       - event: [push, pull_request]
         path: "sdks/python/**"
@@ -120,8 +121,9 @@ steps:
   - name: ci-ruby
     image: ruby:3.2
     commands:
-      - cd sdks/ruby && bundle install || true
-      - cd sdks/ruby && bundle exec rspec || true
+      - cd sdks/ruby
+      - bundle install
+      - bundle exec rspec
     when:
       - event: [push, pull_request]
         path: "sdks/ruby/**"
