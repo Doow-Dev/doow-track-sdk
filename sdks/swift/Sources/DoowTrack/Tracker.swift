@@ -210,11 +210,14 @@ func parseRetryAfter(_ header: String?) -> Double {
 
 public class Tracker {
     static let maxBatchEvents = 500
+    static let idleWaitSeconds: TimeInterval = 30
 
     private let apiKey: String
     private let options: TrackerOptions
     private var buffer: [BufferedEvent] = []
     private let lock = NSLock()
+    private let idle = NSCondition()
+    private var sending = 0
     private let encoder: JSONEncoder
     private var flushTimer: Timer?
     private var isClosed = false
@@ -270,12 +273,32 @@ public class Tracker {
 
         if buffer.count >= options.flushAt && ProcessInfo.processInfo.systemUptime >= holdUntil {
             DispatchQueue.global().async { [weak self] in
-                self?.flush()
+                self?.flushBuffered()
             }
         }
     }
 
     public func flush() {
+        flushBuffered()
+        awaitIdle()
+    }
+
+    private var sendingKey: String { "doow.track.sending.\(ObjectIdentifier(self).hashValue)" }
+
+    // A count-triggered flush runs on a background queue and empties the buffer first, so without
+    // this a short-lived process sees an empty buffer, exits, and kills that send mid-request.
+    // A callback running on the sending thread would otherwise wait for its own send.
+    private func awaitIdle() {
+        if Thread.current.threadDictionary[sendingKey] as? Bool == true { return }
+        let deadline = Date().addingTimeInterval(Tracker.idleWaitSeconds)
+        idle.lock()
+        defer { idle.unlock() }
+        while sending > 0 {
+            if !idle.wait(until: deadline) { return }
+        }
+    }
+
+    private func flushBuffered() {
         var batch: [BufferedEvent]
 
         lock.lock()
@@ -285,7 +308,20 @@ public class Tracker {
         }
         batch = buffer
         buffer.removeAll()
+        idle.lock()
+        sending += 1
+        idle.unlock()
         lock.unlock()
+
+        let outer = Thread.current.threadDictionary[sendingKey] as? Bool ?? false
+        Thread.current.threadDictionary[sendingKey] = true
+        defer {
+            Thread.current.threadDictionary[sendingKey] = outer
+            idle.lock()
+            sending -= 1
+            idle.broadcast()
+            idle.unlock()
+        }
 
         var start = 0
         while start < batch.count {
