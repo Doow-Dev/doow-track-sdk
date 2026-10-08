@@ -211,6 +211,12 @@ func parseRetryAfter(_ header: String?) -> Double {
 public class Tracker {
     static let maxBatchEvents = 500
     static let idleWaitSeconds: TimeInterval = 30
+    static let mainThreadIdleWaitSeconds: TimeInterval = 2
+
+    // The wait blocks the calling thread, so the main thread, which would freeze a UI, gets a short bound.
+    static func idleWait(onMainThread: Bool) -> TimeInterval {
+        onMainThread ? mainThreadIdleWaitSeconds : idleWaitSeconds
+    }
 
     private let apiKey: String
     private let options: TrackerOptions
@@ -290,7 +296,7 @@ public class Tracker {
     // A callback running on the sending thread would otherwise wait for its own send.
     private func awaitIdle() {
         if Thread.current.threadDictionary[sendingKey] as? Bool == true { return }
-        let deadline = Date().addingTimeInterval(Tracker.idleWaitSeconds)
+        let deadline = Date().addingTimeInterval(Tracker.idleWait(onMainThread: Thread.isMainThread))
         idle.lock()
         defer { idle.unlock() }
         while sending > 0 {

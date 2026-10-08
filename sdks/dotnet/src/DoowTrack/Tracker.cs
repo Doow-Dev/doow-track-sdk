@@ -432,7 +432,8 @@ public class Tracker : IDisposable
 
     public void Shutdown()
     {
-        ShutdownAsync().GetAwaiter().GetResult();
+        // Run off the caller's synchronization context so blocking here cannot deadlock a UI thread.
+        Task.Run(ShutdownAsync).GetAwaiter().GetResult();
     }
 
     private Dictionary<string, object>? MergeAttribution(Dictionary<string, object>? eventAttribution)

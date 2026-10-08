@@ -84,18 +84,19 @@ module DoowTrack
         @stopping = true
         @stop_signal.broadcast
       end
+      deadline = monotonic_now + SHUTDOWN_JOIN_SECONDS
       @flusher&.join(SHUTDOWN_JOIN_SECONDS)
-      flush
+      flush_buffered
+      wait_until_idle(deadline)
     end
 
     private
 
     # A count-triggered flush runs on its own thread and empties the buffer first, so without
     # waiting here a short-lived process sees an empty buffer, exits, and kills that thread mid-request.
-    def wait_until_idle
+    def wait_until_idle(deadline = monotonic_now + SHUTDOWN_JOIN_SECONDS)
       return if Thread.current[sending_key]
 
-      deadline = monotonic_now + SHUTDOWN_JOIN_SECONDS
       @mutex.synchronize do
         while @sending.positive?
           remaining = deadline - monotonic_now

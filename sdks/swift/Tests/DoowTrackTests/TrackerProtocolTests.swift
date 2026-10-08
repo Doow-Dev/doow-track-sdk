@@ -132,6 +132,14 @@ final class TrackerProtocolTests {
         tracker.shutdown()
     }
 
+    @Test func theMainThreadNeverWaitsAsLongAsABackgroundThread() {
+        let main = Tracker.idleWait(onMainThread: true)
+        let background = Tracker.idleWait(onMainThread: false)
+
+        #expect(main <= 2)
+        #expect(main < background)
+    }
+
     @Test func shutdownWaitsForACountTriggeredSendAlreadyInFlight() throws {
         let server = SlowServer()
         StubURLProtocol.responder = { _ in server.respond() }
