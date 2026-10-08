@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.1.2] — 2026-10-08
+
 ### Fixed
 
 - A `unit` set on an event is now sent at event level, where earlier releases accepted it and then dropped it before the request.
