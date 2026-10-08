@@ -29,7 +29,7 @@ See individual SDK READMEs in `sdks/<language>/README.md` for installation instr
 
 A metric in Doow can have a unit, such as `GB`, `hours`, `tokens`, or `API calls`, which you set on the metric when you create it (the management API calls it `usage_custom_unit_label`). Send `quantity` already converted to the metric's unit, because Doow records the number you send as it is and does not convert it.
 
-The optional `unit` field records the unit your code used for `quantity`. Doow stores it with the measurement exactly as you send it, after removing control characters, trimming whitespace, and cutting it to 64 characters, and it does not convert it or compare it with the metric's unit, so set it to the unit the metric is defined with.
+The optional `unit` field records the unit your code used for `quantity`. Doow stores it with the measurement exactly as you send it, after removing control characters, trimming whitespace, and cutting it to 64 characters, and it does not convert it or compare it with the metric's unit, so set it to the unit the metric is defined with. The Python, Ruby, Rust, and Swift SDKs send `unit` from version 0.1.2, and earlier versions of those four accepted it but dropped it before the request.
 
 **Example 1: a count.** The metric `tokens_generated` is defined in tokens, and one request produced 1,500 tokens.
 
