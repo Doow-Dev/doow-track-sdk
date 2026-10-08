@@ -205,6 +205,8 @@ class Tracker:
 
         self._buffer: list[SerializedEvent] = []
         self._lock = threading.Lock()
+        self._idle = threading.Condition(self._lock)
+        self._sending = 0
         self._hold_until = 0.0
         self._shutdown = threading.Event()
         self._rate_limit: Optional[RateLimit] = None
@@ -269,16 +271,39 @@ class Tracker:
             )
 
         if should_flush:
-            threading.Thread(target=self.flush, daemon=True).start()
+            threading.Thread(target=self._flush_buffered, daemon=True).start()
 
     def flush(self) -> None:
-        """Send all buffered events immediately."""
+        """Send all buffered events immediately and wait for sends already in flight."""
+        self._flush_buffered()
+        self._wait_until_idle()
+
+    def _wait_until_idle(self) -> None:
+        # A count-triggered flush runs on its own thread and empties the buffer first, so without
+        # this a short-lived process sees an empty buffer, exits, and kills that thread mid-request.
+        deadline = time.monotonic() + self._options.shutdown_timeout
+        with self._idle:
+            while self._sending:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return
+                self._idle.wait(remaining)
+
+    def _flush_buffered(self) -> None:
         with self._lock:
             if not self._buffer:
                 return
             events = self._buffer.copy()
             self._buffer.clear()
+            self._sending += 1
+        try:
+            self._send_events(events)
+        finally:
+            with self._idle:
+                self._sending -= 1
+                self._idle.notify_all()
 
+    def _send_events(self, events: list[SerializedEvent]) -> None:
         # BeforeFlush hook
         if self._options.before_flush:
             events = self._options.before_flush(events)
@@ -422,7 +447,7 @@ class Tracker:
     def _flush_loop(self) -> None:
         while not self._shutdown.wait(self._options.flush_interval):
             try:
-                self.flush()
+                self._flush_buffered()
             except Exception as e:
                 self._handle_error(e)
 

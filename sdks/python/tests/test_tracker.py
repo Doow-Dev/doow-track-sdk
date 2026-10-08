@@ -172,3 +172,47 @@ def test_tracker_queue_overflow():
     assert tracker._buffer[2].quantity == 4
 
     tracker._shutdown.set()
+
+
+def _slow_tracker(release_after: float):
+    import threading
+
+    sent = []
+    started = threading.Event()
+    tracker = Tracker("dk_test_key", TrackerOptions(
+        endpoint="https://test.doow.co",
+        flush_at=1,
+        flush_interval=1000.0,
+    ))
+
+    def slow_send(body):
+        started.set()
+        time.sleep(release_after)
+        sent.append(body)
+        return None
+
+    tracker._do_send = slow_send
+    return tracker, sent, started
+
+
+def test_flush_waits_for_a_background_flush_already_sending():
+    tracker, sent, started = _slow_tracker(0.3)
+
+    tracker.track(TrackEvent(metric="api_calls", quantity=1, license_id="lic_1"))
+    assert started.wait(timeout=2.0)
+
+    tracker.flush()
+
+    assert len(sent) == 1
+    tracker.shutdown()
+
+
+def test_shutdown_waits_for_a_background_flush_already_sending():
+    tracker, sent, started = _slow_tracker(0.3)
+
+    tracker.track(TrackEvent(metric="api_calls", quantity=1, license_id="lic_1"))
+    assert started.wait(timeout=2.0)
+
+    tracker.shutdown()
+
+    assert len(sent) == 1
