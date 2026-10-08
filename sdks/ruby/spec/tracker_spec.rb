@@ -442,4 +442,16 @@ RSpec.describe DoowTrack::Tracker do
       expect(delivered).to eq([1])
     end
   end
+
+  it "does not make a flush called on the sending thread wait for its own send" do
+    reentrant = described_class.new("dk_test", endpoint: endpoint, flush_interval: 0, flush_at: 1000, retry_count: 0)
+    allow(reentrant).to receive(:send_batch) do
+      reentrant.flush
+      :delivered
+    end
+
+    track_one(reentrant)
+
+    expect { Timeout.timeout(3) { reentrant.flush } }.not_to raise_error
+  end
 end

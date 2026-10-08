@@ -93,6 +93,8 @@ module DoowTrack
     # A count-triggered flush runs on its own thread and empties the buffer first, so without
     # waiting here a short-lived process sees an empty buffer, exits, and kills that thread mid-request.
     def wait_until_idle
+      return if Thread.current[:doow_track_sending]
+
       deadline = monotonic_now + SHUTDOWN_JOIN_SECONDS
       @mutex.synchronize do
         while @sending.positive?
@@ -114,9 +116,11 @@ module DoowTrack
         @sending += 1
       end
 
+      Thread.current[:doow_track_sending] = true
       begin
         send_in_chunks(batch)
       ensure
+        Thread.current[:doow_track_sending] = false
         @mutex.synchronize do
           @sending -= 1
           @idle.broadcast

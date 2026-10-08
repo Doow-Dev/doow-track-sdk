@@ -207,6 +207,7 @@ class Tracker:
         self._lock = threading.Lock()
         self._idle = threading.Condition(self._lock)
         self._sending = 0
+        self._sending_here = threading.local()
         self._hold_until = 0.0
         self._shutdown = threading.Event()
         self._rate_limit: Optional[RateLimit] = None
@@ -276,12 +277,15 @@ class Tracker:
     def flush(self) -> None:
         """Send all buffered events immediately and wait for sends already in flight."""
         self._flush_buffered()
-        self._wait_until_idle()
+        self._wait_until_idle(self._options.shutdown_timeout)
 
-    def _wait_until_idle(self) -> None:
+    def _wait_until_idle(self, timeout: float) -> None:
         # A count-triggered flush runs on its own thread and empties the buffer first, so without
         # this a short-lived process sees an empty buffer, exits, and kills that thread mid-request.
-        deadline = time.monotonic() + self._options.shutdown_timeout
+        # A callback running on the sending thread would otherwise wait for its own send.
+        if getattr(self._sending_here, "active", False):
+            return
+        deadline = time.monotonic() + timeout
         with self._idle:
             while self._sending:
                 remaining = deadline - time.monotonic()
@@ -296,9 +300,11 @@ class Tracker:
             events = self._buffer.copy()
             self._buffer.clear()
             self._sending += 1
+        self._sending_here.active = True
         try:
             self._send_events(events)
         finally:
+            self._sending_here.active = False
             with self._idle:
                 self._sending -= 1
                 self._idle.notify_all()
@@ -484,8 +490,9 @@ class Tracker:
     def shutdown(self, timeout: Optional[float] = None) -> None:
         """Flush remaining events and stop the tracker."""
         self._shutdown.set()
-        self.flush()
         timeout = timeout or self._options.shutdown_timeout
+        self._flush_buffered()
+        self._wait_until_idle(timeout)
         self._flush_thread.join(timeout=timeout)
         self._client.close()
 
