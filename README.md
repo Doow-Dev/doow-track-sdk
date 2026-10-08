@@ -37,6 +37,8 @@ When the API is unreachable (a network error, `408`, `429`, or `5xx` after the r
 
 A function or script that exits right after it handles a request can lose events that are still in the queue. Call the SDK's flush method before the handler returns, and call its shutdown method only when the process itself is about to exit, because a tracker that has been shut down stops its background flushing, most SDKs also drop any event tracked afterwards, and a warm function instance reuses its tracker. Set the flush threshold (`flushAt`, spelled as each SDK spells it) to 1 if every event must leave immediately. The TypeScript SDK's `withLambda`, `withVercel`, and `withAzureFunction` wrappers set the threshold to 1 and flush before the handler returns, as described in the [TypeScript serverless guide](sdks/typescript/docs/serverless.md).
 
+A send that starts because the queue reached the flush threshold runs in the background, so the flush and shutdown methods also wait for any send that is already in flight before they return. That wait is capped at 30 seconds in every SDK except Python, which uses its `shutdown_timeout`, and Swift, which waits at most 2 seconds when called on the main thread. The calls block the caller while they wait, so do not call them from a UI thread or from a latency-sensitive request path.
+
 ## Standalone CLI / daemon
 
 The `doow-track` executable is also released for Linux x64/arm64, macOS x64/arm64, and Windows Server x64. It accepts newline-delimited JSON events, so applications in any supported language can use it without installing Node.js or a language SDK on the server. See the [daemon guide](docs/daemon.md) for downloads, configuration, and service setup.
