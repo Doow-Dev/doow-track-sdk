@@ -22,7 +22,10 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.time.Instant
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.locks.ReentrantLock
 import java.util.zip.GZIPOutputStream
+import kotlin.concurrent.withLock
 import kotlin.math.pow
 
 data class TrackerOptions(
@@ -48,6 +51,10 @@ class Tracker(
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = false }
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var flushJob: Job? = null
+    private val idleLock = ReentrantLock()
+    private val idle = idleLock.newCondition()
+    private var sending = 0
+    private val sendingHere = ThreadLocal.withInitial { false }
     @Volatile private var closed = false
     @Volatile private var holdUntilNanos = System.nanoTime()
 
@@ -59,7 +66,7 @@ class Tracker(
                 while (isActive) {
                     delay(options.flushIntervalMs)
                     try {
-                        flush()
+                        flushBuffered()
                     } catch (e: Exception) {
                         log("[doow-track] Flush loop error: ${e.message}")
                     }
@@ -85,20 +92,54 @@ class Tracker(
         }
 
         if (shouldFlush) {
-            scope.launch { flush() }
+            scope.launch { flushBuffered() }
         }
     }
 
     fun flush() {
+        flushBuffered()
+        awaitIdle()
+    }
+
+    // A count-triggered flush runs in its own coroutine and empties the buffer first, so without
+    // this a short-lived process sees an empty buffer, exits, and cancels that coroutine mid-request.
+    // A callback running on the sending thread would otherwise wait for its own send.
+    private fun awaitIdle() {
+        if (sendingHere.get()) return
+        idleLock.withLock {
+            var remaining = TimeUnit.MILLISECONDS.toNanos(IDLE_WAIT_MS)
+            while (sending > 0) {
+                if (remaining <= 0) return
+                remaining = idle.awaitNanos(remaining)
+            }
+        }
+    }
+
+    private fun flushBuffered() {
         if (buffer.isEmpty()) return
 
         val batch = synchronized(buffer) {
             val drained = buffer.toList()
             buffer.removeAll(drained.toSet())
+            if (drained.isNotEmpty()) idleLock.withLock { sending++ }
             drained
         }
         if (batch.isEmpty()) return
 
+        val outer = sendingHere.get()
+        sendingHere.set(true)
+        try {
+            sendInChunks(batch)
+        } finally {
+            sendingHere.set(outer)
+            idleLock.withLock {
+                sending--
+                idle.signalAll()
+            }
+        }
+    }
+
+    private fun sendInChunks(batch: List<Pending>) {
         for ((index, chunk) in batch.chunked(MAX_BATCH_EVENTS).withIndex()) {
             if (sendBatch(chunk)) {
                 requeue(batch.drop(index * MAX_BATCH_EVENTS))
@@ -279,6 +320,7 @@ class Tracker(
         private const val MAX_ERROR_TEXT = 512
         private const val MAX_BODY_CHARS = 1 shl 20
         private const val MAX_BATCH_EVENTS = 500
+        private const val IDLE_WAIT_MS = 30_000L
 
         fun parseRetryAfterMs(header: String?): Long {
             val value = header?.trim().orEmpty()
