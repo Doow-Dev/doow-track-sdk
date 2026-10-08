@@ -300,11 +300,12 @@ class Tracker:
             events = self._buffer.copy()
             self._buffer.clear()
             self._sending += 1
+        outer = getattr(self._sending_here, "active", False)
         self._sending_here.active = True
         try:
             self._send_events(events)
         finally:
-            self._sending_here.active = False
+            self._sending_here.active = outer
             with self._idle:
                 self._sending -= 1
                 self._idle.notify_all()

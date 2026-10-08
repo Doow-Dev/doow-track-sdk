@@ -241,3 +241,33 @@ def test_flush_called_from_a_callback_on_the_sending_thread_does_not_wait_for_it
 
     assert time.monotonic() - started < 1.0
     tracker.shutdown()
+
+
+def test_a_nested_flush_inside_a_callback_keeps_the_sending_thread_marked():
+    holder = {}
+
+    def before_flush(events):
+        tracker = holder["tracker"]
+        if not holder.get("nested"):
+            holder["nested"] = True
+            tracker.track(TrackEvent(metric="api_calls", quantity=2, license_id="lic_1"))
+            tracker.flush()
+            tracker.flush()
+        return events
+
+    tracker = Tracker("dk_test_key", TrackerOptions(
+        endpoint="https://test.doow.co",
+        flush_at=100,
+        flush_interval=1000.0,
+        shutdown_timeout=5.0,
+        before_flush=before_flush,
+    ))
+    holder["tracker"] = tracker
+    tracker._do_send = lambda body: None
+
+    tracker.track(TrackEvent(metric="api_calls", quantity=1, license_id="lic_1"))
+    started = time.monotonic()
+    tracker.flush()
+
+    assert time.monotonic() - started < 1.0
+    tracker.shutdown()
