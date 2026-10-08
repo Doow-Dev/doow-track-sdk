@@ -18,7 +18,7 @@ import httpx
 from .errors import APIError, DoowError, PartialAcceptError, sanitize_text
 from .types import EventKind, RateLimit, SerializedEvent, TrackEvent
 
-SDK_VERSION = "0.1.0"
+SDK_VERSION = "0.1.2"
 DEFAULT_ENDPOINT = "https://api.doow.co"
 DEFAULT_FLUSH_AT = 20
 DEFAULT_FLUSH_INTERVAL = 10.0
