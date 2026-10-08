@@ -50,7 +50,7 @@ class TrackerOptions
 
 class Tracker
 {
-    private const SDK_VERSION = '0.1.0';
+    private const SDK_VERSION = '0.1.2';
     private const MAX_BODY_BYTES = 1048576;
     private const MAX_BATCH_EVENTS = 500;
 

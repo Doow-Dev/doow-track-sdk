@@ -24,7 +24,7 @@ from .types import (
     UpdateMetricInput,
 )
 
-SDK_VERSION = "0.1.0"
+SDK_VERSION = "0.1.2"
 DEFAULT_ENDPOINT = "https://api.doow.co"
 DEFAULT_TIMEOUT = 30.0
 

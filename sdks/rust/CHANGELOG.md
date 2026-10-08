@@ -2,9 +2,12 @@
 
 ## Unreleased
 
+## [0.1.2] — 2026-10-08
+
 ### Fixed
 
 - A `unit` set on an event is now sent at event level, where earlier releases accepted it and then dropped it before the request.
+- The `sdk_version` sent in each batch and the `User-Agent` header now come from the crate version, where earlier releases reported `0.1.0`.
 
 ## [0.1.1] — 2026-10-07
 

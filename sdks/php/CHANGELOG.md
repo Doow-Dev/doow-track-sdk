@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## [0.1.2] — 2026-10-08
+
+### Fixed
+
+- The version sent to the API now matches the package version, where earlier releases reported `0.1.0`. There is no other change: this release exists because the PHP package shares one version line with the Swift SDK.
+
+## [0.1.1] — 2026-10-07
+
 ### Batch size
 
 - An unreadable response body no longer drops a chunk without a status.

@@ -28,7 +28,7 @@ class ManagementOptions
 
 class Management
 {
-    private const SDK_VERSION = '0.1.0';
+    private const SDK_VERSION = '0.1.2';
 
     private string $apiKey;
     private ManagementOptions $options;

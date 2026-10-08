@@ -186,7 +186,7 @@ struct BufferedEvent {
     let event: TrackEvent
 }
 
-let doowSdkVersion = "0.1.1"
+let doowSdkVersion = "0.1.2"
 let maxResponseBytes = 1 << 20
 let responseGraceSeconds: Double = 5
 let maxRetryAfterSeconds: Double = 30
