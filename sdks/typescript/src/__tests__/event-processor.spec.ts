@@ -348,3 +348,21 @@ describe('EventProcessor — S77', () => {
     });
   });
 });
+
+describe('EventProcessor — timer-triggered flush in flight', () => {
+  it('flush waits for a timer-triggered send that is already running', async () => {
+    let completed = 0;
+    const slowFlush = vi.fn(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      completed += 1;
+    });
+    const { processor } = makeProcessor({ flushAt: 100, flushInterval: 20 }, slowFlush);
+
+    await processor.enqueue(makeEvent());
+    await processor.enqueue(makeEvent());
+    await vi.waitFor(() => expect(slowFlush).toHaveBeenCalledTimes(2));
+    await processor.flush();
+
+    expect(completed).toBe(2);
+  });
+});

@@ -32,6 +32,7 @@ export class EventProcessor {
   private readonly _exporter: Exporter;
   /** Track pending async enqueue promises so shutdown can wait for them */
   private readonly _pendingEnqueues: Set<Promise<void>> = new Set();
+  private readonly _inFlightFlushes: Set<Promise<void>> = new Set();
 
   constructor(config: ProcessorConfig, exporter: Exporter) {
     this._config = config;
@@ -97,6 +98,7 @@ export class EventProcessor {
       await Promise.all([...this._pendingEnqueues]);
     }
     await this._triggerFlush();
+    await Promise.allSettled([...this._inFlightFlushes]);
   }
 
   /** Flush and stop timer */
@@ -126,16 +128,23 @@ export class EventProcessor {
     }, this._config.flushInterval);
   }
 
-  private async _triggerFlush(): Promise<void> {
+  private _triggerFlush(): Promise<void> {
     this._stopTimer();
 
-    if (this._queue.length === 0) return;
+    if (this._queue.length === 0) return Promise.resolve();
 
     // Drain the queue
     const batch = this._queue.splice(0, this._queue.length);
     this._currentBytes = 0;
     this._hasFlushed = true;
 
+    // A timer-triggered flush is not awaited by anyone, so flush() waits on this set instead.
+    const send = this._sendBatch(batch);
+    this._inFlightFlushes.add(send);
+    return send.finally(() => this._inFlightFlushes.delete(send));
+  }
+
+  private async _sendBatch(batch: SerializedEvent[]): Promise<void> {
     // Apply beforeFlush hook
     const finalBatch = await this._applyBeforeFlush(batch);
     if (finalBatch === null || finalBatch.length === 0) {
