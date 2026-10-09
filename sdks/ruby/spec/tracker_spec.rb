@@ -397,4 +397,129 @@ RSpec.describe DoowTrack::Tracker do
     expect(waits.size).to eq(6)
     expect(waits.max).to eq(10)
   end
+
+  describe "a count-triggered flush that is already sending" do
+    let(:delivered) { [] }
+    let(:started) { Queue.new }
+    let(:release) { Queue.new }
+    let(:eager) do
+      described_class.new("dk_test", endpoint: endpoint, flush_interval: 0, flush_at: 1, retry_count: 0)
+    end
+
+    before do
+      allow(eager).to receive(:send_batch) do |batch|
+        started << true
+        release.pop
+        delivered << batch.size
+        :delivered
+      end
+    end
+
+    def release_soon
+      Thread.new do
+        Kernel.sleep(0.2)
+        release << true
+      end
+    end
+
+    it "makes flush wait for it" do
+      track_one(eager)
+      started.pop
+      release_soon
+
+      eager.flush
+
+      expect(delivered).to eq([1])
+    end
+
+    it "makes shutdown wait for it" do
+      track_one(eager)
+      started.pop
+      release_soon
+
+      eager.shutdown
+
+      expect(delivered).to eq([1])
+    end
+  end
+
+  it "bounds shutdown by one deadline when a send never finishes" do
+    stub_const("DoowTrack::Tracker::SHUTDOWN_JOIN_SECONDS", 1)
+    started = Queue.new
+    stuck = Queue.new
+    tracker = described_class.new("dk_test", endpoint: endpoint, flush_interval: 0.05, flush_at: 1000, retry_count: 0)
+    allow(tracker).to receive(:send_batch) do
+      started << true
+      stuck.pop
+      :delivered
+    end
+    track_one(tracker)
+    started.pop
+
+    began = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    tracker.shutdown
+    elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - began
+    stuck << true
+
+    expect(elapsed).to be < 1.5
+  end
+
+  it "still waits for another tracker's send when called from inside this tracker's send" do
+    delivered = []
+    started = Queue.new
+    release = Queue.new
+    other = described_class.new("dk_test", endpoint: endpoint, flush_interval: 0, flush_at: 1, retry_count: 0)
+    allow(other).to receive(:send_batch) do |batch|
+      started << true
+      release.pop
+      delivered << batch.size
+      :delivered
+    end
+    track_one(other)
+    started.pop
+
+    outer = described_class.new("dk_test", endpoint: endpoint, flush_interval: 0, flush_at: 1000, retry_count: 0)
+    allow(outer).to receive(:send_batch) do
+      other.flush
+      :delivered
+    end
+    track_one(outer)
+    Thread.new do
+      Kernel.sleep(0.2)
+      release << true
+    end
+
+    outer.flush
+
+    expect(delivered).to eq([1])
+  end
+
+  it "keeps the sending thread marked after a nested flush inside its own send" do
+    tracker = described_class.new("dk_test", endpoint: endpoint, flush_interval: 0, flush_at: 1000, retry_count: 0)
+    nested = false
+    allow(tracker).to receive(:send_batch) do
+      unless nested
+        nested = true
+        track_one(tracker)
+        tracker.flush
+        tracker.flush
+      end
+      :delivered
+    end
+    track_one(tracker)
+
+    expect { Timeout.timeout(3) { tracker.flush } }.not_to raise_error
+  end
+
+  it "does not make a flush called on the sending thread wait for its own send" do
+    reentrant = described_class.new("dk_test", endpoint: endpoint, flush_interval: 0, flush_at: 1000, retry_count: 0)
+    allow(reentrant).to receive(:send_batch) do
+      reentrant.flush
+      :delivered
+    end
+
+    track_one(reentrant)
+
+    expect { Timeout.timeout(3) { reentrant.flush } }.not_to raise_error
+  end
 end

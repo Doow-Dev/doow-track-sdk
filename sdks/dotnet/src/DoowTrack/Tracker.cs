@@ -35,6 +35,10 @@ public class Tracker : IDisposable
     private readonly JsonSerializerOptions _jsonOptions;
     private bool _disposed;
     private long _holdUntilTicks;
+    private static readonly TimeSpan IdleWait = TimeSpan.FromSeconds(30);
+    private readonly AsyncLocal<bool> _sendingHere = new();
+    private int _sending;
+    private TaskCompletionSource _idleSignal = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     public Tracker(string apiKey, TrackerOptions? options = null)
     {
@@ -61,7 +65,7 @@ public class Tracker : IDisposable
 
         if (_options.FlushIntervalMs > 0)
         {
-            _flushTimer = new Timer(_ => _ = FlushAsync(), null, _options.FlushIntervalMs, _options.FlushIntervalMs);
+            _flushTimer = new Timer(_ => _ = FlushBufferedAsync(), null, _options.FlushIntervalMs, _options.FlushIntervalMs);
         }
     }
 
@@ -89,7 +93,7 @@ public class Tracker : IDisposable
 
             if (_buffer.Count >= _options.FlushAt && Environment.TickCount64 >= _holdUntilTicks)
             {
-                _ = FlushAsync();
+                _ = FlushBufferedAsync();
             }
         }
     }
@@ -144,14 +148,58 @@ public class Tracker : IDisposable
 
     public async Task FlushAsync()
     {
+        await FlushBufferedAsync();
+        await WaitUntilIdleAsync();
+    }
+
+    // A count-triggered flush is not awaited and empties the buffer first, so without this a
+    // short-lived process sees an empty buffer, exits, and abandons that request mid-flight.
+    // A callback running inside the send would otherwise wait for its own send.
+    private async Task WaitUntilIdleAsync()
+    {
+        if (_sendingHere.Value) return;
+        Task idle;
+        lock (_lock)
+        {
+            if (_sending == 0) return;
+            idle = _idleSignal.Task;
+        }
+        try
+        {
+            await idle.WaitAsync(IdleWait);
+        }
+        catch (TimeoutException)
+        {
+        }
+    }
+
+    private async Task FlushBufferedAsync()
+    {
         List<Pending> pending;
         lock (_lock)
         {
             if (_buffer.Count == 0) return;
             pending = new List<Pending>(_buffer);
             _buffer.Clear();
+            if (_sending++ == 0) _idleSignal = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         }
 
+        _sendingHere.Value = true;
+        try
+        {
+            await SendInChunksAsync(pending);
+        }
+        finally
+        {
+            lock (_lock)
+            {
+                if (--_sending == 0) _idleSignal.TrySetResult();
+            }
+        }
+    }
+
+    private async Task SendInChunksAsync(List<Pending> pending)
+    {
         for (var start = 0; start < pending.Count; start += MaxBatchEvents)
         {
             var retryLater = await SendBatchAsync(pending.GetRange(start, Math.Min(MaxBatchEvents, pending.Count - start)));
@@ -384,7 +432,8 @@ public class Tracker : IDisposable
 
     public void Shutdown()
     {
-        ShutdownAsync().GetAwaiter().GetResult();
+        // Run off the caller's synchronization context so blocking here cannot deadlock a UI thread.
+        Task.Run(ShutdownAsync).GetAwaiter().GetResult();
     }
 
     private Dictionary<string, object>? MergeAttribution(Dictionary<string, object>? eventAttribution)

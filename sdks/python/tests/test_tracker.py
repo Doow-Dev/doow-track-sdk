@@ -172,3 +172,153 @@ def test_tracker_queue_overflow():
     assert tracker._buffer[2].quantity == 4
 
     tracker._shutdown.set()
+
+
+def _slow_tracker(release_after: float):
+    import threading
+
+    sent = []
+    started = threading.Event()
+    tracker = Tracker("dk_test_key", TrackerOptions(
+        endpoint="https://test.doow.co",
+        flush_at=1,
+        flush_interval=1000.0,
+    ))
+
+    def slow_send(body):
+        started.set()
+        time.sleep(release_after)
+        sent.append(body)
+        return None
+
+    tracker._do_send = slow_send
+    return tracker, sent, started
+
+
+def test_flush_waits_for_a_background_flush_already_sending():
+    tracker, sent, started = _slow_tracker(0.3)
+
+    tracker.track(TrackEvent(metric="api_calls", quantity=1, license_id="lic_1"))
+    assert started.wait(timeout=2.0)
+
+    tracker.flush()
+
+    assert len(sent) == 1
+    tracker.shutdown()
+
+
+def test_shutdown_waits_for_a_background_flush_already_sending():
+    tracker, sent, started = _slow_tracker(0.3)
+
+    tracker.track(TrackEvent(metric="api_calls", quantity=1, license_id="lic_1"))
+    assert started.wait(timeout=2.0)
+
+    tracker.shutdown()
+
+    assert len(sent) == 1
+
+
+def test_flush_called_from_a_callback_on_the_sending_thread_does_not_wait_for_itself():
+    holder = {}
+
+    def before_flush(events):
+        holder["tracker"].flush()
+        return events
+
+    tracker = Tracker("dk_test_key", TrackerOptions(
+        endpoint="https://test.doow.co",
+        flush_at=100,
+        flush_interval=1000.0,
+        shutdown_timeout=5.0,
+        before_flush=before_flush,
+    ))
+    holder["tracker"] = tracker
+    tracker._do_send = lambda body: None
+
+    tracker.track(TrackEvent(metric="api_calls", quantity=1, license_id="lic_1"))
+    started = time.monotonic()
+    tracker.flush()
+
+    assert time.monotonic() - started < 1.0
+    tracker.shutdown()
+
+
+def test_a_nested_flush_inside_a_callback_keeps_the_sending_thread_marked():
+    holder = {}
+
+    def before_flush(events):
+        tracker = holder["tracker"]
+        if not holder.get("nested"):
+            holder["nested"] = True
+            tracker.track(TrackEvent(metric="api_calls", quantity=2, license_id="lic_1"))
+            tracker.flush()
+            tracker.flush()
+        return events
+
+    tracker = Tracker("dk_test_key", TrackerOptions(
+        endpoint="https://test.doow.co",
+        flush_at=100,
+        flush_interval=1000.0,
+        shutdown_timeout=5.0,
+        before_flush=before_flush,
+    ))
+    holder["tracker"] = tracker
+    tracker._do_send = lambda body: None
+
+    tracker.track(TrackEvent(metric="api_calls", quantity=1, license_id="lic_1"))
+    started = time.monotonic()
+    tracker.flush()
+
+    assert time.monotonic() - started < 1.0
+    tracker.shutdown()
+
+
+async def _slow_async_tracker():
+    import asyncio
+
+    from doow_track import AsyncTracker
+    from doow_track.tracker import _DELIVERED
+
+    sent = []
+    started = asyncio.Event()
+    tracker = AsyncTracker("dk_test_key", TrackerOptions(
+        endpoint="https://test.doow.co",
+        flush_at=1,
+        flush_interval=1000.0,
+    ))
+
+    async def slow_send(events):
+        started.set()
+        await asyncio.sleep(0.3)
+        sent.append(len(events))
+        return _DELIVERED
+
+    tracker._send_batch = slow_send
+    return tracker, sent, started
+
+
+@pytest.mark.asyncio
+async def test_async_flush_waits_for_a_count_triggered_send_already_in_flight():
+    import asyncio
+
+    tracker, sent, started = await _slow_async_tracker()
+
+    await tracker.track(TrackEvent(metric="api_calls", quantity=1, license_id="lic_1"))
+    await asyncio.wait_for(started.wait(), timeout=2.0)
+    await tracker.flush()
+
+    assert sent == [1]
+    await tracker.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_async_shutdown_waits_for_a_count_triggered_send_already_in_flight():
+    import asyncio
+
+    tracker, sent, started = await _slow_async_tracker()
+
+    await tracker.track(TrackEvent(metric="api_calls", quantity=1, license_id="lic_1"))
+    await asyncio.wait_for(started.wait(), timeout=2.0)
+    await tracker.shutdown()
+
+    assert sent == [1]

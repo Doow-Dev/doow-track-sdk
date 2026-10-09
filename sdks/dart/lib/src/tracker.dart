@@ -8,6 +8,8 @@ import 'types.dart';
 import 'errors.dart';
 
 const _maxBatchEvents = 500;
+const _idleWait = Duration(seconds: 30);
+const _sendingZone = #doowTrackSending;
 const _maxResponseBytes = 64 * 1024;
 
 class _Reply {
@@ -105,6 +107,7 @@ class Tracker {
   final String _apiKey;
   final TrackerOptions _options;
   final List<Map<String, dynamic>> _queue = [];
+  final Map<Future<void>, Object> _inFlight = {};
   Timer? _flushTimer;
   bool _shutdown = false;
   final Stopwatch _clock = Stopwatch()..start();
@@ -143,7 +146,7 @@ class Tracker {
 
   void _startFlushTimer() {
     _flushTimer?.cancel();
-    _flushTimer = Timer.periodic(_options.flushInterval, (_) => flush());
+    _flushTimer = Timer.periodic(_options.flushInterval, (_) => _flushBuffered());
   }
 
   void track(TrackEvent event) {
@@ -164,16 +167,45 @@ class Tracker {
     _log('Queued event: ${event.metric}');
 
     if (_queue.length >= _options.flushAt && _clock.elapsed >= _holdUntil) {
-      flush();
+      _flushBuffered();
     }
   }
 
   Future<void> flush() async {
-    if (_queue.isEmpty) return;
+    await _flushBuffered();
+    await _waitUntilIdle();
+  }
+
+  // A count-triggered flush is not awaited and empties the queue first, so without this a
+  // short-lived program sees an empty queue and exits while that request is still in flight.
+  // A callback running inside the send would otherwise wait for its own send.
+  Future<void> _waitUntilIdle() async {
+    final own = Zone.current[_sendingZone];
+    final others = [
+      for (final entry in _inFlight.entries)
+        if (!identical(entry.value, own)) entry.key,
+    ];
+    if (others.isEmpty) return;
+    await Future.wait(others.map((send) => send.catchError((_) {})))
+        .timeout(_idleWait, onTimeout: () => const []);
+  }
+
+  Future<void> _flushBuffered() {
+    if (_queue.isEmpty) return Future<void>.value();
 
     final batch = List<Map<String, dynamic>>.from(_queue);
     _queue.clear();
 
+    final token = Object();
+    final send = runZoned(
+      () => _sendInChunks(batch),
+      zoneValues: {_sendingZone: token},
+    );
+    _inFlight[send] = token;
+    return send.whenComplete(() => _inFlight.remove(send));
+  }
+
+  Future<void> _sendInChunks(List<Map<String, dynamic>> batch) async {
     _log('Flushing ${batch.length} events');
 
     for (var start = 0; start < batch.length; start += _maxBatchEvents) {

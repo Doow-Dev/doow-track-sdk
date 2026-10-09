@@ -348,3 +348,66 @@ describe('EventProcessor — S77', () => {
     });
   });
 });
+
+describe('EventProcessor: timer-triggered flush in flight', () => {
+  it('flush waits for a timer-triggered send that is already running', async () => {
+    let completed = 0;
+    const slowFlush = vi.fn(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      completed += 1;
+    });
+    const { processor } = makeProcessor({ flushAt: 100, flushInterval: 20 }, slowFlush);
+
+    await processor.enqueue(makeEvent());
+    await processor.enqueue(makeEvent());
+    await vi.waitFor(() => expect(slowFlush).toHaveBeenCalledTimes(2));
+    await processor.flush();
+
+    expect(completed).toBe(2);
+  });
+});
+
+describe('EventProcessor: flush wait cap', () => {
+  it('stops waiting for a send that never finishes after 30 seconds', async () => {
+    vi.useFakeTimers();
+    try {
+      const stuck = vi.fn(() => new Promise<void>(() => undefined));
+      const { processor } = makeProcessor({ flushAt: 100, flushInterval: 20 }, stuck);
+
+      void processor.enqueue(makeEvent());
+      void processor.enqueue(makeEvent());
+      await vi.advanceTimersByTimeAsync(100);
+      expect(stuck).toHaveBeenCalledTimes(2);
+
+      let returned = false;
+      void processor.flush().then(() => {
+        returned = true;
+      });
+      await vi.advanceTimersByTimeAsync(29_000);
+      expect(returned).toBe(false);
+      await vi.advanceTimersByTimeAsync(2_000);
+
+      expect(returned).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('EventProcessor: shutdown with a timer-triggered send in flight', () => {
+  it('shutdown waits for a timer-triggered send that is already running', async () => {
+    let completed = 0;
+    const slowFlush = vi.fn(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      completed += 1;
+    });
+    const { processor } = makeProcessor({ flushAt: 100, flushInterval: 20 }, slowFlush);
+
+    await processor.enqueue(makeEvent());
+    await processor.enqueue(makeEvent());
+    await vi.waitFor(() => expect(slowFlush).toHaveBeenCalledTimes(2));
+    await processor.shutdown();
+
+    expect(completed).toBe(2);
+  });
+});

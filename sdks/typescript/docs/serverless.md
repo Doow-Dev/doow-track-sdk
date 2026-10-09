@@ -24,7 +24,7 @@ export const handler = meter.withLambda(async (event, context) => {
 - The `DoowTracker` constructor is outside the handler, so it runs once per cold start.
 - The first `track()` call triggers an immediate flush (first-event fast path).
 - `flushAt=1` means every subsequent `track()` also flushes immediately.
-- `flush()` sends the queued events and waits for the request to finish, so a warm instance keeps its tracker between invocations. Call `shutdown()` only when the process itself is about to exit; it waits for in-flight flushes up to `shutdownTimeout` (default 5s) and stops the tracker for good.
+- `flush()` sends the queued events and waits for the request to finish, including a send that the flush timer started earlier and is still running, so a warm instance keeps its tracker between invocations. Call `shutdown()` only when the process itself is about to exit; it waits for in-flight flushes up to `shutdownTimeout` (default 5s) and stops the tracker for good.
 
 ### Lambda layers
 
