@@ -31,29 +31,33 @@ module DoowTrack
     SUM = "SUM"
     MAX = "MAX"
     CUMULATIVE = "CUMULATIVE"
+    PEAK = "PEAK"
+    AVERAGE = "AVERAGE"
+    BALANCE = "BALANCE"
   end
 
   module RateKind
     PER_UNIT = "PER_UNIT"
     FLAT_FEE = "FLAT_FEE"
     PER_SEAT = "PER_SEAT"
-    TIERED = "TIERED"
-    VOLUME = "VOLUME"
+    PERCENTAGE = "PERCENTAGE"
+    USAGE = "USAGE"
   end
 
   module EntitlementPeriod
     MONTHLY = "MONTHLY"
-    YEARLY = "YEARLY"
     QUARTERLY = "QUARTERLY"
-    WEEKLY = "WEEKLY"
-    DAILY = "DAILY"
-    ONE_TIME = "ONE_TIME"
+    ANNUALLY = "ANNUALLY"
+    TERM = "TERM"
+    UNTIL_EXHAUSTED = "UNTIL_EXHAUSTED"
+    NONE = "NONE"
   end
 
   module CarryoverPolicy
     EXPIRE_AT_PERIOD_END = "EXPIRE_AT_PERIOD_END"
     ROLLOVER = "ROLLOVER"
-    ROLLOVER_CAPPED = "ROLLOVER_CAPPED"
+    FIFO_VINTAGE = "FIFO_VINTAGE"
+    RESET = "RESET"
   end
 
   module CostAmortization

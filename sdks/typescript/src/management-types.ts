@@ -246,19 +246,19 @@ export interface ListLicensesParams extends PaginationParams {
 
 // ─── Metrics ───────────────────────────────────────────────────────────────
 
-export type UsageAggregationType = 'SUM' | 'MAX' | 'CUMULATIVE';
+export type UsageAggregationType = 'SUM' | 'MAX' | 'CUMULATIVE' | 'PEAK' | 'AVERAGE' | 'BALANCE';
 
-export type RateKind = 'PER_UNIT' | 'FLAT_FEE' | 'PER_SEAT' | 'TIERED' | 'VOLUME';
+export type RateKind = 'PER_UNIT' | 'FLAT_FEE' | 'PER_SEAT' | 'PERCENTAGE' | 'USAGE';
 
 export type EntitlementPeriod =
   | 'MONTHLY'
-  | 'YEARLY'
   | 'QUARTERLY'
-  | 'WEEKLY'
-  | 'DAILY'
-  | 'ONE_TIME';
+  | 'ANNUALLY'
+  | 'TERM'
+  | 'UNTIL_EXHAUSTED'
+  | 'NONE';
 
-export type CarryoverPolicy = 'EXPIRE_AT_PERIOD_END' | 'ROLLOVER' | 'ROLLOVER_CAPPED';
+export type CarryoverPolicy = 'EXPIRE_AT_PERIOD_END' | 'ROLLOVER' | 'FIFO_VINTAGE' | 'RESET';
 
 export interface CreateMetricInput {
   metric_type: string;

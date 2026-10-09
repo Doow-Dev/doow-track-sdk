@@ -35,7 +35,10 @@ enum class AllLicenseType {
 enum class UsageAggregationType {
     @SerialName("SUM") SUM,
     @SerialName("MAX") MAX,
-    @SerialName("CUMULATIVE") CUMULATIVE
+    @SerialName("CUMULATIVE") CUMULATIVE,
+    @SerialName("PEAK") PEAK,
+    @SerialName("AVERAGE") AVERAGE,
+    @SerialName("BALANCE") BALANCE
 }
 
 @Serializable
@@ -43,25 +46,26 @@ enum class RateKind {
     @SerialName("PER_UNIT") PER_UNIT,
     @SerialName("FLAT_FEE") FLAT_FEE,
     @SerialName("PER_SEAT") PER_SEAT,
-    @SerialName("TIERED") TIERED,
-    @SerialName("VOLUME") VOLUME
+    @SerialName("PERCENTAGE") PERCENTAGE,
+    @SerialName("USAGE") USAGE
 }
 
 @Serializable
 enum class EntitlementPeriod {
     @SerialName("MONTHLY") MONTHLY,
-    @SerialName("YEARLY") YEARLY,
     @SerialName("QUARTERLY") QUARTERLY,
-    @SerialName("WEEKLY") WEEKLY,
-    @SerialName("DAILY") DAILY,
-    @SerialName("ONE_TIME") ONE_TIME
+    @SerialName("ANNUALLY") ANNUALLY,
+    @SerialName("TERM") TERM,
+    @SerialName("UNTIL_EXHAUSTED") UNTIL_EXHAUSTED,
+    @SerialName("NONE") NONE
 }
 
 @Serializable
 enum class CarryoverPolicy {
     @SerialName("EXPIRE_AT_PERIOD_END") EXPIRE_AT_PERIOD_END,
     @SerialName("ROLLOVER") ROLLOVER,
-    @SerialName("ROLLOVER_CAPPED") ROLLOVER_CAPPED
+    @SerialName("FIFO_VINTAGE") FIFO_VINTAGE,
+    @SerialName("RESET") RESET
 }
 
 @Serializable

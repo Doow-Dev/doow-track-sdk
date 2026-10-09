@@ -37,6 +37,9 @@ enum UsageAggregationType: string
     case SUM = 'SUM';
     case MAX = 'MAX';
     case CUMULATIVE = 'CUMULATIVE';
+    case PEAK = 'PEAK';
+    case AVERAGE = 'AVERAGE';
+    case BALANCE = 'BALANCE';
 }
 
 enum RateKind: string
@@ -44,25 +47,26 @@ enum RateKind: string
     case PER_UNIT = 'PER_UNIT';
     case FLAT_FEE = 'FLAT_FEE';
     case PER_SEAT = 'PER_SEAT';
-    case TIERED = 'TIERED';
-    case VOLUME = 'VOLUME';
+    case PERCENTAGE = 'PERCENTAGE';
+    case USAGE = 'USAGE';
 }
 
 enum EntitlementPeriod: string
 {
     case MONTHLY = 'MONTHLY';
-    case YEARLY = 'YEARLY';
     case QUARTERLY = 'QUARTERLY';
-    case WEEKLY = 'WEEKLY';
-    case DAILY = 'DAILY';
-    case ONE_TIME = 'ONE_TIME';
+    case ANNUALLY = 'ANNUALLY';
+    case TERM = 'TERM';
+    case UNTIL_EXHAUSTED = 'UNTIL_EXHAUSTED';
+    case NONE = 'NONE';
 }
 
 enum CarryoverPolicy: string
 {
     case EXPIRE_AT_PERIOD_END = 'EXPIRE_AT_PERIOD_END';
     case ROLLOVER = 'ROLLOVER';
-    case ROLLOVER_CAPPED = 'ROLLOVER_CAPPED';
+    case FIFO_VINTAGE = 'FIFO_VINTAGE';
+    case RESET = 'RESET';
 }
 
 enum CostAmortization: string

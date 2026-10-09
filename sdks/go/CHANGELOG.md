@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Changed
+
+- `EntitlementPeriod` and `CarryoverPolicy` now list the values the API accepts, so code that referenced `YEARLY`, `WEEKLY`, `DAILY`, `ONE_TIME`, or `ROLLOVER_CAPPED` no longer compiles. `entitlement_period` is `MONTHLY`, `QUARTERLY`, `ANNUALLY`, `TERM`, `UNTIL_EXHAUSTED`, or `NONE`, and `carryover_policy` is `EXPIRE_AT_PERIOD_END`, `ROLLOVER`, `FIFO_VINTAGE`, or `RESET`. The API never accepted the removed values.
+- `RateKind` now lists `PER_UNIT`, `FLAT_FEE`, `PER_SEAT`, `PERCENTAGE`, and `USAGE`, the values the API stores. `TIERED` and `VOLUME` never existed on the API side, so code that referenced them no longer compiles. Creating a metric through the SDK accepts all five; for `PERCENTAGE`, `usage_rate` is a fraction between 0 and 1 and `quantity` is the amount it applies to.
+- `UsageAggregationType` now also lists `PEAK`, `AVERAGE`, and `BALANCE`, which the API stores for metrics created in the dashboard, so listing or reading such a metric no longer fails to parse. Creating a metric through the SDK accepts all six, the same as the dashboard.
+- The same fields of `Metric` (`UsageRate`, `UsageLimit`, `UsageIncluded`, `PerUnitCap`, `UsageRateIsEstimated`, `ExpectedEmissionIntervalMins`) are pointers too, so a limit of `0` reads as `0` and a field the API did not send reads as `nil`. Code that read one of them as a plain value must dereference it after checking for `nil`.
+- The optional numeric and boolean fields of `CreateMetricInput` (`UsageRate`, `UsageLimit`, `UsageIncluded`, `PerUnitCap`, `UsageRateIsEstimated`, `ExpectedEmissionIntervalMins`) are now pointers, so a value of `0` or `false` is sent instead of being dropped as empty, and `doow.Ptr` builds the pointer: `UsageLimit: doow.Ptr(0.0)`. Code that set one of these fields to a plain value needs `doow.Ptr(...)`.
+
 ## [0.1.1] — 2026-10-07
 
 ### Batch size

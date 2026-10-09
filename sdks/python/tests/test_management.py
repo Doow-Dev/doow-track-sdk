@@ -166,3 +166,26 @@ def test_expenses_list(httpx_mock: HTTPXMock):
 
     assert len(result.data) == 1
     assert result.data[0].total == 150.00
+
+
+@pytest.mark.parametrize("aggregation", ["PEAK", "AVERAGE", "BALANCE"])
+def test_metrics_get_reads_aggregation_types_created_elsewhere(httpx_mock: HTTPXMock, aggregation):
+    """A metric made in the dashboard can use an aggregation the SDK cannot create."""
+    httpx_mock.add_response(
+        url="https://test.doow.co/sdk/metrics/metric_1",
+        method="GET",
+        json={
+            "id": "metric_1",
+            "metric_type": "seats_peak",
+            "usage_aggregation_type": aggregation,
+            "rate_kind": "PER_UNIT",
+            "license_id": "lic_1",
+            "created_at": "2026-01-01T00:00:00Z",
+            "updated_at": "2026-01-01T00:00:00Z",
+        },
+    )
+
+    with Management("dk_test_key", ManagementOptions(endpoint="https://test.doow.co")) as mgmt:
+        metric = mgmt.metrics.get("metric_1")
+
+    assert metric.usage_aggregation_type.value == aggregation

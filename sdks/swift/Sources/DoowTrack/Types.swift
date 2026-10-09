@@ -28,29 +28,33 @@ public enum UsageAggregationType: String, Codable {
     case sum = "SUM"
     case max = "MAX"
     case cumulative = "CUMULATIVE"
+    case peak = "PEAK"
+    case average = "AVERAGE"
+    case balance = "BALANCE"
 }
 
 public enum RateKind: String, Codable {
     case perUnit = "PER_UNIT"
     case flatFee = "FLAT_FEE"
     case perSeat = "PER_SEAT"
-    case tiered = "TIERED"
-    case volume = "VOLUME"
+    case percentage = "PERCENTAGE"
+    case usage = "USAGE"
 }
 
 public enum EntitlementPeriod: String, Codable {
     case monthly = "MONTHLY"
-    case yearly = "YEARLY"
     case quarterly = "QUARTERLY"
-    case weekly = "WEEKLY"
-    case daily = "DAILY"
-    case oneTime = "ONE_TIME"
+    case annually = "ANNUALLY"
+    case term = "TERM"
+    case untilExhausted = "UNTIL_EXHAUSTED"
+    case none = "NONE"
 }
 
 public enum CarryoverPolicy: String, Codable {
     case expireAtPeriodEnd = "EXPIRE_AT_PERIOD_END"
     case rollover = "ROLLOVER"
-    case rolloverCapped = "ROLLOVER_CAPPED"
+    case fifoVintage = "FIFO_VINTAGE"
+    case reset = "RESET"
 }
 
 public enum CostAmortization: String, Codable {

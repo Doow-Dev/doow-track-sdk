@@ -213,3 +213,92 @@ func TestManagement_APIError(t *testing.T) {
 		t.Errorf("expected NOT_FOUND, got %s", apiErr.Code)
 	}
 }
+
+func TestManagement_CreateMetricSendsZeroAndFalseValues(t *testing.T) {
+	var sent map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "POST" && r.URL.Path == "/sdk/licenses/lic_1/metrics" {
+			json.NewDecoder(r.Body).Decode(&sent)
+			json.NewEncoder(w).Encode(Metric{ID: "met_1"})
+			return
+		}
+		t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	mgmt := NewManagement("dk_test_key", &ManagementOptions{Endpoint: server.URL})
+	_, err := mgmt.Metrics.Create(context.Background(), "lic_1", CreateMetricInput{
+		MetricType:                   "fees",
+		RateKind:                     RateKindPercent,
+		UsageRate:                    Ptr(0.0),
+		UsageLimit:                   Ptr(0.0),
+		UsageIncluded:                Ptr(0.0),
+		PerUnitCap:                   Ptr(0.0),
+		UsageRateIsEstimated:         Ptr(false),
+		ExpectedEmissionIntervalMins: Ptr(1),
+	})
+	if err != nil {
+		t.Fatalf("create failed: %v", err)
+	}
+
+	for _, field := range []string{
+		"usage_rate", "usage_limit", "usage_included", "per_unit_cap",
+		"usage_rate_is_estimated", "expected_emission_interval_minutes",
+	} {
+		if _, ok := sent[field]; !ok {
+			t.Errorf("%s was dropped from the request body: %v", field, sent)
+		}
+	}
+	if sent["usage_rate_is_estimated"] != false {
+		t.Errorf("usage_rate_is_estimated = %v, want false", sent["usage_rate_is_estimated"])
+	}
+}
+
+func TestManagement_CreateMetricWithOnlyATypeSendsNothingElse(t *testing.T) {
+	var sent map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewDecoder(r.Body).Decode(&sent)
+		json.NewEncoder(w).Encode(Metric{ID: "met_1"})
+	}))
+	defer server.Close()
+
+	mgmt := NewManagement("dk_test_key", &ManagementOptions{Endpoint: server.URL})
+	if _, err := mgmt.Metrics.Create(context.Background(), "lic_1", CreateMetricInput{MetricType: "api_calls"}); err != nil {
+		t.Fatalf("create failed: %v", err)
+	}
+
+	if len(sent) != 1 || sent["metric_type"] != "api_calls" {
+		t.Errorf("body = %v, want only metric_type", sent)
+	}
+}
+
+func TestMetric_TellsAZeroLimitApartFromNoLimit(t *testing.T) {
+	var withZeros Metric
+	body := `{"id":"m","usage_rate":0,"usage_limit":0,"usage_included":0,"per_unit_cap":0,` +
+		`"usage_rate_is_estimated":false,"expected_emission_interval_minutes":0}`
+	if err := json.Unmarshal([]byte(body), &withZeros); err != nil {
+		t.Fatalf("decode failed: %v", err)
+	}
+
+	for name, isSet := range map[string]bool{
+		"usage_rate":                         withZeros.UsageRate != nil,
+		"usage_limit":                        withZeros.UsageLimit != nil,
+		"usage_included":                     withZeros.UsageIncluded != nil,
+		"per_unit_cap":                       withZeros.PerUnitCap != nil,
+		"usage_rate_is_estimated":            withZeros.UsageRateIsEstimated != nil,
+		"expected_emission_interval_minutes": withZeros.ExpectedEmissionIntervalMins != nil,
+	} {
+		if !isSet {
+			t.Errorf("%s was present with a zero value but reads as unset", name)
+		}
+	}
+
+	var absent Metric
+	if err := json.Unmarshal([]byte(`{"id":"m"}`), &absent); err != nil {
+		t.Fatalf("decode failed: %v", err)
+	}
+	if absent.UsageLimit != nil || absent.UsageRate != nil || absent.UsageRateIsEstimated != nil {
+		t.Errorf("absent fields should read as nil: %+v", absent)
+	}
+}

@@ -36,29 +36,33 @@ class UsageAggregationType(str, Enum):
     SUM = "SUM"
     MAX = "MAX"
     CUMULATIVE = "CUMULATIVE"
+    PEAK = "PEAK"
+    AVERAGE = "AVERAGE"
+    BALANCE = "BALANCE"
 
 
 class RateKind(str, Enum):
     PER_UNIT = "PER_UNIT"
     FLAT_FEE = "FLAT_FEE"
     PER_SEAT = "PER_SEAT"
-    TIERED = "TIERED"
-    VOLUME = "VOLUME"
+    PERCENTAGE = "PERCENTAGE"
+    USAGE = "USAGE"
 
 
 class EntitlementPeriod(str, Enum):
     MONTHLY = "MONTHLY"
-    YEARLY = "YEARLY"
     QUARTERLY = "QUARTERLY"
-    WEEKLY = "WEEKLY"
-    DAILY = "DAILY"
-    ONE_TIME = "ONE_TIME"
+    ANNUALLY = "ANNUALLY"
+    TERM = "TERM"
+    UNTIL_EXHAUSTED = "UNTIL_EXHAUSTED"
+    NONE = "NONE"
 
 
 class CarryoverPolicy(str, Enum):
     EXPIRE_AT_PERIOD_END = "EXPIRE_AT_PERIOD_END"
     ROLLOVER = "ROLLOVER"
-    ROLLOVER_CAPPED = "ROLLOVER_CAPPED"
+    FIFO_VINTAGE = "FIFO_VINTAGE"
+    RESET = "RESET"
 
 
 class CostAmortization(str, Enum):

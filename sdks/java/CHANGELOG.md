@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Added
+
+- `Models.CreateMetricInput` and `Models.Metric` now carry `usageCustomUnitLabel`, `entitlementPeriod`, `carryoverPolicy`, `usageLimit`, `usageIncluded`, `perUnitCap`, `usageRateIsEstimated`, and `expectedEmissionIntervalMinutes`, so a metric can be created with a unit label and entitlement settings and read back with them. All are optional, and `rateKind` and `entitlementPeriod` are strings (`PER_UNIT`, `FLAT_FEE`, `PER_SEAT`, `PERCENTAGE`, or `USAGE` for `rateKind`; `MONTHLY`, `QUARTERLY`, `ANNUALLY`, `TERM`, `UNTIL_EXHAUSTED`, or `NONE` for `entitlementPeriod`).
+
+### Changed
+
+- `CarryoverPolicy` now lists the values the API accepts: `EXPIRE_AT_PERIOD_END`, `ROLLOVER`, `FIFO_VINTAGE`, and `RESET`. Code that referenced `ROLLOVER_CAPPED` no longer compiles, and the API never accepted it.
+
 ## [0.1.1] — 2026-10-07
 
 ### Batch size

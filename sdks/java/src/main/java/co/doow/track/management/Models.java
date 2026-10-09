@@ -90,6 +90,14 @@ public class Models {
         @JsonProperty("rate_kind") public String rateKind;
         @JsonProperty("license_id") public String licenseId;
         @JsonProperty("usage_rate") public Double usageRate;
+        @JsonProperty("usage_custom_unit_label") public String usageCustomUnitLabel;
+        @JsonProperty("entitlement_period") public String entitlementPeriod;
+        @JsonProperty("carryover_policy") public String carryoverPolicy;
+        @JsonProperty("usage_limit") public Double usageLimit;
+        @JsonProperty("usage_included") public Double usageIncluded;
+        @JsonProperty("per_unit_cap") public Double perUnitCap;
+        @JsonProperty("usage_rate_is_estimated") public Boolean usageRateIsEstimated;
+        @JsonProperty("expected_emission_interval_minutes") public Integer expectedEmissionIntervalMinutes;
         @JsonProperty("created_at") public Instant createdAt;
         @JsonProperty("updated_at") public Instant updatedAt;
     }
@@ -100,6 +108,14 @@ public class Models {
         @JsonProperty("usage_aggregation_type") public String usageAggregationType;
         @JsonProperty("rate_kind") public String rateKind;
         @JsonProperty("usage_rate") public Double usageRate;
+        @JsonProperty("usage_custom_unit_label") public String usageCustomUnitLabel;
+        @JsonProperty("entitlement_period") public String entitlementPeriod;
+        @JsonProperty("carryover_policy") public String carryoverPolicy;
+        @JsonProperty("usage_limit") public Double usageLimit;
+        @JsonProperty("usage_included") public Double usageIncluded;
+        @JsonProperty("per_unit_cap") public Double perUnitCap;
+        @JsonProperty("usage_rate_is_estimated") public Boolean usageRateIsEstimated;
+        @JsonProperty("expected_emission_interval_minutes") public Integer expectedEmissionIntervalMinutes;
 
         public CreateMetricInput() {}
         public CreateMetricInput(String metricType) { this.metricType = metricType; }
