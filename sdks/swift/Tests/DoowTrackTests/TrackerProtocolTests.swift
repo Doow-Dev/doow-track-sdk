@@ -80,10 +80,10 @@ final class TrackerProtocolTests {
         session = URLSession(configuration: config)
     }
 
-    private func makeTracker(retryCount: Int = 2, timeoutSeconds: Double = 10) throws -> Tracker {
+    private func makeTracker(retryCount: Int = 2, timeoutSeconds: Double = 10, flushAt: Int = 1000) throws -> Tracker {
         try Tracker("dk_test", options: TrackerOptions(
             endpoint: "https://test.doow.co",
-            flushAt: 1000,
+            flushAt: flushAt,
             flushIntervalSeconds: 0,
             timeoutSeconds: timeoutSeconds,
             retryCount: retryCount,
@@ -98,6 +98,58 @@ final class TrackerProtocolTests {
 
     private func json(_ data: Data) throws -> [String: Any] {
         try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+    }
+
+    private final class SlowServer {
+        let started = DispatchSemaphore(value: 0)
+        private let lock = NSLock()
+        private var count = 0
+        var completed: Int {
+            lock.lock()
+            defer { lock.unlock() }
+            return count
+        }
+        func respond() -> (Int, Data) {
+            started.signal()
+            Thread.sleep(forTimeInterval: 0.4)
+            lock.lock()
+            count += 1
+            lock.unlock()
+            return (202, Data())
+        }
+    }
+
+    @Test func flushWaitsForACountTriggeredSendAlreadyInFlight() throws {
+        let server = SlowServer()
+        StubURLProtocol.responder = { _ in server.respond() }
+        let tracker = try makeTracker(retryCount: 0, flushAt: 1)
+
+        track(tracker)
+        #expect(server.started.wait(timeout: .now() + 2) == .success)
+        tracker.flush()
+
+        #expect(server.completed == 1)
+        tracker.shutdown()
+    }
+
+    @Test func theMainThreadNeverWaitsAsLongAsABackgroundThread() {
+        let main = Tracker.idleWait(onMainThread: true)
+        let background = Tracker.idleWait(onMainThread: false)
+
+        #expect(main <= 2)
+        #expect(main < background)
+    }
+
+    @Test func shutdownWaitsForACountTriggeredSendAlreadyInFlight() throws {
+        let server = SlowServer()
+        StubURLProtocol.responder = { _ in server.respond() }
+        let tracker = try makeTracker(retryCount: 0, flushAt: 1)
+
+        track(tracker)
+        #expect(server.started.wait(timeout: .now() + 2) == .success)
+        tracker.shutdown()
+
+        #expect(server.completed == 1)
     }
 
     @Test func batchEnvelopeAndObjectTupleHint() throws {

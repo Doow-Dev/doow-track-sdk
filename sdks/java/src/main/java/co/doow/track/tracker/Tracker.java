@@ -27,9 +27,12 @@ public class Tracker implements AutoCloseable {
     private static final int MAX_ERROR_TEXT = 512;
     private static final int MAX_BODY_CHARS = 1 << 20;
     private static final int MAX_BATCH_EVENTS = 500;
+    private static final long IDLE_WAIT_MS = 30_000;
 
     private final List<Pending> buffer = new ArrayList<>();
     private final Object lock = new Object();
+    private int sending = 0;
+    private final ThreadLocal<Boolean> sendingHere = ThreadLocal.withInitial(() -> false);
     private final ScheduledExecutorService scheduler;
     private volatile boolean closed = false;
     private volatile long holdUntilNanos = System.nanoTime();
@@ -102,7 +105,7 @@ public class Tracker implements AutoCloseable {
 
     private void flushQuietly() {
         try {
-            flush();
+            flushBuffered();
         } catch (RuntimeException e) {
             if (options.isDebug()) {
                 System.err.println("[doow-track] Flush error: " + e.getMessage());
@@ -111,13 +114,56 @@ public class Tracker implements AutoCloseable {
     }
 
     public void flush() {
+        flushBuffered();
+        awaitIdle();
+    }
+
+    // A count-triggered flush runs on the scheduler thread and empties the buffer first, so without
+    // this a short-lived process sees an empty buffer, exits, and kills that thread mid-request.
+    // A callback running on the sending thread would otherwise wait for its own send.
+    private void awaitIdle() {
+        if (sendingHere.get()) return;
+        long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(IDLE_WAIT_MS);
+        synchronized (lock) {
+            while (sending > 0) {
+                long remainingMs = TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime());
+                if (remainingMs <= 0) return;
+                try {
+                    lock.wait(remainingMs);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+            }
+        }
+    }
+
+    private void flushBuffered() {
         List<Pending> batch;
         synchronized (lock) {
             if (buffer.isEmpty()) return;
             batch = new ArrayList<>(buffer);
             buffer.clear();
+            sending++;
         }
+        boolean outer = sendingHere.get();
+        sendingHere.set(true);
+        try {
+            sendInChunks(batch);
+        } finally {
+            if (outer) {
+                sendingHere.set(true);
+            } else {
+                sendingHere.remove();
+            }
+            synchronized (lock) {
+                sending--;
+                lock.notifyAll();
+            }
+        }
+    }
 
+    private void sendInChunks(List<Pending> batch) {
         for (int start = 0; start < batch.size(); start += MAX_BATCH_EVENTS) {
             boolean retryLater = sendBatch(
                 new ArrayList<>(batch.subList(start, Math.min(start + MAX_BATCH_EVENTS, batch.size()))));

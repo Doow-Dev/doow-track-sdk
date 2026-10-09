@@ -205,6 +205,9 @@ class Tracker:
 
         self._buffer: list[SerializedEvent] = []
         self._lock = threading.Lock()
+        self._idle = threading.Condition(self._lock)
+        self._sending = 0
+        self._sending_here = threading.local()
         self._hold_until = 0.0
         self._shutdown = threading.Event()
         self._rate_limit: Optional[RateLimit] = None
@@ -269,16 +272,45 @@ class Tracker:
             )
 
         if should_flush:
-            threading.Thread(target=self.flush, daemon=True).start()
+            threading.Thread(target=self._flush_buffered, daemon=True).start()
 
     def flush(self) -> None:
-        """Send all buffered events immediately."""
+        """Send all buffered events immediately and wait for sends already in flight."""
+        self._flush_buffered()
+        self._wait_until_idle(self._options.shutdown_timeout)
+
+    def _wait_until_idle(self, timeout: float) -> None:
+        # A count-triggered flush runs on its own thread and empties the buffer first, so without
+        # this a short-lived process sees an empty buffer, exits, and kills that thread mid-request.
+        # A callback running on the sending thread would otherwise wait for its own send.
+        if getattr(self._sending_here, "active", False):
+            return
+        deadline = time.monotonic() + timeout
+        with self._idle:
+            while self._sending:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return
+                self._idle.wait(remaining)
+
+    def _flush_buffered(self) -> None:
         with self._lock:
             if not self._buffer:
                 return
             events = self._buffer.copy()
             self._buffer.clear()
+            self._sending += 1
+        outer = getattr(self._sending_here, "active", False)
+        self._sending_here.active = True
+        try:
+            self._send_events(events)
+        finally:
+            self._sending_here.active = outer
+            with self._idle:
+                self._sending -= 1
+                self._idle.notify_all()
 
+    def _send_events(self, events: list[SerializedEvent]) -> None:
         # BeforeFlush hook
         if self._options.before_flush:
             events = self._options.before_flush(events)
@@ -422,7 +454,7 @@ class Tracker:
     def _flush_loop(self) -> None:
         while not self._shutdown.wait(self._options.flush_interval):
             try:
-                self.flush()
+                self._flush_buffered()
             except Exception as e:
                 self._handle_error(e)
 
@@ -459,8 +491,9 @@ class Tracker:
     def shutdown(self, timeout: Optional[float] = None) -> None:
         """Flush remaining events and stop the tracker."""
         self._shutdown.set()
-        self.flush()
         timeout = timeout or self._options.shutdown_timeout
+        self._flush_buffered()
+        self._wait_until_idle(timeout)
         self._flush_thread.join(timeout=timeout)
         self._client.close()
 
@@ -493,6 +526,7 @@ class AsyncTracker:
 
         self._buffer: list[SerializedEvent] = []
         self._lock = asyncio.Lock()
+        self._sending: set[asyncio.Task] = set()
         self._hold_until = 0.0
         self._shutdown = False
         self._rate_limit: Optional[RateLimit] = None
@@ -551,10 +585,24 @@ class AsyncTracker:
             )
 
         if should_flush:
-            asyncio.create_task(self.flush())
+            task = asyncio.create_task(self._flush_buffered())
+            self._sending.add(task)
+            task.add_done_callback(self._sending.discard)
 
     async def flush(self) -> None:
-        """Send all buffered events immediately."""
+        """Send all buffered events immediately and wait for sends already in flight."""
+        await self._flush_buffered()
+        await self._wait_until_idle()
+
+    async def _wait_until_idle(self) -> None:
+        # A count-triggered flush runs as its own task and empties the buffer first, so without
+        # this a short-lived program sees an empty buffer and exits while that request is in flight.
+        # A callback running inside a send task would otherwise wait for itself.
+        others = {task for task in self._sending if task is not asyncio.current_task()}
+        if others:
+            await asyncio.wait(others, timeout=self._options.shutdown_timeout)
+
+    async def _flush_buffered(self) -> None:
         async with self._lock:
             if not self._buffer:
                 return
@@ -646,7 +694,7 @@ class AsyncTracker:
         while not self._shutdown:
             await asyncio.sleep(self._options.flush_interval)
             try:
-                await self.flush()
+                await self._flush_buffered()
             except Exception:
                 pass
 

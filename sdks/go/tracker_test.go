@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -957,4 +958,43 @@ func TestTracker_InFlightUnavailableBatchWaitsForRetryAfterAndRetriesTheSameBatc
 	if payloads[0].BatchID != payloads[1].BatchID {
 		t.Fatalf("batch id changed across the rate-limited retry")
 	}
+}
+
+func slowServer(t *testing.T, started chan<- struct{}, completed *int32) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case started <- struct{}{}:
+		default:
+		}
+		time.Sleep(300 * time.Millisecond)
+		atomic.AddInt32(completed, 1)
+		w.WriteHeader(http.StatusAccepted)
+	}))
+}
+
+func TestTracker_FlushWaitsForACountTriggeredSendAlreadyInFlight(t *testing.T) {
+	started := make(chan struct{}, 1)
+	var completed int32
+	server := slowServer(t, started, &completed)
+	defer server.Close()
+
+	tracker := NewTracker("dk_test_key", &TrackerOptions{
+		Endpoint:      server.URL,
+		FlushAt:       1,
+		FlushInterval: time.Hour,
+	})
+	tracker.Track(TrackEvent{Metric: "api_calls", Quantity: 1, LicenseID: "lic_1"})
+
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the count-triggered send never started")
+	}
+	tracker.Flush()
+
+	if got := atomic.LoadInt32(&completed); got != 1 {
+		t.Fatalf("Flush returned before the in-flight send finished: completed=%d", got)
+	}
+	tracker.Shutdown()
 }

@@ -252,9 +252,16 @@ export class DoowTracker {
     const timeoutMs = timeout ?? this._options.shutdownTimeout;
 
     const shutdownPromise = this._processor.shutdown();
-    const timeoutPromise = new Promise<void>((resolve) => setTimeout(resolve, timeoutMs));
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeoutPromise = new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, timeoutMs);
+    });
 
-    await Promise.race([shutdownPromise, timeoutPromise]);
+    try {
+      await Promise.race([shutdownPromise, timeoutPromise]);
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   /** True if the SDK is enabled */

@@ -14,6 +14,7 @@ import {
 
 const KEEPALIVE_LIMIT_BYTES = 60_000;
 const MAX_BATCH_EVENTS = 500;
+const IDLE_WAIT_MS = 30_000;
 
 const DEFAULT_OPTIONS: Required<Omit<TrackerOptions, 'attribution' | 'onError'>> = {
   endpoint: 'https://api.doow.co',
@@ -34,6 +35,7 @@ export class Tracker {
     onError?: (error: Error) => void;
   };
   private queue: QueuedEvent[] = [];
+  private readonly inFlight = new Set<Promise<void>>();
   private flushTimer: ReturnType<typeof setInterval> | null = null;
   private shutdown = false;
   private holdUntil = 0;
@@ -54,7 +56,7 @@ export class Tracker {
 
   private startFlushTimer(): void {
     if (this.flushTimer) clearInterval(this.flushTimer);
-    this.flushTimer = setInterval(() => this.flush(), this.options.flushIntervalMs);
+    this.flushTimer = setInterval(() => void this.flushBuffered(), this.options.flushIntervalMs);
   }
 
   private setupLifecycleHooks(): void {
@@ -96,16 +98,39 @@ export class Tracker {
     this.log(`Queued event: ${event.metric}`);
 
     if (this.queue.length >= this.options.flushAt && performance.now() >= this.holdUntil) {
-      this.flush();
+      void this.flushBuffered();
     }
   }
 
   async flush(): Promise<void> {
-    if (this.queue.length === 0 || this.shutdown) return;
+    await this.flushBuffered();
+    await this.waitUntilIdle();
+  }
+
+  // A count-triggered flush is not awaited and empties the queue first, so without this
+  // flush() would see an empty queue and return while that request is still in flight.
+  private async waitUntilIdle(): Promise<void> {
+    if (this.inFlight.size === 0) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, IDLE_WAIT_MS);
+    });
+    await Promise.race([Promise.allSettled([...this.inFlight]), timeout]);
+    clearTimeout(timer);
+  }
+
+  private flushBuffered(): Promise<void> {
+    if (this.queue.length === 0 || this.shutdown) return Promise.resolve();
 
     const batch = [...this.queue];
     this.queue = [];
 
+    const send = this.sendInChunks(batch);
+    this.inFlight.add(send);
+    return send.finally(() => this.inFlight.delete(send));
+  }
+
+  private async sendInChunks(batch: QueuedEvent[]): Promise<void> {
     this.log(`Flushing ${batch.length} events`);
 
     for (let i = 0; i < batch.length; i += MAX_BATCH_EVENTS) {
