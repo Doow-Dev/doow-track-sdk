@@ -349,7 +349,7 @@ describe('EventProcessor — S77', () => {
   });
 });
 
-describe('EventProcessor — timer-triggered flush in flight', () => {
+describe('EventProcessor: timer-triggered flush in flight', () => {
   it('flush waits for a timer-triggered send that is already running', async () => {
     let completed = 0;
     const slowFlush = vi.fn(async () => {
@@ -367,7 +367,7 @@ describe('EventProcessor — timer-triggered flush in flight', () => {
   });
 });
 
-describe('EventProcessor — flush wait cap', () => {
+describe('EventProcessor: flush wait cap', () => {
   it('stops waiting for a send that never finishes after 30 seconds', async () => {
     vi.useFakeTimers();
     try {
@@ -394,7 +394,7 @@ describe('EventProcessor — flush wait cap', () => {
   });
 });
 
-describe('EventProcessor — shutdown with a timer-triggered send in flight', () => {
+describe('EventProcessor: shutdown with a timer-triggered send in flight', () => {
   it('shutdown waits for a timer-triggered send that is already running', async () => {
     let completed = 0;
     const slowFlush = vi.fn(async () => {

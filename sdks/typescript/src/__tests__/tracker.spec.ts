@@ -417,7 +417,7 @@ describe('DoowTracker — S76 SDK core', () => {
   });
 });
 
-describe('DoowTracker — shutdown timer', () => {
+describe('DoowTracker: shutdown timer', () => {
   it('leaves no timer running once a fast shutdown finishes', async () => {
     vi.useFakeTimers();
     try {
