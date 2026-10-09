@@ -86,7 +86,7 @@ Doow reads these attributes from each data point and from its resource. A data p
 
 | Attribute | Required | Description |
 |-----------|----------|-------------|
-| `license_id` | yes | The license the usage belongs to. A data point without it is not matched to a license |
+| `license_id` | yes | The license the usage belongs to. A data point without it is not matched to a license, and a data point whose license belongs to another organization is dropped |
 | `app_name` | no | The application the metric belongs to. Defaults to `unknown` |
 | `license_name` | no | The license plan name. Defaults to `unknown` |
 
@@ -173,7 +173,7 @@ Other metric names are kept as they are, and all other attributes stay in the at
 
 | Status | Meaning | What to do |
 |--------|---------|------------|
-| `200` | The batch was accepted. The body is an empty JSON object | Nothing |
+| `200` | The batch was accepted. The body is an empty JSON object, or contains `partialSuccess` with `rejectedDataPoints` and an `errorMessage` such as `license_not_found` when some data points were dropped | Nothing, unless `partialSuccess` appears, in which case check the `license_id` of the dropped points |
 | `400` | The body is missing or the payload could not be normalized | Fix the payload and check that the `Content-Type` is `application/json` |
 | `401` | The API key is missing, invalid, or revoked | Generate a new `dk_` key from the dashboard |
 | `429` | Too many requests for the organization | Wait for the `Retry-After` header, then retry. The collector's `retry_on_failure` does this |

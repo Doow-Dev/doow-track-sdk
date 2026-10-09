@@ -144,7 +144,7 @@ Each line is a JSON object with these fields. Only the first three are required.
 | `kind` | string | `USAGE` (default) or `ADJUSTMENT` |
 | `timestamp` | string | ISO 8601 time of the event. Defaults to the time the sidecar receives it |
 | `source_system` | string | Optional source name. Defaults to `sdk` |
-| `metric_tuple_hint` | object | Optional `{ "app_name", "license_name", "metric_name" }` used to resolve the metric on ingest |
+| `metric_tuple_hint` | object | Optional `{ "app_name", "license_name", "metric_name" }` used to resolve the metric on ingest. Without it, the API resolves the metric by its name under the event's `license_id`, and rejects the event with `unknown_metric` if that license has no metric of that name |
 | `attribution` | object | Optional string, number, or boolean values merged with `DOOW_TRACK_ATTRIBUTION` |
 | `metadata` | object | Optional free-form fields |
 
