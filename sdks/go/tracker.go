@@ -309,6 +309,13 @@ const idleWait = 30 * time.Second
 // A count-triggered flush runs on its own goroutine and empties the buffer first, so without this
 // a short-lived program sees an empty buffer and exits while that request is still in flight.
 func (t *Tracker) waitUntilIdle() {
+	t.sendMu.Lock()
+	idle := t.sending == 0
+	t.sendMu.Unlock()
+	if idle {
+		return
+	}
+
 	timedOut := false
 	timer := time.AfterFunc(idleWait, func() {
 		t.sendMu.Lock()
