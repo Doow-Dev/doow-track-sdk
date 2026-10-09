@@ -9,6 +9,16 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## [0.1.14] — 2026-10-09
+
+### Fixed
+
+- `flush()` and `shutdown()` now wait for a send that a full queue or the flush timer already started, so a short-lived script no longer exits before that send finishes. The wait is capped at 30 seconds, and the shutdown timeout timer is cleared once shutdown finishes.
+
+### Changed
+
+- The API now rejects an event whose license belongs to another organization (`license_not_found`) or whose metric name does not exist on its license (`unknown_metric`) as a `207` partial accept, and an event with only a `metric_name` is now resolved without a `metric_tuple_hint`. See [Rejected events](../../README.md#rejected-events).
+
 ## [0.1.13] — 2026-10-07
 
 ### Changed
