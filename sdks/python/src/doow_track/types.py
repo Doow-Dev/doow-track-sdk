@@ -42,8 +42,8 @@ class RateKind(str, Enum):
     PER_UNIT = "PER_UNIT"
     FLAT_FEE = "FLAT_FEE"
     PER_SEAT = "PER_SEAT"
-    TIERED = "TIERED"
-    VOLUME = "VOLUME"
+    PERCENTAGE = "PERCENTAGE"
+    USAGE = "USAGE"
 
 
 class EntitlementPeriod(str, Enum):

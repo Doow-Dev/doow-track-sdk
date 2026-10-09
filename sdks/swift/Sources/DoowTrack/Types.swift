@@ -34,8 +34,8 @@ public enum RateKind: String, Codable {
     case perUnit = "PER_UNIT"
     case flatFee = "FLAT_FEE"
     case perSeat = "PER_SEAT"
-    case tiered = "TIERED"
-    case volume = "VOLUME"
+    case percentage = "PERCENTAGE"
+    case usage = "USAGE"
 }
 
 public enum EntitlementPeriod: String, Codable {

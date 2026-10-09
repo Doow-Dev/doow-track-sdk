@@ -12,6 +12,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Changed
 
 - `EntitlementPeriod` and `CarryoverPolicy` now list the values the API accepts. `entitlement_period` is `MONTHLY`, `QUARTERLY`, `ANNUALLY`, `TERM`, `UNTIL_EXHAUSTED`, or `NONE`, and `carryover_policy` is `EXPIRE_AT_PERIOD_END`, `ROLLOVER`, `FIFO_VINTAGE`, or `RESET`. The old `YEARLY`, `WEEKLY`, `DAILY`, `ONE_TIME`, and `ROLLOVER_CAPPED` values were never accepted by the API.
+- `RateKind` now lists `PER_UNIT`, `FLAT_FEE`, `PER_SEAT`, `PERCENTAGE`, and `USAGE`, the values the API stores. `TIERED` and `VOLUME` never existed on the API side, so code that referenced them no longer compiles. Creating a metric through the SDK still accepts only `PER_UNIT`, `FLAT_FEE`, and `PER_SEAT`.
 
 ## [0.1.13] — 2026-10-07
 

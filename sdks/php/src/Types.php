@@ -44,8 +44,8 @@ enum RateKind: string
     case PER_UNIT = 'PER_UNIT';
     case FLAT_FEE = 'FLAT_FEE';
     case PER_SEAT = 'PER_SEAT';
-    case TIERED = 'TIERED';
-    case VOLUME = 'VOLUME';
+    case PERCENTAGE = 'PERCENTAGE';
+    case USAGE = 'USAGE';
 }
 
 enum EntitlementPeriod: string

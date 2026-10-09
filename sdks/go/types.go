@@ -342,8 +342,8 @@ const (
 	RateKindPerUnit RateKind = "PER_UNIT"
 	RateKindFlatFee RateKind = "FLAT_FEE"
 	RateKindPerSeat RateKind = "PER_SEAT"
-	RateKindTiered  RateKind = "TIERED"
-	RateKindVolume  RateKind = "VOLUME"
+	RateKindPercent RateKind = "PERCENTAGE"
+	RateKindUsage   RateKind = "USAGE"
 )
 
 // EntitlementPeriod enum

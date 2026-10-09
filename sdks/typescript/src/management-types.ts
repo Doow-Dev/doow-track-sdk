@@ -248,7 +248,7 @@ export interface ListLicensesParams extends PaginationParams {
 
 export type UsageAggregationType = 'SUM' | 'MAX' | 'CUMULATIVE';
 
-export type RateKind = 'PER_UNIT' | 'FLAT_FEE' | 'PER_SEAT' | 'TIERED' | 'VOLUME';
+export type RateKind = 'PER_UNIT' | 'FLAT_FEE' | 'PER_SEAT' | 'PERCENTAGE' | 'USAGE';
 
 export type EntitlementPeriod =
   | 'MONTHLY'

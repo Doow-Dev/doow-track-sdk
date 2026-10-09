@@ -46,8 +46,8 @@ public enum RateKind
     [JsonPropertyName("PER_UNIT")] PerUnit,
     [JsonPropertyName("FLAT_FEE")] FlatFee,
     [JsonPropertyName("PER_SEAT")] PerSeat,
-    [JsonPropertyName("TIERED")] Tiered,
-    [JsonPropertyName("VOLUME")] Volume
+    [JsonPropertyName("PERCENTAGE")] Percentage,
+    [JsonPropertyName("USAGE")] Usage
 }
 
 public enum EntitlementPeriod

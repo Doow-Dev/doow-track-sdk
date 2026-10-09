@@ -43,8 +43,8 @@ enum class RateKind {
     @SerialName("PER_UNIT") PER_UNIT,
     @SerialName("FLAT_FEE") FLAT_FEE,
     @SerialName("PER_SEAT") PER_SEAT,
-    @SerialName("TIERED") TIERED,
-    @SerialName("VOLUME") VOLUME
+    @SerialName("PERCENTAGE") PERCENTAGE,
+    @SerialName("USAGE") USAGE
 }
 
 @Serializable

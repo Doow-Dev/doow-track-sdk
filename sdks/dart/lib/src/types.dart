@@ -10,7 +10,7 @@ enum AllLicenseType { usageBased, seatBased, prepaidCredits, flatRate }
 
 enum UsageAggregationType { sum, max, cumulative }
 
-enum RateKind { perUnit, flatFee, perSeat, tiered, volume }
+enum RateKind { perUnit, flatFee, perSeat, percentage, usage }
 
 enum EntitlementPeriod { monthly, quarterly, annually, term, untilExhausted, none }
 
@@ -339,8 +339,8 @@ class Metric {
       case 'PER_UNIT': return RateKind.perUnit;
       case 'FLAT_FEE': return RateKind.flatFee;
       case 'PER_SEAT': return RateKind.perSeat;
-      case 'TIERED': return RateKind.tiered;
-      case 'VOLUME': return RateKind.volume;
+      case 'PERCENTAGE': return RateKind.percentage;
+      case 'USAGE': return RateKind.usage;
       default: return null;
     }
   }
@@ -567,8 +567,8 @@ class CreateMetricInput {
       case RateKind.perUnit: return 'PER_UNIT';
       case RateKind.flatFee: return 'FLAT_FEE';
       case RateKind.perSeat: return 'PER_SEAT';
-      case RateKind.tiered: return 'TIERED';
-      case RateKind.volume: return 'VOLUME';
+      case RateKind.percentage: return 'PERCENTAGE';
+      case RateKind.usage: return 'USAGE';
     }
   }
 

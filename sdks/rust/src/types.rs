@@ -84,8 +84,8 @@ pub enum RateKind {
     PerUnit,
     FlatFee,
     PerSeat,
-    Tiered,
-    Volume,
+    Percentage,
+    Usage,
 }
 
 impl Default for RateKind {
