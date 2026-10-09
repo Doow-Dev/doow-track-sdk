@@ -380,13 +380,13 @@ type Metric struct {
 	RateKind                     RateKind             `json:"rate_kind"`
 	EntitlementPeriod            EntitlementPeriod    `json:"entitlement_period"`
 	CarryoverPolicy              CarryoverPolicy      `json:"carryover_policy"`
-	UsageRate                    float64              `json:"usage_rate,omitempty"`
-	UsageLimit                   float64              `json:"usage_limit,omitempty"`
-	UsageIncluded                float64              `json:"usage_included,omitempty"`
-	PerUnitCap                   float64              `json:"per_unit_cap,omitempty"`
-	UsageRateIsEstimated         bool                 `json:"usage_rate_is_estimated,omitempty"`
+	UsageRate                    *float64             `json:"usage_rate,omitempty"`
+	UsageLimit                   *float64             `json:"usage_limit,omitempty"`
+	UsageIncluded                *float64             `json:"usage_included,omitempty"`
+	PerUnitCap                   *float64             `json:"per_unit_cap,omitempty"`
+	UsageRateIsEstimated         *bool                `json:"usage_rate_is_estimated,omitempty"`
 	UsageCustomUnitLabel         string               `json:"usage_custom_unit_label,omitempty"`
-	ExpectedEmissionIntervalMins int                  `json:"expected_emission_interval_minutes,omitempty"`
+	ExpectedEmissionIntervalMins *int                 `json:"expected_emission_interval_minutes,omitempty"`
 	CreatedAt                    string               `json:"created_at"`
 	UpdatedAt                    string               `json:"updated_at"`
 }

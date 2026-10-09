@@ -272,3 +272,33 @@ func TestManagement_CreateMetricWithOnlyATypeSendsNothingElse(t *testing.T) {
 		t.Errorf("body = %v, want only metric_type", sent)
 	}
 }
+
+func TestMetric_TellsAZeroLimitApartFromNoLimit(t *testing.T) {
+	var withZeros Metric
+	body := `{"id":"m","usage_rate":0,"usage_limit":0,"usage_included":0,"per_unit_cap":0,` +
+		`"usage_rate_is_estimated":false,"expected_emission_interval_minutes":0}`
+	if err := json.Unmarshal([]byte(body), &withZeros); err != nil {
+		t.Fatalf("decode failed: %v", err)
+	}
+
+	for name, isSet := range map[string]bool{
+		"usage_rate":                         withZeros.UsageRate != nil,
+		"usage_limit":                        withZeros.UsageLimit != nil,
+		"usage_included":                     withZeros.UsageIncluded != nil,
+		"per_unit_cap":                       withZeros.PerUnitCap != nil,
+		"usage_rate_is_estimated":            withZeros.UsageRateIsEstimated != nil,
+		"expected_emission_interval_minutes": withZeros.ExpectedEmissionIntervalMins != nil,
+	} {
+		if !isSet {
+			t.Errorf("%s was present with a zero value but reads as unset", name)
+		}
+	}
+
+	var absent Metric
+	if err := json.Unmarshal([]byte(`{"id":"m"}`), &absent); err != nil {
+		t.Fatalf("decode failed: %v", err)
+	}
+	if absent.UsageLimit != nil || absent.UsageRate != nil || absent.UsageRateIsEstimated != nil {
+		t.Errorf("absent fields should read as nil: %+v", absent)
+	}
+}
