@@ -27,10 +27,9 @@ public class Tracker implements AutoCloseable {
     private static final int MAX_ERROR_TEXT = 512;
     private static final int MAX_BODY_CHARS = 1 << 20;
     private static final int MAX_BATCH_EVENTS = 500;
-
-    private final List<Pending> buffer = new ArrayList<>();
     private static final long IDLE_WAIT_MS = 30_000;
 
+    private final List<Pending> buffer = new ArrayList<>();
     private final Object lock = new Object();
     private int sending = 0;
     private final ThreadLocal<Boolean> sendingHere = ThreadLocal.withInitial(() -> false);
@@ -152,7 +151,11 @@ public class Tracker implements AutoCloseable {
         try {
             sendInChunks(batch);
         } finally {
-            sendingHere.set(outer);
+            if (outer) {
+                sendingHere.set(true);
+            } else {
+                sendingHere.remove();
+            }
             synchronized (lock) {
                 sending--;
                 lock.notifyAll();
