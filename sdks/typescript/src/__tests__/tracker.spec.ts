@@ -416,3 +416,20 @@ describe('DoowTracker — S76 SDK core', () => {
     });
   });
 });
+
+describe('DoowTracker — shutdown timer', () => {
+  it('leaves no timer running once a fast shutdown finishes', async () => {
+    vi.useFakeTimers();
+    try {
+      const { transport } = makeTransport();
+      const tracker = new DoowTracker('dk_test_key', { transport, flushAt: 100, flushInterval: 60_000 });
+      tracker.track({ metric: 'api_calls', quantity: 1, license_id: 'lic_1' });
+
+      await tracker.shutdown();
+
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
