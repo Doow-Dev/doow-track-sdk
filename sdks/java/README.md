@@ -80,6 +80,8 @@ Sending `2500000000` with `bytes` to the same metric would record 2.5 billion GB
 
 ### Management API
 
+Metric fields, their defaults, and the values each one accepts are listed in [Metric fields](../../README.md#metric-fields).
+
 ```java
 import co.doow.track.management.*;
 import co.doow.track.types.*;

@@ -49,6 +49,29 @@ Sending `"quantity":2500000000` with `"unit":"bytes"` to the same metric would r
 
 The same rule applies to [OTLP](docs/otlp.md#units), the [daemon](docs/daemon.md#event-format), and the [sidecar](docs/sidecar.md#event-format), which all pass `unit` through unchanged.
 
+## Metric fields
+
+When you create or update a metric through the management API, `metric_type` is the only required field, and every other field is optional, so a create with only `metric_type` uses the defaults below. The API spells the fields in snake_case, and each SDK spells them in its own style, such as `usageLimit` in Java or `UsageLimit` in .NET and Go.
+
+| Field | Values | Default | Notes |
+|-------|--------|---------|-------|
+| `metric_type` | text, up to 255 characters | none | The metric's name, unique within its license |
+| `usage_aggregation_type` | `SUM`, `MAX`, `CUMULATIVE` | `CUMULATIVE` | How measurements add up over a period |
+| `rate_kind` | `PER_UNIT`, `FLAT_FEE`, `PER_SEAT`, `PERCENTAGE`, `USAGE` | `PER_UNIT` | See the note on `PERCENTAGE` below |
+| `usage_rate` | number, 0 or more | none | The price per unit, or the fraction for `PERCENTAGE` |
+| `usage_custom_unit_label` | text, up to 64 characters | none | The metric's unit, see [Units](#units) |
+| `entitlement_period` | `MONTHLY`, `QUARTERLY`, `ANNUALLY`, `TERM`, `UNTIL_EXHAUSTED`, `NONE` | `MONTHLY` | How often the included allowance resets |
+| `carryover_policy` | `EXPIRE_AT_PERIOD_END`, `ROLLOVER`, `FIFO_VINTAGE`, `RESET` | `EXPIRE_AT_PERIOD_END` | What happens to unused allowance at the end of a period |
+| `usage_limit` | number, 0 or more | none | A cap on usage |
+| `usage_included` | number, 0 or more | none | An allowance included in the base price |
+| `per_unit_cap` | number, 0 or more | none | A cap on the charge per unit, which is only allowed when `rate_kind` is `PER_UNIT` |
+| `usage_rate_is_estimated` | `true`, `false` | `false` | Marks the rate as an estimate |
+| `expected_emission_interval_minutes` | whole number, 1 or more | none | How often events are expected, which Doow uses to notice a gap in the data |
+
+For `PERCENTAGE`, `usage_rate` is a fraction between 0 and 1 (0.029 means 2.9%) and `quantity` is the amount the percentage applies to, so a rate of 0.029 and a quantity of 10,000 gives 290. `USAGE` is priced like `PER_UNIT`: Doow multiplies the quantity by `usage_rate`, and when the metric has no `usage_rate` it uses the cost the vendor reports with the events, if any.
+
+On an update, send only the fields you want to change. Setting `usage_limit`, `usage_included`, `per_unit_cap`, or `expected_emission_interval_minutes` to `null` clears it, whereas `entitlement_period`, `carryover_policy`, and `usage_rate_is_estimated` cannot be cleared. Changing `rate_kind` away from `PER_UNIT` is refused while the metric still has a `per_unit_cap`, unless the same request clears it.
+
 ## Batch size
 
 A batch may contain at most 1,000 events, which is the per-minute event limit for an organization. The API rejects a larger batch with a non-retryable `413` and `error: batch_too_large`, because it can never fit under the limit. Every SDK that queues events sends at most 500 events per request and splits a larger flush into several requests, each with its own `batch_id`, so you do not need to split batches yourself. The one exception is the Next.js `ServerTracker.trackBatch`, which sends exactly the events you pass as a single request. If you call the HTTP API directly, split batches client-side.
