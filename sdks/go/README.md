@@ -255,6 +255,14 @@ metric, _ := mgmt.Metrics.Create(ctx, licenseID, doow.CreateMetricInput{
     MetricType: "api_calls",
 })
 
+// Optional numbers and flags are pointers, so 0 and false can be sent
+metric, _ := mgmt.Metrics.Create(ctx, licenseID, doow.CreateMetricInput{
+    MetricType:           "fees",
+    RateKind:             doow.RateKindPercent,
+    UsageRate:            doow.Ptr(0.029),
+    UsageRateIsEstimated: doow.Ptr(false),
+})
+
 // Get / Update / Delete
 metric, _ := mgmt.Metrics.Get(ctx, metricID)
 metric, _ := mgmt.Metrics.Update(ctx, metricID, doow.UpdateMetricInput{...})

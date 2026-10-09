@@ -69,6 +69,9 @@ pub enum UsageAggregationType {
     Sum,
     Max,
     Cumulative,
+    Peak,
+    Average,
+    Balance,
 }
 
 impl Default for UsageAggregationType {
@@ -615,4 +618,33 @@ pub struct RateLimit {
     pub limit: i32,
     pub remaining: i32,
     pub reset: DateTime<Utc>,
+}
+
+#[cfg(test)]
+mod metric_enum_tests {
+    use super::*;
+
+    fn metric_json(aggregation: &str) -> String {
+        format!(
+            r#"{{"id":"m","license_id":"l","metric_type":"seats","usage_aggregation_type":"{aggregation}",
+            "rate_kind":"PERCENTAGE","entitlement_period":"UNTIL_EXHAUSTED","carryover_policy":"FIFO_VINTAGE",
+            "created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T00:00:00Z"}}"#
+        )
+    }
+
+    #[test]
+    fn reads_every_aggregation_type_the_api_can_return() {
+        for name in ["SUM", "MAX", "CUMULATIVE", "PEAK", "AVERAGE", "BALANCE"] {
+            let parsed: Result<Metric, _> = serde_json::from_str(&metric_json(name));
+            assert!(parsed.is_ok(), "{name} failed to parse: {:?}", parsed.err());
+        }
+    }
+
+    #[test]
+    fn reads_the_rate_kind_entitlement_period_and_carryover_policy_values() {
+        let metric: Metric = serde_json::from_str(&metric_json("SUM")).unwrap();
+        assert_eq!(metric.rate_kind, RateKind::Percentage);
+        assert_eq!(metric.entitlement_period, Some(EntitlementPeriod::UntilExhausted));
+        assert_eq!(metric.carryover_policy, Some(CarryoverPolicy::FifoVintage));
+    }
 }

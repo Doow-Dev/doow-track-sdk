@@ -8,7 +8,7 @@ enum LicenseType { usageBased }
 /// All license types (for responses that may include UI-created licenses)
 enum AllLicenseType { usageBased, seatBased, prepaidCredits, flatRate }
 
-enum UsageAggregationType { sum, max, cumulative }
+enum UsageAggregationType { sum, max, cumulative, peak, average, balance }
 
 enum RateKind { perUnit, flatFee, perSeat, percentage, usage }
 
@@ -330,6 +330,9 @@ class Metric {
       case 'SUM': return UsageAggregationType.sum;
       case 'MAX': return UsageAggregationType.max;
       case 'CUMULATIVE': return UsageAggregationType.cumulative;
+      case 'PEAK': return UsageAggregationType.peak;
+      case 'AVERAGE': return UsageAggregationType.average;
+      case 'BALANCE': return UsageAggregationType.balance;
       default: return null;
     }
   }
@@ -559,6 +562,9 @@ class CreateMetricInput {
       case UsageAggregationType.sum: return 'SUM';
       case UsageAggregationType.max: return 'MAX';
       case UsageAggregationType.cumulative: return 'CUMULATIVE';
+      case UsageAggregationType.peak: return 'PEAK';
+      case UsageAggregationType.average: return 'AVERAGE';
+      case UsageAggregationType.balance: return 'BALANCE';
     }
   }
 

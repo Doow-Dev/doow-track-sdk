@@ -38,7 +38,10 @@ public enum UsageAggregationType
 {
     [JsonPropertyName("SUM")] Sum,
     [JsonPropertyName("MAX")] Max,
-    [JsonPropertyName("CUMULATIVE")] Cumulative
+    [JsonPropertyName("CUMULATIVE")] Cumulative,
+    [JsonPropertyName("PEAK")] Peak,
+    [JsonPropertyName("AVERAGE")] Average,
+    [JsonPropertyName("BALANCE")] Balance
 }
 
 public enum RateKind

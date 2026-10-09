@@ -28,6 +28,9 @@ public enum UsageAggregationType: String, Codable {
     case sum = "SUM"
     case max = "MAX"
     case cumulative = "CUMULATIVE"
+    case peak = "PEAK"
+    case average = "AVERAGE"
+    case balance = "BALANCE"
 }
 
 public enum RateKind: String, Codable {

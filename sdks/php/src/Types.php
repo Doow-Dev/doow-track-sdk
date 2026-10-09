@@ -37,6 +37,9 @@ enum UsageAggregationType: string
     case SUM = 'SUM';
     case MAX = 'MAX';
     case CUMULATIVE = 'CUMULATIVE';
+    case PEAK = 'PEAK';
+    case AVERAGE = 'AVERAGE';
+    case BALANCE = 'BALANCE';
 }
 
 enum RateKind: string

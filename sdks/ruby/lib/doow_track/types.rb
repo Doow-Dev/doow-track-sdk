@@ -31,6 +31,9 @@ module DoowTrack
     SUM = "SUM"
     MAX = "MAX"
     CUMULATIVE = "CUMULATIVE"
+    PEAK = "PEAK"
+    AVERAGE = "AVERAGE"
+    BALANCE = "BALANCE"
   end
 
   module RateKind

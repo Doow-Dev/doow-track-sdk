@@ -35,7 +35,10 @@ enum class AllLicenseType {
 enum class UsageAggregationType {
     @SerialName("SUM") SUM,
     @SerialName("MAX") MAX,
-    @SerialName("CUMULATIVE") CUMULATIVE
+    @SerialName("CUMULATIVE") CUMULATIVE,
+    @SerialName("PEAK") PEAK,
+    @SerialName("AVERAGE") AVERAGE,
+    @SerialName("BALANCE") BALANCE
 }
 
 @Serializable

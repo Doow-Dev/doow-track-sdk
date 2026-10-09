@@ -246,7 +246,7 @@ export interface ListLicensesParams extends PaginationParams {
 
 // ─── Metrics ───────────────────────────────────────────────────────────────
 
-export type UsageAggregationType = 'SUM' | 'MAX' | 'CUMULATIVE';
+export type UsageAggregationType = 'SUM' | 'MAX' | 'CUMULATIVE' | 'PEAK' | 'AVERAGE' | 'BALANCE';
 
 export type RateKind = 'PER_UNIT' | 'FLAT_FEE' | 'PER_SEAT' | 'PERCENTAGE' | 'USAGE';
 

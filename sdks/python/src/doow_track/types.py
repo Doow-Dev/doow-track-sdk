@@ -36,6 +36,9 @@ class UsageAggregationType(str, Enum):
     SUM = "SUM"
     MAX = "MAX"
     CUMULATIVE = "CUMULATIVE"
+    PEAK = "PEAK"
+    AVERAGE = "AVERAGE"
+    BALANCE = "BALANCE"
 
 
 class RateKind(str, Enum):

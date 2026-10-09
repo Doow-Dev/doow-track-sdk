@@ -333,6 +333,9 @@ const (
 	UsageAggregationSum        UsageAggregationType = "SUM"
 	UsageAggregationMax        UsageAggregationType = "MAX"
 	UsageAggregationCumulative UsageAggregationType = "CUMULATIVE"
+	UsageAggregationPeak       UsageAggregationType = "PEAK"
+	UsageAggregationAverage    UsageAggregationType = "AVERAGE"
+	UsageAggregationBalance    UsageAggregationType = "BALANCE"
 )
 
 // RateKind enum
@@ -395,13 +398,18 @@ type CreateMetricInput struct {
 	RateKind                     RateKind             `json:"rate_kind,omitempty"`
 	EntitlementPeriod            EntitlementPeriod    `json:"entitlement_period,omitempty"`
 	CarryoverPolicy              CarryoverPolicy      `json:"carryover_policy,omitempty"`
-	UsageRate                    float64              `json:"usage_rate,omitempty"`
-	UsageLimit                   float64              `json:"usage_limit,omitempty"`
-	UsageIncluded                float64              `json:"usage_included,omitempty"`
-	PerUnitCap                   float64              `json:"per_unit_cap,omitempty"`
-	UsageRateIsEstimated         bool                 `json:"usage_rate_is_estimated,omitempty"`
+	UsageRate                    *float64             `json:"usage_rate,omitempty"`
+	UsageLimit                   *float64             `json:"usage_limit,omitempty"`
+	UsageIncluded                *float64             `json:"usage_included,omitempty"`
+	PerUnitCap                   *float64             `json:"per_unit_cap,omitempty"`
+	UsageRateIsEstimated         *bool                `json:"usage_rate_is_estimated,omitempty"`
 	UsageCustomUnitLabel         string               `json:"usage_custom_unit_label,omitempty"`
-	ExpectedEmissionIntervalMins int                  `json:"expected_emission_interval_minutes,omitempty"`
+	ExpectedEmissionIntervalMins *int                 `json:"expected_emission_interval_minutes,omitempty"`
+}
+
+// Ptr returns a pointer to v, for the optional fields of the input types.
+func Ptr[T any](v T) *T {
+	return &v
 }
 
 // UpdateMetricInput for updating metrics
