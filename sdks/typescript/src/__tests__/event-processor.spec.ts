@@ -393,3 +393,21 @@ describe('EventProcessor — flush wait cap', () => {
     }
   });
 });
+
+describe('EventProcessor — shutdown with a timer-triggered send in flight', () => {
+  it('shutdown waits for a timer-triggered send that is already running', async () => {
+    let completed = 0;
+    const slowFlush = vi.fn(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      completed += 1;
+    });
+    const { processor } = makeProcessor({ flushAt: 100, flushInterval: 20 }, slowFlush);
+
+    await processor.enqueue(makeEvent());
+    await processor.enqueue(makeEvent());
+    await vi.waitFor(() => expect(slowFlush).toHaveBeenCalledTimes(2));
+    await processor.shutdown();
+
+    expect(completed).toBe(2);
+  });
+});

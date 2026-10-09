@@ -124,6 +124,7 @@ export class EventProcessor {
       await Promise.all([...this._pendingEnqueues]);
     }
     await this._triggerFlush();
+    await Promise.allSettled([...this._inFlightFlushes]);
     await this._exporter.drain();
   }
 
