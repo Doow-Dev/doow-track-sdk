@@ -5,7 +5,8 @@ import com.fasterxml.jackson.annotation.JsonValue;
 public enum CarryoverPolicy {
     EXPIRE_AT_PERIOD_END("EXPIRE_AT_PERIOD_END"),
     ROLLOVER("ROLLOVER"),
-    ROLLOVER_CAPPED("ROLLOVER_CAPPED");
+    FIFO_VINTAGE("FIFO_VINTAGE"),
+    RESET("RESET");
 
     private final String value;
 

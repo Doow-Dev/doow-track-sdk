@@ -350,12 +350,12 @@ const (
 type EntitlementPeriod string
 
 const (
-	EntitlementPeriodMonthly   EntitlementPeriod = "MONTHLY"
-	EntitlementPeriodYearly    EntitlementPeriod = "YEARLY"
-	EntitlementPeriodQuarterly EntitlementPeriod = "QUARTERLY"
-	EntitlementPeriodWeekly    EntitlementPeriod = "WEEKLY"
-	EntitlementPeriodDaily     EntitlementPeriod = "DAILY"
-	EntitlementPeriodOneTime   EntitlementPeriod = "ONE_TIME"
+	EntitlementPeriodMonthly        EntitlementPeriod = "MONTHLY"
+	EntitlementPeriodQuarterly      EntitlementPeriod = "QUARTERLY"
+	EntitlementPeriodAnnually       EntitlementPeriod = "ANNUALLY"
+	EntitlementPeriodTerm           EntitlementPeriod = "TERM"
+	EntitlementPeriodUntilExhausted EntitlementPeriod = "UNTIL_EXHAUSTED"
+	EntitlementPeriodNone           EntitlementPeriod = "NONE"
 )
 
 // CarryoverPolicy enum
@@ -364,7 +364,8 @@ type CarryoverPolicy string
 const (
 	CarryoverExpire      CarryoverPolicy = "EXPIRE_AT_PERIOD_END"
 	CarryoverRollover    CarryoverPolicy = "ROLLOVER"
-	CarryoverRolloverCap CarryoverPolicy = "ROLLOVER_CAPPED"
+	CarryoverFifoVintage CarryoverPolicy = "FIFO_VINTAGE"
+	CarryoverReset       CarryoverPolicy = "RESET"
 )
 
 // Metric represents a usage metric

@@ -51,18 +51,19 @@ enum RateKind: string
 enum EntitlementPeriod: string
 {
     case MONTHLY = 'MONTHLY';
-    case YEARLY = 'YEARLY';
     case QUARTERLY = 'QUARTERLY';
-    case WEEKLY = 'WEEKLY';
-    case DAILY = 'DAILY';
-    case ONE_TIME = 'ONE_TIME';
+    case ANNUALLY = 'ANNUALLY';
+    case TERM = 'TERM';
+    case UNTIL_EXHAUSTED = 'UNTIL_EXHAUSTED';
+    case NONE = 'NONE';
 }
 
 enum CarryoverPolicy: string
 {
     case EXPIRE_AT_PERIOD_END = 'EXPIRE_AT_PERIOD_END';
     case ROLLOVER = 'ROLLOVER';
-    case ROLLOVER_CAPPED = 'ROLLOVER_CAPPED';
+    case FIFO_VINTAGE = 'FIFO_VINTAGE';
+    case RESET = 'RESET';
 }
 
 enum CostAmortization: string

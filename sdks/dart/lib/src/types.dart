@@ -12,9 +12,9 @@ enum UsageAggregationType { sum, max, cumulative }
 
 enum RateKind { perUnit, flatFee, perSeat, tiered, volume }
 
-enum EntitlementPeriod { monthly, yearly, quarterly, weekly, daily, oneTime }
+enum EntitlementPeriod { monthly, quarterly, annually, term, untilExhausted, none }
 
-enum CarryoverPolicy { expireAtPeriodEnd, rollover, rolloverCapped }
+enum CarryoverPolicy { expireAtPeriodEnd, rollover, fifoVintage, reset }
 
 enum CostAmortization { prorata, months, quarter, years }
 
@@ -348,11 +348,11 @@ class Metric {
   static EntitlementPeriod? _parseEntitlementPeriod(String? value) {
     switch (value) {
       case 'MONTHLY': return EntitlementPeriod.monthly;
-      case 'YEARLY': return EntitlementPeriod.yearly;
       case 'QUARTERLY': return EntitlementPeriod.quarterly;
-      case 'WEEKLY': return EntitlementPeriod.weekly;
-      case 'DAILY': return EntitlementPeriod.daily;
-      case 'ONE_TIME': return EntitlementPeriod.oneTime;
+      case 'ANNUALLY': return EntitlementPeriod.annually;
+      case 'TERM': return EntitlementPeriod.term;
+      case 'UNTIL_EXHAUSTED': return EntitlementPeriod.untilExhausted;
+      case 'NONE': return EntitlementPeriod.none;
       default: return null;
     }
   }
@@ -361,7 +361,8 @@ class Metric {
     switch (value) {
       case 'EXPIRE_AT_PERIOD_END': return CarryoverPolicy.expireAtPeriodEnd;
       case 'ROLLOVER': return CarryoverPolicy.rollover;
-      case 'ROLLOVER_CAPPED': return CarryoverPolicy.rolloverCapped;
+      case 'FIFO_VINTAGE': return CarryoverPolicy.fifoVintage;
+      case 'RESET': return CarryoverPolicy.reset;
       default: return null;
     }
   }
@@ -574,11 +575,11 @@ class CreateMetricInput {
   static String _entitlementPeriodToString(EntitlementPeriod type) {
     switch (type) {
       case EntitlementPeriod.monthly: return 'MONTHLY';
-      case EntitlementPeriod.yearly: return 'YEARLY';
       case EntitlementPeriod.quarterly: return 'QUARTERLY';
-      case EntitlementPeriod.weekly: return 'WEEKLY';
-      case EntitlementPeriod.daily: return 'DAILY';
-      case EntitlementPeriod.oneTime: return 'ONE_TIME';
+      case EntitlementPeriod.annually: return 'ANNUALLY';
+      case EntitlementPeriod.term: return 'TERM';
+      case EntitlementPeriod.untilExhausted: return 'UNTIL_EXHAUSTED';
+      case EntitlementPeriod.none: return 'NONE';
     }
   }
 
@@ -586,7 +587,8 @@ class CreateMetricInput {
     switch (type) {
       case CarryoverPolicy.expireAtPeriodEnd: return 'EXPIRE_AT_PERIOD_END';
       case CarryoverPolicy.rollover: return 'ROLLOVER';
-      case CarryoverPolicy.rolloverCapped: return 'ROLLOVER_CAPPED';
+      case CarryoverPolicy.fifoVintage: return 'FIFO_VINTAGE';
+      case CarryoverPolicy.reset: return 'RESET';
     }
   }
 }

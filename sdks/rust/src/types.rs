@@ -99,11 +99,11 @@ impl Default for RateKind {
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum EntitlementPeriod {
     Monthly,
-    Yearly,
     Quarterly,
-    Weekly,
-    Daily,
-    OneTime,
+    Annually,
+    Term,
+    UntilExhausted,
+    None,
 }
 
 /// Carryover policy
@@ -113,8 +113,10 @@ pub enum CarryoverPolicy {
     ExpireAtPeriodEnd,
     #[serde(rename = "ROLLOVER")]
     Rollover,
-    #[serde(rename = "ROLLOVER_CAPPED")]
-    RolloverCapped,
+    #[serde(rename = "FIFO_VINTAGE")]
+    FifoVintage,
+    #[serde(rename = "RESET")]
+    Reset,
 }
 
 /// Cost amortization

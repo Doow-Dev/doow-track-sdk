@@ -53,18 +53,19 @@ public enum RateKind
 public enum EntitlementPeriod
 {
     [JsonPropertyName("MONTHLY")] Monthly,
-    [JsonPropertyName("YEARLY")] Yearly,
     [JsonPropertyName("QUARTERLY")] Quarterly,
-    [JsonPropertyName("WEEKLY")] Weekly,
-    [JsonPropertyName("DAILY")] Daily,
-    [JsonPropertyName("ONE_TIME")] OneTime
+    [JsonPropertyName("ANNUALLY")] Annually,
+    [JsonPropertyName("TERM")] Term,
+    [JsonPropertyName("UNTIL_EXHAUSTED")] UntilExhausted,
+    [JsonPropertyName("NONE")] None
 }
 
 public enum CarryoverPolicy
 {
     [JsonPropertyName("EXPIRE_AT_PERIOD_END")] ExpireAtPeriodEnd,
     [JsonPropertyName("ROLLOVER")] Rollover,
-    [JsonPropertyName("ROLLOVER_CAPPED")] RolloverCapped
+    [JsonPropertyName("FIFO_VINTAGE")] FifoVintage,
+    [JsonPropertyName("RESET")] Reset
 }
 
 public enum CostAmortization

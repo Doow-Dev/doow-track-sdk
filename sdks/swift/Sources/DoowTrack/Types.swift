@@ -40,17 +40,18 @@ public enum RateKind: String, Codable {
 
 public enum EntitlementPeriod: String, Codable {
     case monthly = "MONTHLY"
-    case yearly = "YEARLY"
     case quarterly = "QUARTERLY"
-    case weekly = "WEEKLY"
-    case daily = "DAILY"
-    case oneTime = "ONE_TIME"
+    case annually = "ANNUALLY"
+    case term = "TERM"
+    case untilExhausted = "UNTIL_EXHAUSTED"
+    case none = "NONE"
 }
 
 public enum CarryoverPolicy: String, Codable {
     case expireAtPeriodEnd = "EXPIRE_AT_PERIOD_END"
     case rollover = "ROLLOVER"
-    case rolloverCapped = "ROLLOVER_CAPPED"
+    case fifoVintage = "FIFO_VINTAGE"
+    case reset = "RESET"
 }
 
 public enum CostAmortization: String, Codable {

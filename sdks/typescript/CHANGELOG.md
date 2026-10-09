@@ -9,6 +9,10 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+### Changed
+
+- `EntitlementPeriod` and `CarryoverPolicy` now list the values the API accepts. `entitlement_period` is `MONTHLY`, `QUARTERLY`, `ANNUALLY`, `TERM`, `UNTIL_EXHAUSTED`, or `NONE`, and `carryover_policy` is `EXPIRE_AT_PERIOD_END`, `ROLLOVER`, `FIFO_VINTAGE`, or `RESET`. The old `YEARLY`, `WEEKLY`, `DAILY`, `ONE_TIME`, and `ROLLOVER_CAPPED` values were never accepted by the API.
+
 ## [0.1.13] — 2026-10-07
 
 ### Changed

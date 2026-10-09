@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Changed
+
+- `EntitlementPeriod` and `CarryoverPolicy` now list the values the API accepts, so code that referenced `YEARLY`, `WEEKLY`, `DAILY`, `ONE_TIME`, or `ROLLOVER_CAPPED` no longer compiles. `entitlement_period` is `MONTHLY`, `QUARTERLY`, `ANNUALLY`, `TERM`, `UNTIL_EXHAUSTED`, or `NONE`, and `carryover_policy` is `EXPIRE_AT_PERIOD_END`, `ROLLOVER`, `FIFO_VINTAGE`, or `RESET`. The API never accepted the removed values.
+
 ## [0.1.1] — 2026-10-07
 
 This is the first release published to Maven Central. Earlier versions were never uploaded, so `co.doow:doow-track-kotlin` did not previously resolve.

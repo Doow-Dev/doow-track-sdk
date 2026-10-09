@@ -48,17 +48,18 @@ class RateKind(str, Enum):
 
 class EntitlementPeriod(str, Enum):
     MONTHLY = "MONTHLY"
-    YEARLY = "YEARLY"
     QUARTERLY = "QUARTERLY"
-    WEEKLY = "WEEKLY"
-    DAILY = "DAILY"
-    ONE_TIME = "ONE_TIME"
+    ANNUALLY = "ANNUALLY"
+    TERM = "TERM"
+    UNTIL_EXHAUSTED = "UNTIL_EXHAUSTED"
+    NONE = "NONE"
 
 
 class CarryoverPolicy(str, Enum):
     EXPIRE_AT_PERIOD_END = "EXPIRE_AT_PERIOD_END"
     ROLLOVER = "ROLLOVER"
-    ROLLOVER_CAPPED = "ROLLOVER_CAPPED"
+    FIFO_VINTAGE = "FIFO_VINTAGE"
+    RESET = "RESET"
 
 
 class CostAmortization(str, Enum):
