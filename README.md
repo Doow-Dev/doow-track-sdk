@@ -56,21 +56,21 @@ When you create or update a metric through the management API, `metric_type` is 
 | Field | Values | Default | Notes |
 |-------|--------|---------|-------|
 | `metric_type` | text, up to 255 characters | none | The metric's name, unique within its license |
-| `usage_aggregation_type` | `SUM`, `MAX`, `CUMULATIVE` | `CUMULATIVE` | How measurements add up over a period |
+| `usage_aggregation_type` | `CUMULATIVE`, `SUM`, `MAX`, `PEAK`, `AVERAGE`, `BALANCE` | `CUMULATIVE` | How measurements add up over a period: `PEAK` takes the largest single measurement, `AVERAGE` the mean, and `BALANCE` draws the total down against `usage_limit` |
 | `rate_kind` | `PER_UNIT`, `FLAT_FEE`, `PER_SEAT`, `PERCENTAGE`, `USAGE` | `PER_UNIT` | See the note on `PERCENTAGE` below |
 | `usage_rate` | number, 0 or more | none | The price per unit, or the fraction for `PERCENTAGE` |
 | `usage_custom_unit_label` | text, up to 64 characters | none | The metric's unit, see [Units](#units) |
 | `entitlement_period` | `MONTHLY`, `QUARTERLY`, `ANNUALLY`, `TERM`, `UNTIL_EXHAUSTED`, `NONE` | `MONTHLY` | How often the included allowance resets |
 | `carryover_policy` | `EXPIRE_AT_PERIOD_END`, `ROLLOVER`, `FIFO_VINTAGE`, `RESET` | `EXPIRE_AT_PERIOD_END` | What happens to unused allowance at the end of a period |
 | `usage_limit` | number, 0 or more | none | A cap on usage |
-| `usage_included` | number, 0 or more | none | An allowance included in the base price |
+| `usage_included` | number, 0 or more | none | An allowance included in the base price, which is not subtracted for `PEAK` or `AVERAGE` metrics |
 | `per_unit_cap` | number, 0 or more | none | A cap on the charge per unit, which is only allowed when `rate_kind` is `PER_UNIT` |
 | `usage_rate_is_estimated` | `true`, `false` | `false` | Marks the rate as an estimate |
 | `expected_emission_interval_minutes` | whole number, 1 or more | none | How often events are expected, which Doow uses to notice a gap in the data |
 
 For `PERCENTAGE`, `usage_rate` is a fraction between 0 and 1 (0.029 means 2.9%) and `quantity` is the amount the percentage applies to, so a rate of 0.029 and a quantity of 10,000 gives 290. `USAGE` is priced like `PER_UNIT`: Doow multiplies the quantity by `usage_rate`, and when the metric has no `usage_rate` it uses the cost the vendor reports with the events, if any.
 
-On an update, send only the fields you want to change. Setting `usage_limit`, `usage_included`, `per_unit_cap`, or `expected_emission_interval_minutes` to `null` clears it, whereas `entitlement_period`, `carryover_policy`, and `usage_rate_is_estimated` cannot be cleared. Changing `rate_kind` away from `PER_UNIT` is refused while the metric still has a `per_unit_cap`, unless the same request clears it.
+On an update, send only the fields you want to change. Setting `usage_rate`, `usage_custom_unit_label`, `usage_limit`, `usage_included`, `per_unit_cap`, or `expected_emission_interval_minutes` to `null` clears it (a `PERCENTAGE` metric still needs its `usage_rate`), whereas `entitlement_period`, `carryover_policy`, and `usage_rate_is_estimated` cannot be cleared. Changing `rate_kind` away from `PER_UNIT` is refused while the metric still has a `per_unit_cap`, unless the same request clears it.
 
 ## Batch size
 
