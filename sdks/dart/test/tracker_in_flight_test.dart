@@ -31,6 +31,8 @@ Tracker eagerTracker(MockClient client, {void Function(DoowError)? onError}) => 
 TrackEvent event() => TrackEvent(metric: 'api_calls', quantity: 1, licenseId: 'lic_1');
 
 void main() {
+  timerCreatedInsideACallbackStillWaitsForOtherSends();
+
   test('flush waits for a count-triggered send already in flight', () async {
     final server = SlowServer();
     final tracker = eagerTracker(server.client);
@@ -67,6 +69,37 @@ void main() {
     tracker.track(event());
 
     await handlerFinished.future.timeout(const Duration(seconds: 5));
+    await tracker.shutdown();
+  });
+}
+
+void timerCreatedInsideACallbackStillWaitsForOtherSends() {
+  test('a timer created inside the error handler still waits for other sends in flight', () async {
+    late Tracker tracker;
+    var calls = 0;
+    var completed = 0;
+    var completedWhenFlushReturned = -1;
+    final flushReturned = Completer<void>();
+    final client = MockClient((request) async {
+      calls++;
+      if (calls == 1) return http.Response('{"message":"bad"}', 400);
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+      completed++;
+      return http.Response('{}', 202);
+    });
+    tracker = eagerTracker(client, onError: (_) {
+      Timer(const Duration(milliseconds: 50), () async {
+        await tracker.flush();
+        completedWhenFlushReturned = completed;
+        flushReturned.complete();
+      });
+    });
+
+    tracker.track(event());
+    tracker.track(event());
+    await flushReturned.future.timeout(const Duration(seconds: 5));
+
+    expect(completedWhenFlushReturned, 1);
     await tracker.shutdown();
   });
 }

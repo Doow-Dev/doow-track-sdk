@@ -107,7 +107,7 @@ class Tracker {
   final String _apiKey;
   final TrackerOptions _options;
   final List<Map<String, dynamic>> _queue = [];
-  final Set<Future<void>> _inFlight = {};
+  final Map<Future<void>, Object> _inFlight = {};
   Timer? _flushTimer;
   bool _shutdown = false;
   final Stopwatch _clock = Stopwatch()..start();
@@ -180,9 +180,13 @@ class Tracker {
   // short-lived program sees an empty queue and exits while that request is still in flight.
   // A callback running inside the send would otherwise wait for its own send.
   Future<void> _waitUntilIdle() async {
-    if (Zone.current[_sendingZone] == this) return;
-    if (_inFlight.isEmpty) return;
-    await Future.wait(_inFlight.toList().map((send) => send.catchError((_) {})))
+    final own = Zone.current[_sendingZone];
+    final others = [
+      for (final entry in _inFlight.entries)
+        if (!identical(entry.value, own)) entry.key,
+    ];
+    if (others.isEmpty) return;
+    await Future.wait(others.map((send) => send.catchError((_) {})))
         .timeout(_idleWait, onTimeout: () => const []);
   }
 
@@ -192,11 +196,12 @@ class Tracker {
     final batch = List<Map<String, dynamic>>.from(_queue);
     _queue.clear();
 
+    final token = Object();
     final send = runZoned(
       () => _sendInChunks(batch),
-      zoneValues: {_sendingZone: this},
+      zoneValues: {_sendingZone: token},
     );
-    _inFlight.add(send);
+    _inFlight[send] = token;
     return send.whenComplete(() => _inFlight.remove(send));
   }
 
