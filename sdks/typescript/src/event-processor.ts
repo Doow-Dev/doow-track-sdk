@@ -13,6 +13,8 @@ import type { DoowTrackerOptions, SerializedEvent } from './types.js';
 import type { Exporter } from './exporter.js';
 import type { DebugLogger } from './debug.js';
 
+const IN_FLIGHT_WAIT_MS = 30_000;
+
 export interface ProcessorConfig {
   flushAt: number;
   flushInterval: number;
@@ -94,11 +96,25 @@ export class EventProcessor {
 
   /** Manual flush — waits for pending enqueues, then flushes buffer */
   async flush(): Promise<void> {
-    if (this._pendingEnqueues.size > 0) {
-      await Promise.all([...this._pendingEnqueues]);
+    await this._withinCap(async () => {
+      if (this._pendingEnqueues.size > 0) {
+        await Promise.all([...this._pendingEnqueues]);
+      }
+      await this._triggerFlush();
+      await Promise.allSettled([...this._inFlightFlushes]);
+    });
+  }
+
+  private async _withinCap(work: () => Promise<void>): Promise<void> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const cap = new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, IN_FLIGHT_WAIT_MS);
+    });
+    try {
+      await Promise.race([work(), cap]);
+    } finally {
+      clearTimeout(timer);
     }
-    await this._triggerFlush();
-    await Promise.allSettled([...this._inFlightFlushes]);
   }
 
   /** Flush and stop timer */

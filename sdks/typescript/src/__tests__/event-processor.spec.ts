@@ -366,3 +366,30 @@ describe('EventProcessor — timer-triggered flush in flight', () => {
     expect(completed).toBe(2);
   });
 });
+
+describe('EventProcessor — flush wait cap', () => {
+  it('stops waiting for a send that never finishes after 30 seconds', async () => {
+    vi.useFakeTimers();
+    try {
+      const stuck = vi.fn(() => new Promise<void>(() => undefined));
+      const { processor } = makeProcessor({ flushAt: 100, flushInterval: 20 }, stuck);
+
+      void processor.enqueue(makeEvent());
+      void processor.enqueue(makeEvent());
+      await vi.advanceTimersByTimeAsync(100);
+      expect(stuck).toHaveBeenCalledTimes(2);
+
+      let returned = false;
+      void processor.flush().then(() => {
+        returned = true;
+      });
+      await vi.advanceTimersByTimeAsync(29_000);
+      expect(returned).toBe(false);
+      await vi.advanceTimersByTimeAsync(2_000);
+
+      expect(returned).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
