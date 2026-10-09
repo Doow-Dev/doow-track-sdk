@@ -70,6 +70,9 @@ type Tracker struct {
 	flushSem  chan struct{}
 	rateLimit *RateLimit
 	inflight  sync.WaitGroup
+	sendMu    sync.Mutex
+	sendIdle  *sync.Cond
+	sending   int
 	closed    atomic.Bool
 	closeOnce sync.Once
 	holdUntil atomic.Int64
@@ -206,6 +209,7 @@ func NewTracker(apiKey string, opts *TrackerOptions) *Tracker {
 		done:                 make(chan struct{}),
 		flushSem:             make(chan struct{}, maxFlushes),
 	}
+	t.sendIdle = sync.NewCond(&t.sendMu)
 
 	go t.flushLoop()
 	return t
@@ -287,13 +291,41 @@ func (t *Tracker) Track(event TrackEvent) {
 		t.inflight.Add(1)
 		go func() {
 			defer t.inflight.Done()
-			t.Flush()
+			t.flushBuffered()
 		}()
 	}
 }
 
-// Flush sends all buffered events immediately
+// Flush sends all buffered events immediately and waits for sends already in flight. A flush
+// called from a callback that runs inside a send waits for that send too, up to idleWait.
 func (t *Tracker) Flush() error {
+	err := t.flushBuffered()
+	t.waitUntilIdle()
+	return err
+}
+
+const idleWait = 30 * time.Second
+
+// A count-triggered flush runs on its own goroutine and empties the buffer first, so without this
+// a short-lived program sees an empty buffer and exits while that request is still in flight.
+func (t *Tracker) waitUntilIdle() {
+	timedOut := false
+	timer := time.AfterFunc(idleWait, func() {
+		t.sendMu.Lock()
+		timedOut = true
+		t.sendIdle.Broadcast()
+		t.sendMu.Unlock()
+	})
+	defer timer.Stop()
+
+	t.sendMu.Lock()
+	defer t.sendMu.Unlock()
+	for t.sending > 0 && !timedOut {
+		t.sendIdle.Wait()
+	}
+}
+
+func (t *Tracker) flushBuffered() error {
 	t.mu.Lock()
 	if len(t.buffer) == 0 {
 		t.mu.Unlock()
@@ -301,7 +333,16 @@ func (t *Tracker) Flush() error {
 	}
 	events := t.buffer
 	t.buffer = make([]SerializedEvent, 0, t.maxQueueSize)
+	t.sendMu.Lock()
+	t.sending++
+	t.sendMu.Unlock()
 	t.mu.Unlock()
+	defer func() {
+		t.sendMu.Lock()
+		t.sending--
+		t.sendIdle.Broadcast()
+		t.sendMu.Unlock()
+	}()
 
 	// BeforeFlush hook
 	if t.beforeFlush != nil {
@@ -548,11 +589,11 @@ func (t *Tracker) flushLoop() {
 	for {
 		select {
 		case <-ticker.C:
-			if err := t.Flush(); err != nil {
+			if err := t.flushBuffered(); err != nil {
 				t.log("periodic flush error: %v", err)
 			}
 		case <-t.shutdown:
-			t.Flush()
+			t.flushBuffered()
 			t.inflight.Wait()
 			return
 		}
