@@ -271,3 +271,54 @@ def test_a_nested_flush_inside_a_callback_keeps_the_sending_thread_marked():
 
     assert time.monotonic() - started < 1.0
     tracker.shutdown()
+
+
+async def _slow_async_tracker():
+    import asyncio
+
+    from doow_track import AsyncTracker
+    from doow_track.tracker import _DELIVERED
+
+    sent = []
+    started = asyncio.Event()
+    tracker = AsyncTracker("dk_test_key", TrackerOptions(
+        endpoint="https://test.doow.co",
+        flush_at=1,
+        flush_interval=1000.0,
+    ))
+
+    async def slow_send(events):
+        started.set()
+        await asyncio.sleep(0.3)
+        sent.append(len(events))
+        return _DELIVERED
+
+    tracker._send_batch = slow_send
+    return tracker, sent, started
+
+
+@pytest.mark.asyncio
+async def test_async_flush_waits_for_a_count_triggered_send_already_in_flight():
+    import asyncio
+
+    tracker, sent, started = await _slow_async_tracker()
+
+    await tracker.track(TrackEvent(metric="api_calls", quantity=1, license_id="lic_1"))
+    await asyncio.wait_for(started.wait(), timeout=2.0)
+    await tracker.flush()
+
+    assert sent == [1]
+    await tracker.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_async_shutdown_waits_for_a_count_triggered_send_already_in_flight():
+    import asyncio
+
+    tracker, sent, started = await _slow_async_tracker()
+
+    await tracker.track(TrackEvent(metric="api_calls", quantity=1, license_id="lic_1"))
+    await asyncio.wait_for(started.wait(), timeout=2.0)
+    await tracker.shutdown()
+
+    assert sent == [1]

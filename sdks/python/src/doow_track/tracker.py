@@ -526,6 +526,7 @@ class AsyncTracker:
 
         self._buffer: list[SerializedEvent] = []
         self._lock = asyncio.Lock()
+        self._sending: set[asyncio.Task] = set()
         self._hold_until = 0.0
         self._shutdown = False
         self._rate_limit: Optional[RateLimit] = None
@@ -584,10 +585,24 @@ class AsyncTracker:
             )
 
         if should_flush:
-            asyncio.create_task(self.flush())
+            task = asyncio.create_task(self._flush_buffered())
+            self._sending.add(task)
+            task.add_done_callback(self._sending.discard)
 
     async def flush(self) -> None:
-        """Send all buffered events immediately."""
+        """Send all buffered events immediately and wait for sends already in flight."""
+        await self._flush_buffered()
+        await self._wait_until_idle()
+
+    async def _wait_until_idle(self) -> None:
+        # A count-triggered flush runs as its own task and empties the buffer first, so without
+        # this a short-lived program sees an empty buffer and exits while that request is in flight.
+        # A callback running inside a send task would otherwise wait for itself.
+        others = {task for task in self._sending if task is not asyncio.current_task()}
+        if others:
+            await asyncio.wait(others, timeout=self._options.shutdown_timeout)
+
+    async def _flush_buffered(self) -> None:
         async with self._lock:
             if not self._buffer:
                 return
@@ -679,7 +694,7 @@ class AsyncTracker:
         while not self._shutdown:
             await asyncio.sleep(self._options.flush_interval)
             try:
-                await self.flush()
+                await self._flush_buffered()
             except Exception:
                 pass
 
