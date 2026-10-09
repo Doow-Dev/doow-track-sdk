@@ -14,6 +14,16 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `EntitlementPeriod` and `CarryoverPolicy` now list the values the API accepts. `entitlement_period` is `MONTHLY`, `QUARTERLY`, `ANNUALLY`, `TERM`, `UNTIL_EXHAUSTED`, or `NONE`, and `carryover_policy` is `EXPIRE_AT_PERIOD_END`, `ROLLOVER`, `FIFO_VINTAGE`, or `RESET`. The old `YEARLY`, `WEEKLY`, `DAILY`, `ONE_TIME`, and `ROLLOVER_CAPPED` values were never accepted by the API.
 - `RateKind` now lists `PER_UNIT`, `FLAT_FEE`, `PER_SEAT`, `PERCENTAGE`, and `USAGE`, the values the API stores. `TIERED` and `VOLUME` never existed on the API side, so code that referenced them no longer compiles. Creating a metric through the SDK accepts `PER_UNIT`, `FLAT_FEE`, `PER_SEAT`, and `PERCENTAGE`; for `PERCENTAGE`, `usage_rate` is a fraction between 0 and 1 and `quantity` is the amount it applies to.
 
+## [0.1.14] — 2026-10-09
+
+### Fixed
+
+- `flush()` and `shutdown()` now wait for a send that a full queue or the flush timer already started, so a short-lived script no longer exits before that send finishes. The wait is capped at 30 seconds, and the shutdown timeout timer is cleared once shutdown finishes.
+
+### Changed
+
+- The API now rejects an event whose license belongs to another organization (`license_not_found`) or whose metric name does not exist on its license (`unknown_metric`) as a `207` partial accept, and an event with only a `metric_name` is now resolved without a `metric_tuple_hint`. See [Rejected events](../../README.md#rejected-events).
+
 ## [0.1.13] — 2026-10-07
 
 ### Changed
