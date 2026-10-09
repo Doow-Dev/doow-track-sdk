@@ -56,14 +56,14 @@ When you create or update a metric through the management API, `metric_type` is 
 | Field | Values | Default | Notes |
 |-------|--------|---------|-------|
 | `metric_type` | text, up to 255 characters | none | The metric's name, unique within its license |
-| `usage_aggregation_type` | `CUMULATIVE`, `SUM`, `MAX`, `PEAK`, `AVERAGE`, `BALANCE` | `CUMULATIVE` | How measurements add up over a period: `PEAK` takes the largest single measurement, `AVERAGE` the mean, and `BALANCE` draws the total down against `usage_limit` |
+| `usage_aggregation_type` | `CUMULATIVE`, `SUM`, `MAX`, `PEAK`, `AVERAGE`, `BALANCE` | `CUMULATIVE` | How measurements add up over a period: `CUMULATIVE` and `SUM` add up every measurement, `PEAK` and `MAX` take the largest single measurement, `AVERAGE` the mean, and `BALANCE` draws the total down against `usage_limit` |
 | `rate_kind` | `PER_UNIT`, `FLAT_FEE`, `PER_SEAT`, `PERCENTAGE`, `USAGE` | `PER_UNIT` | See the note on `PERCENTAGE` below |
 | `usage_rate` | number, 0 or more | none | The price per unit, or the fraction for `PERCENTAGE` |
 | `usage_custom_unit_label` | text, up to 64 characters | none | The metric's unit, see [Units](#units) |
 | `entitlement_period` | `MONTHLY`, `QUARTERLY`, `ANNUALLY`, `TERM`, `UNTIL_EXHAUSTED`, `NONE` | `MONTHLY` | How often the included allowance resets |
 | `carryover_policy` | `EXPIRE_AT_PERIOD_END`, `ROLLOVER`, `FIFO_VINTAGE`, `RESET` | `EXPIRE_AT_PERIOD_END` | What happens to unused allowance at the end of a period |
 | `usage_limit` | number, 0 or more | none | A cap on usage |
-| `usage_included` | number, 0 or more | none | An allowance included in the base price, which is not subtracted for `PEAK` or `AVERAGE` metrics |
+| `usage_included` | number, 0 or more | none | An allowance included in the base price, which is not subtracted for `PEAK`, `MAX`, or `AVERAGE` metrics |
 | `per_unit_cap` | number, 0 or more | none | A cap on the charge per unit, which is only allowed when `rate_kind` is `PER_UNIT` |
 | `usage_rate_is_estimated` | `true`, `false` | `false` | Marks the rate as an estimate |
 | `expected_emission_interval_minutes` | whole number, 1 or more | none | How often events are expected, which Doow uses to notice a gap in the data |
