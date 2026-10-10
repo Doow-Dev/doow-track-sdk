@@ -153,7 +153,7 @@ class AppsResource
         $data = $this->client->get("/sdk/apps{$query}");
         return new PaginatedResponse(
             data: array_map(fn($a) => App::fromArray($a), $data['data'] ?? []),
-            nextCursor: $data['next_cursor'] ?? null,
+            cursor: $data['next_cursor'] ?? null,
             hasMore: $data['has_more'] ?? false,
         );
     }
@@ -195,7 +195,7 @@ class ContractsResource
         $data = $this->client->get("/sdk/apps/{$appId}/contracts{$query}");
         return new PaginatedResponse(
             data: array_map(fn($c) => Contract::fromArray($c), $data['data'] ?? []),
-            nextCursor: $data['next_cursor'] ?? null,
+            cursor: $data['next_cursor'] ?? null,
             hasMore: $data['has_more'] ?? false,
         );
     }
@@ -237,7 +237,7 @@ class LicensesResource
         $data = $this->client->get("/sdk/contracts/{$contractId}/licenses{$query}");
         return new PaginatedResponse(
             data: array_map(fn($l) => License::fromArray($l), $data['data'] ?? []),
-            nextCursor: $data['next_cursor'] ?? null,
+            cursor: $data['next_cursor'] ?? null,
             hasMore: $data['has_more'] ?? false,
         );
     }
@@ -273,7 +273,7 @@ class MetricsResource
         $data = $this->client->get("/sdk/licenses/{$licenseId}/metrics{$query}");
         return new PaginatedResponse(
             data: array_map(fn($m) => Metric::fromArray($m), $data['data'] ?? []),
-            nextCursor: $data['next_cursor'] ?? null,
+            cursor: $data['next_cursor'] ?? null,
             hasMore: $data['has_more'] ?? false,
         );
     }
@@ -322,7 +322,7 @@ class ExpensesResource
         $data = $this->client->get("/sdk/expenses{$query}");
         return new PaginatedResponse(
             data: array_map(fn($e) => Expense::fromArray($e), $data['data'] ?? []),
-            nextCursor: $data['next_cursor'] ?? null,
+            cursor: $data['next_cursor'] ?? null,
             hasMore: $data['has_more'] ?? false,
         );
     }
