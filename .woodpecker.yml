@@ -249,31 +249,31 @@ steps:
         VERSION=$(node -p "require('./sdks/typescript/package.json').version")
         mkdir -p release-assets
         for pair in linux-x64:node24-linux-x64 linux-arm64:node24-linux-arm64 darwin-x64:node24-macos-x64 darwin-arm64:node24-macos-arm64 windows-x64.exe:node24-win-x64; do
-          TARGET="${pair%%:*}"
-          PKG_TARGET="${pair#*:}"
-          npx --no-install pkg sdks/typescript/dist/cli.cjs --target "$PKG_TARGET" --output "release-assets/doow-track-$TARGET"
-          case "$TARGET" in *.exe) ;; *) chmod +x "release-assets/doow-track-$TARGET" ;; esac
-          ( cd release-assets && sha256sum "doow-track-$TARGET" > "doow-track-$TARGET.sha256" )
+          TARGET="$${pair%%:*}"
+          PKG_TARGET="$${pair#*:}"
+          npx --no-install pkg sdks/typescript/dist/cli.cjs --target "$$PKG_TARGET" --output "release-assets/doow-track-$$TARGET"
+          case "$$TARGET" in *.exe) ;; *) chmod +x "release-assets/doow-track-$$TARGET" ;; esac
+          ( cd release-assets && sha256sum "doow-track-$$TARGET" > "doow-track-$$TARGET.sha256" )
         done
 
         cd release-assets
         sha256sum -c doow-track-linux-x64.sha256
-        test "$(./doow-track-linux-x64 --version)" = "doow-track v$VERSION"
+        test "$(./doow-track-linux-x64 --version)" = "doow-track v$$VERSION"
         ./doow-track-linux-x64 --help | grep -q 'Usage: doow-track'
         printf '{"metric":"release_smoke","quantity":1,"license_id":"lic_smoke"}\n' | env DOOW_TRACK_DISABLED=true ./doow-track-linux-x64 --api-key dk_smoke
 
         RELEASE_ID=$(curl -fsS -X POST \
-          -H "Authorization: Bearer $GITHUB_TOKEN" \
+          -H "Authorization: Bearer $$GITHUB_TOKEN" \
           -H "Accept: application/vnd.github+json" \
           "https://api.github.com/repos/Doow-Dev/doow-track-sdk/releases" \
-          -d "{\"tag_name\":\"$CI_COMMIT_TAG\",\"name\":\"@doow/track v$VERSION\"}" \
+          -d "{\"tag_name\":\"$CI_COMMIT_TAG\",\"name\":\"@doow/track v$$VERSION\"}" \
           | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>console.log(JSON.parse(s).id))")
         for asset in doow-track-*; do
           curl -fsS -X POST \
-            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "Authorization: Bearer $$GITHUB_TOKEN" \
             -H "Content-Type: application/octet-stream" \
-            --data-binary "@$asset" \
-            "https://uploads.github.com/repos/Doow-Dev/doow-track-sdk/releases/$RELEASE_ID/assets?name=$asset"
+            --data-binary "@$$asset" \
+            "https://uploads.github.com/repos/Doow-Dev/doow-track-sdk/releases/$$RELEASE_ID/assets?name=$$asset"
         done
     environment:
       # The same classic PAT the sidecar image push uses. Creating a release and uploading assets
