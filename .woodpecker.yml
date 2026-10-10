@@ -140,10 +140,14 @@ steps:
 
   # --- PHP SDK ---
   - name: ci-php
-    image: php:8.2-cli
+    image: composer:2
     commands:
-      - cd sdks/php && composer install || true
-      - cd sdks/php && vendor/bin/phpunit || true
+      - apk add --no-cache oniguruma-dev
+      - docker-php-ext-install mbstring
+      - cd sdks/php
+      - composer install --no-interaction --prefer-dist --no-progress
+      - composer test
+      - composer analyse
     when:
       - event: [push, pull_request]
         path: "sdks/php/**"
