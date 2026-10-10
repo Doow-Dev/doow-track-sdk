@@ -58,7 +58,25 @@ tracker.Track(new TrackEvent
 await tracker.ShutdownAsync();
 ```
 
+### Units
+
+`Quantity` must be in the unit the metric is defined with in Doow, so convert before you send. The optional `Unit` records the unit your code used, and Doow stores it as sent without converting it or comparing it with the metric's unit. For a metric `data_transfer_gb` defined in GB, send `2.5` with `GB`, not the number of bytes:
+
+```csharp
+tracker.Track(new TrackEvent
+{
+    Metric = "data_transfer_gb",
+    Quantity = 2.5,
+    LicenseId = "lic_abc123",
+    Unit = "GB"
+});
+```
+
+Sending `2500000000` with `bytes` to the same metric would record 2.5 billion GB. See [Units](../../README.md#units) for how Doow reads the field.
+
 ### Management API
+
+Metric fields, their defaults, and the values each one accepts are listed in [Metric fields](../../README.md#metric-fields).
 
 ```csharp
 using DoowTrack;

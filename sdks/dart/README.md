@@ -67,7 +67,24 @@ tracker.track(TrackEvent(
 await tracker.shutdown();
 ```
 
+### Units
+
+`quantity` must be in the unit the metric is defined with in Doow, so convert before you send. The optional `unit` records the unit your code used, and Doow stores it as sent without converting it or comparing it with the metric's unit. For a metric `data_transfer_gb` defined in GB, send `2.5` with `GB`, not the number of bytes:
+
+```dart
+tracker.track(TrackEvent(
+  metric: 'data_transfer_gb',
+  quantity: 2.5,
+  licenseId: 'lic_abc123',
+  unit: 'GB',
+));
+```
+
+Sending `2500000000` with `bytes` to the same metric would record 2.5 billion GB. See [Units](../../README.md#units) for how Doow reads the field.
+
 ### Management API
+
+Metric fields, their defaults, and the values each one accepts are listed in [Metric fields](../../README.md#metric-fields).
 
 ```dart
 import 'package:doow_track/doow_track.dart';

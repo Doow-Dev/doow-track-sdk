@@ -74,3 +74,33 @@ export async function handler(req: Request): Promise<Response> {
   }
 }
 ```
+
+## Units
+
+A metric in Doow can have a unit, such as `GB` or `seconds`, and `quantity` must already be in that unit. A serverless handler usually has bytes and milliseconds in hand, so convert them before you call `track()`. The optional `unit` records the unit your code used, and Doow stores it as sent without converting it or comparing it with the metric's unit.
+
+This Lambda handler reports the data it received in GB and its run time in seconds, for metrics that are defined in those units:
+
+```ts
+export const handler = meter.withLambda(async (event, context) => {
+  const startedAt = Date.now();
+  const response = await processEvent(event);
+
+  meter.track({
+    metric: 'data_received_gb',
+    quantity: Buffer.byteLength(event.body ?? '') / 1e9,
+    unit: 'GB',
+    license_id: 'lic_...',
+  });
+  meter.track({
+    metric: 'compute_seconds',
+    quantity: (Date.now() - startedAt) / 1000,
+    unit: 'seconds',
+    license_id: 'lic_...',
+  });
+
+  return response;
+});
+```
+
+Dividing the byte count by `1e9` gives GB, and dividing the elapsed milliseconds by `1000` gives seconds. Sending the raw byte count to `data_received_gb` would record a number a billion times too large, and the raw millisecond count to `compute_seconds` one a thousand times too large. See [Units](../../../README.md#units) for how Doow reads the field.

@@ -86,7 +86,7 @@ Doow reads these attributes from each data point and from its resource. A data p
 
 | Attribute | Required | Description |
 |-----------|----------|-------------|
-| `license_id` | yes | The license the usage belongs to. A data point without it is not matched to a license |
+| `license_id` | yes | The license the usage belongs to. A data point without it is not matched to a license, and a data point whose license belongs to another organization is dropped |
 | `app_name` | no | The application the metric belongs to. Defaults to `unknown` |
 | `license_name` | no | The license plan name. Defaults to `unknown` |
 
@@ -99,6 +99,33 @@ Every other attribute is kept as attribution metadata on the event, except the s
 | Sum | Accepted. Each data point becomes one usage event |
 | Gauge | Accepted. Each data point is treated as a quantity to add, not as a level, so only send a gauge for values that you want summed |
 | Histogram, ExponentialHistogram, Summary | Not accepted. These metrics are skipped and the rest of the request is still processed |
+
+## Units
+
+An OTLP metric carries a `unit`, written as a UCUM code such as `By` for bytes, `GBy` for gigabytes, `s` for seconds, or `{request}` for a count. Doow records it on the measurement exactly as the metric sends it, after removing control characters and cutting it to 64 characters, and it ignores an empty unit. It does not convert values or compare the unit with the unit of the Doow metric, so send each data point in the unit the Doow metric is defined with.
+
+For example, a Doow metric `data_transfer_gb` that is defined in GB should receive data points that are already in gigabytes, with the unit set to match:
+
+```json
+{
+  "name": "data_transfer_gb",
+  "unit": "GBy",
+  "sum": {
+    "dataPoints": [{
+      "asDouble": 2.5,
+      "startTimeUnixNano": "1700000000000000000",
+      "timeUnixNano": "1700000060000000000",
+      "attributes": [
+        {"key": "license_id", "value": {"stringValue": "lic_test_123"}}
+      ]
+    }],
+    "aggregationTemporality": 1,
+    "isMonotonic": true
+  }
+}
+```
+
+Doow records 2.5 against `data_transfer_gb` and stores the unit `GBy`. If your instrument reports bytes (`By`), convert to gigabytes in the collector or the application first, because otherwise Doow records the byte count as a number of GB. See [Units](../README.md#units) for the same rule for SDK events.
 
 ## Temporality
 
@@ -146,7 +173,7 @@ Other metric names are kept as they are, and all other attributes stay in the at
 
 | Status | Meaning | What to do |
 |--------|---------|------------|
-| `200` | The batch was accepted. The body is an empty JSON object | Nothing |
+| `200` | The batch was accepted. The body is an empty JSON object, or contains `partialSuccess` with `rejectedDataPoints` and an `errorMessage` such as `license_not_found` when some data points were dropped | Nothing, unless `partialSuccess` appears, in which case check the `license_id` of the dropped points |
 | `400` | The body is missing or the payload could not be normalized | Fix the payload and check that the `Content-Type` is `application/json` |
 | `401` | The API key is missing, invalid, or revoked | Generate a new `dk_` key from the dashboard |
 | `429` | Too many requests for the organization | Wait for the `Retry-After` header, then retry. The collector's `retry_on_failure` does this |
