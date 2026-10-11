@@ -23,7 +23,7 @@ Official Dart/Flutter SDK for [Doow](https://doow.co) usage telemetry and manage
 
 ```yaml
 dependencies:
-  doow_track: ^0.1.0
+  doow_track: ^0.1.1
 ```
 
 Or from Git:
