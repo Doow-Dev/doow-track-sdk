@@ -52,4 +52,4 @@ Whoever cuts the next release should treat this as a major version bump.
 
 ## Releasing
 
-Commit messages do not trigger or version a release. A release is a git tag named `<sdk>-vX.Y.Z`, as described in the Releasing section of the [README](./README.md). Bump the version in the SDK's package file and merge it first. The TypeScript pipeline rejects a tag that is not plain `X.Y.Z` or that does not match that version. Follow the complete [SDK release runbook](docs/release-runbook.md), including the per-SDK version audit, tag matrix, registry verification, and failure recovery rules.
+Commit messages do not trigger or version a release. A release is a git tag named `<sdk>-vX.Y.Z`, as described in the Releasing section of the [README](./README.md). Bump the version in the SDK's package file and merge it first. The TypeScript pipeline rejects a tag that is not plain `X.Y.Z` or that does not match that version.

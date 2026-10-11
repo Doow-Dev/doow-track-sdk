@@ -114,7 +114,7 @@ These guides do not depend on a particular SDK:
 
 ## Contributing
 
-See [CONTRIBUTING.md](./CONTRIBUTING.md) for commit conventions and the [SDK release runbook](docs/release-runbook.md) for the complete per-SDK release, tag, registry, CI, and recovery procedure.
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for commit conventions and release process.
 
 ## Releasing
 
