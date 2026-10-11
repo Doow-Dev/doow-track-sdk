@@ -99,7 +99,7 @@ The `doow-track` executable is also released for Linux x64/arm64, macOS x64/arm6
 The same input is available as a container image, for platforms where installing an executable is awkward:
 
 ```sh
-docker pull ghcr.io/doow-dev/doow-track-sidecar:0.1.13
+docker pull ghcr.io/doow-dev/doow-track-sidecar:0.1.15
 ```
 
 The image is private, so pull it from an environment authenticated to GHCR with package read access. Each release publishes three tags: the full version, `0`, and `latest`. Pin the full version in production, because the input contract changes between releases: 0.1.12 moved the container to a non-root user on Node 22 and began enforcing the 1 MiB line limit on file input, so a floating tag changes how a running deployment behaves without anyone upgrading it. The [sidecar guide](docs/sidecar.md) covers Compose and Kubernetes, the input modes, and the health check.
